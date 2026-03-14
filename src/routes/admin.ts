@@ -436,79 +436,137 @@ admin.post('/staff/honsha/:id/delete', async (c) => {
   return c.redirect('/admin/staff')
 })
 
-// SMTP設定
+// SMTP設定（Gmail専用）
 admin.get('/smtp', async (c) => {
   const user = (c as any).get('user')
   const smtp = await c.env.DB.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
+  const saved = c.req.query('saved')
 
   const content = `
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-xl">
-      <form method="POST" action="/admin/smtp">
-        <div class="space-y-4">
-          <div class="grid grid-cols-2 gap-4">
-            <div class="col-span-2">
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">SMTPサーバー <span class="text-red-500">*</span></label>
-              <input type="text" name="host" value="${smtp?.host || ''}" required placeholder="mail.example.co.jp"
+    <div class="space-y-5 max-w-xl">
+      <!-- Gmail設定状態バナー -->
+      <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+        <svg class="w-5 h-5 text-blue-500 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.910 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/>
+        </svg>
+        <div>
+          <p class="text-sm font-semibold text-blue-800">Gmail送信設定</p>
+          <p class="text-xs text-blue-600 mt-0.5">送信元アカウント：<strong>tokyo.defense.mail@gmail.com</strong></p>
+          <p class="text-xs text-blue-500 mt-0.5">メール送信には MailChannels API を経由してGmail認証を行います。</p>
+        </div>
+      </div>
+
+      ${saved ? `<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">✅ 設定を保存しました。</div>` : ''}
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <form method="POST" action="/admin/smtp">
+          <!-- 固定値（非表示） -->
+          <input type="hidden" name="host" value="smtp.gmail.com">
+          <input type="hidden" name="port" value="587">
+          <input type="hidden" name="use_tls" value="1">
+
+          <div class="space-y-4">
+            <!-- Gmailアドレス -->
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">
+                Gmailアドレス
+                <span class="text-red-500">*</span>
+              </label>
+              <div class="relative">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.910 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/></svg>
+                </span>
+                <input type="email" name="username" name2="from_email"
+                  value="${smtp?.username || 'tokyo.defense.mail@gmail.com'}"
+                  required
+                  class="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50"
+                  readonly>
+              </div>
+              <input type="hidden" name="from_email" value="${smtp?.from_email || 'tokyo.defense.mail@gmail.com'}">
+            </div>
+
+            <!-- Gmailパスワード -->
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">
+                Gmailパスワード（またはアプリパスワード）
+                <span class="text-red-500">*</span>
+              </label>
+              <input type="password" name="password"
+                placeholder="変更する場合のみ入力（空欄=現在の設定を維持）"
+                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-400 mt-1">
+                現在のパスワードは設定済みです。変更する場合のみ入力してください。
+              </p>
+            </div>
+
+            <!-- 送信者名 -->
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">送信者名（メールの差出人表示）</label>
+              <input type="text" name="from_name"
+                value="${smtp?.from_name || '請求書回覧システム（東京デファンス）'}"
                 class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
             </div>
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">ポート番号</label>
-              <input type="number" name="port" value="${smtp?.port || 587}"
-                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-            </div>
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">TLS使用</label>
-              <select name="use_tls" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                <option value="1" ${smtp?.use_tls ? 'selected' : ''}>使用する</option>
-                <option value="0" ${!smtp?.use_tls ? 'selected' : ''}>使用しない</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">認証ユーザー名</label>
-              <input type="text" name="username" value="${smtp?.username || ''}" placeholder="任意"
-                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-            </div>
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">認証パスワード</label>
-              <input type="password" name="password" placeholder="変更する場合のみ入力"
-                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-            </div>
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">送信元メールアドレス <span class="text-red-500">*</span></label>
-              <input type="email" name="from_email" value="${smtp?.from_email || ''}" required
-                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-            </div>
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">送信者名</label>
-              <input type="text" name="from_name" value="${smtp?.from_name || '請求書回覧システム'}"
-                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+
+            <!-- 現在の設定確認（読み取り専用） -->
+            <div class="bg-gray-50 rounded-lg p-4 text-xs text-gray-500 space-y-1">
+              <p class="font-semibold text-gray-600 mb-2">📋 現在の設定</p>
+              <p>SMTPサーバー：smtp.gmail.com:587（TLS有効・固定）</p>
+              <p>送信元アドレス：${smtp?.from_email || 'tokyo.defense.mail@gmail.com'}</p>
+              <p>送信者名：${smtp?.from_name || '請求書回覧システム（東京デファンス）'}</p>
+              <p>パスワード：${smtp?.password ? '設定済み ✅' : '未設定 ⚠️'}</p>
             </div>
           </div>
-        </div>
-        <div class="flex gap-3 mt-6">
-          <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg transition text-sm">保存する</button>
-        </div>
-      </form>
+
+          <div class="flex gap-3 mt-6">
+            <button type="submit"
+              class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg transition text-sm">
+              保存する
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- 注意事項 -->
+      <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
+        <p class="font-semibold mb-2">⚠️ Gmailご利用の注意事項</p>
+        <ul class="list-disc list-inside space-y-1 text-xs">
+          <li>Googleアカウントの「2段階認証」が必要です</li>
+          <li>通常のパスワードではなく<strong>アプリパスワード</strong>（16桁）の使用を推奨します</li>
+          <li>アプリパスワード：Googleアカウント → セキュリティ → アプリパスワード</li>
+          <li>メール送信にはMailChannels APIを経由します（Cloudflare Workers制約のため）</li>
+        </ul>
+      </div>
     </div>
   `
-  return c.html(layout('メール設定（SMTP）', content, user))
+  return c.html(layout('メール設定（Gmail）', content, user))
 })
 
 admin.post('/smtp', async (c) => {
   const db = c.env.DB
   const body = await c.req.parseBody() as any
+
+  // Gmail固定値
+  const host = 'smtp.gmail.com'
+  const port = 587
+  const use_tls = 1
+  const username = body.username || 'tokyo.defense.mail@gmail.com'
+  const from_email = body.from_email || username
+  const from_name = body.from_name || '請求書回覧システム（東京デファンス）'
+
   const existing = await db.prepare('SELECT id FROM smtp_settings LIMIT 1').first()
 
   if (existing) {
     let sql = 'UPDATE smtp_settings SET host=?, port=?, username=?, from_email=?, from_name=?, use_tls=?, updated_at=datetime("now")'
-    const params: any[] = [body.host, parseInt(body.port), body.username || null, body.from_email, body.from_name, body.use_tls === '1' ? 1 : 0]
+    const params: any[] = [host, port, username, from_email, from_name, use_tls]
     if (body.password) { sql += ', password=?'; params.push(body.password) }
     sql += ' WHERE id=?'; params.push((existing as any).id)
     await db.prepare(sql).bind(...params).run()
   } else {
-    await db.prepare('INSERT INTO smtp_settings (host, port, username, password, from_email, from_name, use_tls) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(body.host, parseInt(body.port), body.username || null, body.password || null, body.from_email, body.from_name, body.use_tls === '1' ? 1 : 0).run()
+    await db.prepare(
+      'INSERT INTO smtp_settings (host, port, username, password, from_email, from_name, use_tls) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(host, port, username, body.password || null, from_email, from_name, use_tls).run()
   }
-  return c.redirect('/admin/smtp')
+  return c.redirect('/admin/smtp?saved=1')
 })
 
 export default admin
