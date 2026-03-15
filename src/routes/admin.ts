@@ -62,7 +62,17 @@ admin.get('/users', async (c) => {
                   ${u.is_active ? '<span class="text-green-600 text-xs">● 有効</span>' : '<span class="text-red-400 text-xs">● 無効</span>'}
                   ${u.must_change_password ? '<span class="ml-2 text-xs text-orange-500">PW要変更</span>' : ''}
                 </td>
-                <td class="px-4 py-3"><a href="/admin/users/${u.id}/edit" class="text-blue-600 hover:underline text-xs">編集</a></td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <a href="/admin/users/${u.id}/edit" class="inline-block text-blue-600 hover:text-blue-800 text-xs font-medium px-2 py-1 bg-blue-50 hover:bg-blue-100 rounded transition">編集</a>
+                    ${u.employee_number !== 'admin' ? `
+                    <button
+                      type="button"
+                      onclick="deleteUser(${u.id}, '${u.name.replace(/'/g, "\\'")}')"
+                      class="inline-block text-red-500 hover:text-red-700 text-xs font-medium px-2 py-1 bg-red-50 hover:bg-red-100 rounded transition">削除</button>
+                    ` : '<span class="text-xs text-gray-300">-</span>'}
+                  </div>
+                </td>
               </tr>
             `).join('')}
           </tbody>
@@ -70,7 +80,87 @@ admin.get('/users', async (c) => {
       </div>
     </div>
   `
-  return c.html(layout('ユーザー管理', content, user))
+
+  // 削除確認モーダル + 隠しフォーム
+  const deleteModal = `
+    <!-- 削除確認モーダル -->
+    <div id="deleteModal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600 text-xl">⚠️</div>
+          <h3 class="font-bold text-gray-800 text-lg">ユーザー削除の確認</h3>
+        </div>
+        <p class="text-gray-600 text-sm mb-2">以下のユーザーを削除します。</p>
+        <p class="font-semibold text-gray-800 text-base mb-4" id="deleteTargetName"></p>
+        <p class="text-xs text-red-500 bg-red-50 rounded p-2 mb-5">⚠ この操作は取り消せません。関連する担当者設定も解除されます。</p>
+        <div class="flex gap-3">
+          <button onclick="closeDeleteModal()" class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition">キャンセル</button>
+          <button onclick="submitDelete()" class="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-semibold transition">削除する</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 削除用隠しフォーム -->
+    <form id="deleteForm" method="POST" action="" class="hidden"></form>
+
+    <script>
+      function deleteUser(userId, userName) {
+        document.getElementById('deleteTargetName').textContent = '【' + userName + '】';
+        document.getElementById('deleteForm').action = '/admin/users/' + userId + '/delete';
+        document.getElementById('deleteModal').classList.remove('hidden');
+      }
+      function closeDeleteModal() {
+        document.getElementById('deleteModal').classList.add('hidden');
+      }
+      function submitDelete() {
+        document.getElementById('deleteForm').submit();
+      }
+      // モーダル外クリックで閉じる
+      document.getElementById('deleteModal').addEventListener('click', function(e) {
+        if (e.target === this) closeDeleteModal();
+      });
+    </script>
+  `
+
+  // 削除完了・エラーメッセージ
+  const params = new URL(c.req.url).searchParams
+  const alertMsg = params.get('deleted') === '1'
+    ? '<div class="mb-4 px-4 py-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm">✅ ユーザーを削除しました。</div>'
+    : params.get('error') === 'self'
+    ? '<div class="mb-4 px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">❌ 自分自身は削除できません。</div>'
+    : params.get('error') === 'admin'
+    ? '<div class="mb-4 px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">❌ システム管理者は削除できません。</div>'
+    : ''
+
+  return c.html(layout('ユーザー管理', alertMsg + content + deleteModal, user))
+})
+
+// ユーザー削除
+admin.post('/users/:id/delete', async (c) => {
+  const db = c.env.DB
+  const id = c.req.param('id')
+
+  // 自分自身は削除不可
+  const me = (c as any).get('user')
+  if (String(me.uid) === String(id)) {
+    return c.redirect('/admin/users?error=self')
+  }
+
+  // adminユーザーは削除不可
+  const target = await db.prepare('SELECT * FROM users WHERE id = ?').bind(id).first() as any
+  if (!target) return c.redirect('/admin/users')
+  if (target.employee_number === 'admin') return c.redirect('/admin/users?error=admin')
+
+  // 関連データを削除
+  await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id).run()
+  await db.prepare('DELETE FROM operations_staff WHERE user_id = ?').bind(id).run()
+  await db.prepare('DELETE FROM honsha_staff WHERE user_id = ?').bind(id).run()
+  // 上長として設定されている場合は解除
+  await db.prepare('UPDATE users SET supervisor_id = NULL WHERE supervisor_id = ?').bind(id).run()
+  // ユーザー削除
+  await db.prepare('DELETE FROM users WHERE id = ?').bind(id).run()
+
+  return c.redirect('/admin/users?deleted=1')
 })
 
 // ユーザー追加フォーム
