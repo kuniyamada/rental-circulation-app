@@ -1,9 +1,9 @@
 export function layout(title: string, content: string, user: any): string {
   const roleLabel: Record<string, string> = {
-    front: 'フロント',
-    manager: '上長',
+    front: '担当者',
+    manager: '業務管理課',
     operations: '業務管理課',
-    accounting: '会計担当',
+    accounting: '会計課',
     honsha: '本社経理',
     admin: '管理者',
   }

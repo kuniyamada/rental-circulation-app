@@ -33,7 +33,7 @@ admin.get('/users', async (c) => {
   `).all()
 
   const roleLabels: Record<string, string> = {
-    front: '担当者', manager: '管理課', operations: '業務管理課',
+    front: '担当者', manager: '業務管理課', operations: '業務管理課',
     accounting: '会計課', honsha: '本社経理', admin: '管理者'
   }
 
@@ -75,7 +75,7 @@ admin.get('/users', async (c) => {
                 <td class="px-4 py-3 text-gray-500 text-xs">${u.email}</td>
                 <td class="px-4 py-3"><span class="${{
                   front: 'bg-blue-50 text-blue-700',
-                  manager: 'bg-purple-50 text-purple-700',
+                  manager: 'bg-orange-50 text-orange-700',
                   operations: 'bg-orange-50 text-orange-700',
                   accounting: 'bg-yellow-50 text-yellow-700',
                   honsha: 'bg-green-50 text-green-700',
@@ -269,7 +269,6 @@ admin.post('/users/:id', async (c) => {
 function userForm(user: any, supervisors: any[], opsStaff?: any, honshaStaff?: any): string {
   const roles = [
     { value: 'front', label: '担当者（フロント）' },
-    { value: 'manager', label: '管理課' },
     { value: 'operations', label: '業務管理課' },
     { value: 'accounting', label: '会計課' },
     { value: 'honsha', label: '本社経理' },
