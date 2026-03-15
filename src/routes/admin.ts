@@ -33,8 +33,8 @@ admin.get('/users', async (c) => {
   `).all()
 
   const roleLabels: Record<string, string> = {
-    front: 'フロント', manager: '上長', operations: '業務管理課',
-    accounting: '会計担当', honsha: '本社経理', admin: '管理者'
+    front: '担当者', manager: '管理課', operations: '業務管理課',
+    accounting: '会計課', honsha: '本社経理', admin: '管理者'
   }
 
   const content = `
@@ -73,7 +73,14 @@ admin.get('/users', async (c) => {
                 <td class="px-4 py-3 font-mono text-xs">${u.employee_number}</td>
                 <td class="px-4 py-3 font-medium">${u.name} ${u.is_admin ? '<span class="text-xs bg-red-100 text-red-600 px-1.5 rounded">管理者</span>' : ''}</td>
                 <td class="px-4 py-3 text-gray-500 text-xs">${u.email}</td>
-                <td class="px-4 py-3"><span class="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">${roleLabels[u.role] || u.role}</span></td>
+                <td class="px-4 py-3"><span class="${{
+                  front: 'bg-blue-50 text-blue-700',
+                  manager: 'bg-purple-50 text-purple-700',
+                  operations: 'bg-orange-50 text-orange-700',
+                  accounting: 'bg-yellow-50 text-yellow-700',
+                  honsha: 'bg-green-50 text-green-700',
+                  admin: 'bg-red-50 text-red-700'
+                }[u.role] || 'bg-gray-100 text-gray-600'} text-xs px-2 py-0.5 rounded-full">${(u.supervisor_id ? roleLabels[u.role] + '/上司' : roleLabels[u.role]) || u.role}</span></td>
                 <td class="px-4 py-3">${assignBadge}</td>
                 <td class="px-4 py-3 text-gray-500 text-xs">${u.supervisor_name || '-'}</td>
                 <td class="px-4 py-3">
@@ -261,10 +268,10 @@ admin.post('/users/:id', async (c) => {
 
 function userForm(user: any, supervisors: any[], opsStaff?: any, honshaStaff?: any): string {
   const roles = [
-    { value: 'front', label: 'フロント' },
-    { value: 'manager', label: '上長' },
+    { value: 'front', label: '担当者（フロント）' },
+    { value: 'manager', label: '管理課' },
     { value: 'operations', label: '業務管理課' },
-    { value: 'accounting', label: '会計担当（管理組合）' },
+    { value: 'accounting', label: '会計課' },
     { value: 'honsha', label: '本社経理' },
     { value: 'admin', label: '管理者' },
   ]
