@@ -141,16 +141,27 @@ applications.get('/new', async (c) => {
 
       <form method="POST" action="/applications" enctype="multipart/form-data" id="appForm">
         <div class="space-y-5">
-          <!-- 標題 -->
+          <!-- 標題（マンション番号入力→名称表示） -->
           <div>
-            <label class="block text-sm font-semibold text-gray-700 mb-1.5">標題（マンション名） <span class="text-red-500">*</span></label>
-            <select name="mansion_id" required onchange="updateTitle(this)"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-              <option value="">マンションを選択してください</option>
-              ${(mansions.results as any[]).map(m =>
-                `<option value="${m.id}">${m.mansion_number ? `[${m.mansion_number}] ` : ''}${m.name}</option>`
-              ).join('')}
-            </select>
+            <label class="block text-sm font-semibold text-gray-700 mb-1.5">標題（マンション） <span class="text-red-500">*</span></label>
+            <div class="flex gap-2 items-start">
+              <!-- 番号入力 -->
+              <div class="w-28">
+                <input type="number" id="mansionNumberInput" placeholder="番号" min="1"
+                  class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none text-center"
+                  oninput="searchMansion(this.value)">
+                <p class="text-xs text-gray-400 mt-1 text-center">番号を入力</p>
+              </div>
+              <!-- 検索結果表示 -->
+              <div class="flex-1">
+                <div id="mansionResult" class="px-3 py-2.5 border border-dashed border-gray-300 rounded-lg text-sm text-gray-400 bg-gray-50 min-h-[42px] flex items-center">
+                  番号を入力するとマンション名が表示されます
+                </div>
+                <div id="mansionNotFound" class="hidden px-3 py-2 text-sm text-red-500 mt-1">⚠ 該当するマンションが見つかりません</div>
+              </div>
+            </div>
+            <!-- hidden inputs -->
+            <input type="hidden" name="mansion_id" id="mansionIdInput" required>
             <input type="hidden" name="title" id="titleInput">
           </div>
 
@@ -228,7 +239,7 @@ applications.get('/new', async (c) => {
           <!-- 金額 -->
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">予算料（円） <span class="text-red-500">*</span></label>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">予算額（円） <span class="text-red-500">*</span></label>
               <div class="relative">
                 <input type="number" name="budget_amount" required min="0"
                   class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
@@ -293,10 +304,47 @@ applications.get('/new', async (c) => {
     </div>
 
     <script>
-      function updateTitle(sel) {
-        const text = sel.options[sel.selectedIndex]?.text || ''
-        document.getElementById('titleInput').value = text
+      // マンションデータをJSに埋め込み
+      const MANSIONS = ${JSON.stringify(
+        (mansions.results as any[]).map((m: any) => ({
+          id: m.id,
+          number: m.mansion_number,
+          name: m.name
+        }))
+      )};
+
+      function searchMansion(val) {
+        const num = parseInt(val);
+        const resultEl = document.getElementById('mansionResult');
+        const notFoundEl = document.getElementById('mansionNotFound');
+        const idInput = document.getElementById('mansionIdInput');
+        const titleInput = document.getElementById('titleInput');
+
+        if (!val || isNaN(num)) {
+          resultEl.textContent = '番号を入力するとマンション名が表示されます';
+          resultEl.className = 'px-3 py-2.5 border border-dashed border-gray-300 rounded-lg text-sm text-gray-400 bg-gray-50 min-h-[42px] flex items-center';
+          notFoundEl.classList.add('hidden');
+          idInput.value = '';
+          titleInput.value = '';
+          return;
+        }
+
+        const found = MANSIONS.find(m => m.number === num);
+        if (found) {
+          resultEl.innerHTML = '<span class="text-blue-700 font-bold text-base mr-2">' + found.number + '</span><span class="font-semibold text-gray-800">' + found.name + '</span>';
+          resultEl.className = 'px-3 py-2.5 border-2 border-blue-400 rounded-lg text-sm bg-blue-50 min-h-[42px] flex items-center gap-1';
+          notFoundEl.classList.add('hidden');
+          idInput.value = found.id;
+          titleInput.value = found.name;
+        } else {
+          resultEl.textContent = '番号を入力するとマンション名が表示されます';
+          resultEl.className = 'px-3 py-2.5 border border-dashed border-gray-300 rounded-lg text-sm text-gray-400 bg-gray-50 min-h-[42px] flex items-center';
+          notFoundEl.classList.remove('hidden');
+          idInput.value = '';
+          titleInput.value = '';
+        }
       }
+
       function togglePaymentFields() {
         const val = document.querySelector('input[name="payment_target"]:checked')?.value
         document.getElementById('kumiaiFields').classList.toggle('hidden', val !== 'kumiai')
@@ -512,7 +560,7 @@ applications.get('/:id', async (c) => {
           <div><span class="text-gray-400">回覧開始日</span><p class="font-medium mt-0.5">${app.circulation_start_date}</p></div>
           <div><span class="text-gray-400">支払先</span><p class="font-medium mt-0.5">${paymentLabel(app.payment_target, app.td_type)}</p></div>
           ${app.account_item ? `<div><span class="text-gray-400">勘定科目</span><p class="font-medium mt-0.5">${app.account_item}</p></div>` : ''}
-          <div><span class="text-gray-400">予算料</span><p class="font-medium mt-0.5">${Number(app.budget_amount).toLocaleString()}円</p></div>
+          <div><span class="text-gray-400">予算額</span><p class="font-medium mt-0.5">${Number(app.budget_amount).toLocaleString()}円</p></div>
           ${app.commission_rate ? `<div><span class="text-gray-400">手数料</span><p class="font-medium mt-0.5">${app.commission_rate}%</p></div>` : ''}
           ${app.kumiai_amount ? `<div><span class="text-gray-400">組合請求金額</span><p class="font-medium mt-0.5">${Number(app.kumiai_amount).toLocaleString()}円</p></div>` : ''}
           ${app.remarks ? `<div class="col-span-2"><span class="text-gray-400">備考</span><p class="font-medium mt-0.5">${app.remarks}</p></div>` : ''}
@@ -643,7 +691,7 @@ applications.get('/:id/review/:stepId', async (c) => {
           <div><span class="text-gray-400">申請者</span><p class="font-medium">${app.applicant_name}</p></div>
           <div><span class="text-gray-400">支払先</span><p class="font-medium">${paymentLabel(app.payment_target, app.td_type)}</p></div>
           ${app.account_item ? `<div><span class="text-gray-400">勘定科目</span><p class="font-medium">${app.account_item}</p></div>` : ''}
-          <div><span class="text-gray-400">予算料</span><p class="font-medium">${Number(app.budget_amount).toLocaleString()}円</p></div>
+          <div><span class="text-gray-400">予算額</span><p class="font-medium">${Number(app.budget_amount).toLocaleString()}円</p></div>
           ${app.commission_rate ? `<div><span class="text-gray-400">手数料</span><p class="font-medium">${app.commission_rate}%</p></div>` : ''}
           ${app.kumiai_amount ? `<div><span class="text-gray-400">組合請求金額</span><p class="font-medium">${Number(app.kumiai_amount).toLocaleString()}円</p></div>` : ''}
           ${app.remarks ? `<div class="col-span-2"><span class="text-gray-400">備考</span><p class="font-medium">${app.remarks}</p></div>` : ''}

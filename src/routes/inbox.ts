@@ -164,19 +164,26 @@ inbox.get('/new', async (c) => {
 
         <form method="POST" action="/inbox" enctype="multipart/form-data" class="space-y-5">
 
-          <!-- マンション名 -->
+          <!-- マンション番号入力 -->
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1">
-              マンション名 <span class="text-red-500">*</span>
+              マンション <span class="text-red-500">*</span>
             </label>
-            <select name="mansion_id" required
-              onchange="updateFront(this)"
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="">-- 選択してください --</option>
-              ${(mansions.results as any[]).map(m =>
-                `<option value="${m.id}" data-front-id="${m.front_user_id || ''}">${m.mansion_number ? `[${m.mansion_number}] ` : ''}${m.name}</option>`
-              ).join('')}
-            </select>
+            <div class="flex gap-2 items-start">
+              <div class="w-28">
+                <input type="number" id="mansionNumberInput" placeholder="番号" min="1"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none text-center"
+                  oninput="searchMansion(this.value)">
+                <p class="text-xs text-gray-400 mt-1 text-center">番号を入力</p>
+              </div>
+              <div class="flex-1">
+                <div id="mansionResult" class="px-3 py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-400 bg-gray-50 min-h-[38px] flex items-center">
+                  番号を入力するとマンション名が表示されます
+                </div>
+                <div id="mansionNotFound" class="hidden px-3 py-1 text-xs text-red-500 mt-1">⚠ 該当するマンションが見つかりません</div>
+              </div>
+            </div>
+            <input type="hidden" name="mansion_id" id="mansionIdInput" required>
           </div>
 
           <!-- 担当フロント -->
@@ -191,7 +198,7 @@ inbox.get('/new', async (c) => {
                 `<option value="${f.id}">${f.name}（${f.email}）</option>`
               ).join('')}
             </select>
-            <p class="text-xs text-gray-400 mt-1">マンション選択時に自動セットされます（変更可）</p>
+            <p class="text-xs text-gray-400 mt-1">マンション番号入力時に自動セットされます（変更可）</p>
           </div>
 
           <!-- 請求書PDF添付 -->
@@ -231,21 +238,51 @@ inbox.get('/new', async (c) => {
     </div>
 
     <script>
-      // マンション選択時にフロントを自動セット
-      const frontOptions = ${JSON.stringify(
-        (fronts.results as any[]).reduce((acc: any, f: any) => { acc[f.id] = f.id; return acc }, {})
+      // マンションデータをJSに埋め込み
+      const MANSIONS = ${JSON.stringify(
+        (mansions.results as any[]).map((m: any) => ({
+          id: m.id,
+          number: m.mansion_number,
+          name: m.name,
+          frontId: m.front_user_id ? String(m.front_user_id) : ''
+        }))
       )};
 
-      function updateFront(sel) {
-        const frontId = sel.options[sel.selectedIndex].getAttribute('data-front-id');
+      function searchMansion(val) {
+        const num = parseInt(val);
+        const resultEl = document.getElementById('mansionResult');
+        const notFoundEl = document.getElementById('mansionNotFound');
+        const idInput = document.getElementById('mansionIdInput');
         const frontSel = document.getElementById('frontSelect');
-        if (frontId) {
-          for (let i = 0; i < frontSel.options.length; i++) {
-            if (frontSel.options[i].value === frontId) {
-              frontSel.selectedIndex = i;
-              break;
+
+        if (!val || isNaN(num)) {
+          resultEl.textContent = '番号を入力するとマンション名が表示されます';
+          resultEl.className = 'px-3 py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-400 bg-gray-50 min-h-[38px] flex items-center';
+          notFoundEl.classList.add('hidden');
+          idInput.value = '';
+          return;
+        }
+
+        const found = MANSIONS.find(m => m.number === num);
+        if (found) {
+          resultEl.innerHTML = '<span class="text-blue-700 font-bold mr-2">' + found.number + '</span><span class="font-semibold text-gray-800">' + found.name + '</span>';
+          resultEl.className = 'px-3 py-2 border-2 border-blue-400 rounded-lg text-sm bg-blue-50 min-h-[38px] flex items-center gap-1';
+          notFoundEl.classList.add('hidden');
+          idInput.value = found.id;
+          // 担当フロント自動セット
+          if (found.frontId && frontSel) {
+            for (let i = 0; i < frontSel.options.length; i++) {
+              if (frontSel.options[i].value === found.frontId) {
+                frontSel.selectedIndex = i;
+                break;
+              }
             }
           }
+        } else {
+          resultEl.textContent = '番号を入力するとマンション名が表示されます';
+          resultEl.className = 'px-3 py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-400 bg-gray-50 min-h-[38px] flex items-center';
+          notFoundEl.classList.remove('hidden');
+          idInput.value = '';
         }
       }
 
