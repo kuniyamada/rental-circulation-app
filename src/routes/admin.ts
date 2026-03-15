@@ -20,9 +20,15 @@ admin.use('*', async (c, next) => {
 admin.get('/users', async (c) => {
   const user = (c as any).get('user')
   const db = c.env.DB
+  // operations_staff・honsha_staff の担当区分も取得
   const users = await db.prepare(`
-    SELECT u.*, s.name as supervisor_name
-    FROM users u LEFT JOIN users s ON u.supervisor_id = s.id
+    SELECT u.*, s.name as supervisor_name,
+      os.id as ops_staff_id, os.is_primary as ops_is_primary,
+      hs.id as honsha_staff_id
+    FROM users u
+    LEFT JOIN users s ON u.supervisor_id = s.id
+    LEFT JOIN operations_staff os ON os.user_id = u.id
+    LEFT JOIN honsha_staff hs ON hs.user_id = u.id
     ORDER BY u.employee_number
   `).all()
 
@@ -45,18 +51,30 @@ admin.get('/users', async (c) => {
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">氏名</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">メール</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">役割</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">担当区分</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">直属上長</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
               <th class="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-50">
-            ${(users.results as any[]).map(u => `
+            ${(users.results as any[]).map(u => {
+              // 担当区分バッジ生成
+              let assignBadge = '<span class="text-gray-300 text-xs">-</span>'
+              if (u.ops_staff_id) {
+                assignBadge = u.ops_is_primary
+                  ? '<span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">業務管理課（担当）</span>'
+                  : '<span class="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">業務管理課（予備）</span>'
+              } else if (u.honsha_staff_id) {
+                assignBadge = '<span class="bg-purple-100 text-purple-700 text-xs px-2 py-0.5 rounded-full">本社経理（担当）</span>'
+              }
+              return `
               <tr class="hover:bg-gray-50">
                 <td class="px-4 py-3 font-mono text-xs">${u.employee_number}</td>
                 <td class="px-4 py-3 font-medium">${u.name} ${u.is_admin ? '<span class="text-xs bg-red-100 text-red-600 px-1.5 rounded">管理者</span>' : ''}</td>
                 <td class="px-4 py-3 text-gray-500 text-xs">${u.email}</td>
                 <td class="px-4 py-3"><span class="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">${roleLabels[u.role] || u.role}</span></td>
+                <td class="px-4 py-3">${assignBadge}</td>
                 <td class="px-4 py-3 text-gray-500 text-xs">${u.supervisor_name || '-'}</td>
                 <td class="px-4 py-3">
                   ${u.is_active ? '<span class="text-green-600 text-xs">● 有効</span>' : '<span class="text-red-400 text-xs">● 無効</span>'}
@@ -74,7 +92,8 @@ admin.get('/users', async (c) => {
                   </div>
                 </td>
               </tr>
-            `).join('')}
+              `
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -191,10 +210,13 @@ admin.post('/users', async (c) => {
 admin.get('/users/:id/edit', async (c) => {
   const user = (c as any).get('user')
   const db = c.env.DB
-  const target = await db.prepare('SELECT * FROM users WHERE id = ?').bind(c.req.param('id')).first()
+  const target = await db.prepare('SELECT * FROM users WHERE id = ?').bind(c.req.param('id')).first() as any
   const supervisors = await db.prepare("SELECT * FROM users WHERE is_active = 1 ORDER BY name").all()
   if (!target) return c.redirect('/admin/users')
-  return c.html(layout('ユーザー編集', userForm(target as any, supervisors.results as any[]), user))
+  // 担当区分情報を取得
+  const opsStaff = await db.prepare('SELECT * FROM operations_staff WHERE user_id = ?').bind(target.id).first() as any
+  const honshaStaff = await db.prepare('SELECT * FROM honsha_staff WHERE user_id = ?').bind(target.id).first() as any
+  return c.html(layout('ユーザー編集', userForm(target, supervisors.results as any[], opsStaff, honshaStaff), user))
 })
 
 // ユーザー更新処理
@@ -218,10 +240,26 @@ admin.post('/users/:id', async (c) => {
     await db.prepare('UPDATE users SET password_hash=?, must_change_password=1 WHERE id=?').bind(hash, id).run()
   }
 
+  // ---- 担当区分の更新（operations_staff / honsha_staff）----
+  // まず既存の担当設定をクリア
+  await db.prepare('DELETE FROM operations_staff WHERE user_id = ?').bind(id).run()
+  await db.prepare('DELETE FROM honsha_staff WHERE user_id = ?').bind(id).run()
+
+  // 役割が operations の場合、担当/予備を登録
+  if (body.role === 'operations' && body.ops_assignment) {
+    const isPrimary = body.ops_assignment === 'primary' ? 1 : 0
+    await db.prepare('INSERT OR IGNORE INTO operations_staff (user_id, is_primary) VALUES (?, ?)')
+      .bind(id, isPrimary).run()
+  }
+  // 役割が honsha の場合、本社経理担当として登録
+  if (body.role === 'honsha' && body.honsha_assignment === '1') {
+    await db.prepare('INSERT OR IGNORE INTO honsha_staff (user_id) VALUES (?)').bind(id).run()
+  }
+
   return c.redirect('/admin/users')
 })
 
-function userForm(user: any, supervisors: any[]): string {
+function userForm(user: any, supervisors: any[], opsStaff?: any, honshaStaff?: any): string {
   const roles = [
     { value: 'front', label: 'フロント' },
     { value: 'manager', label: '上長' },
@@ -294,6 +332,47 @@ function userForm(user: any, supervisors: any[]): string {
             </label>
             ` : ''}
           </div>
+
+          <!-- 担当区分（役割がoperationsまたはhonshaのとき表示） -->
+          <div id="assignSection" class="border-t border-gray-100 pt-4 mt-2" style="${(user?.role === 'operations' || user?.role === 'honsha') ? '' : 'display:none'}">
+            <p class="text-sm font-semibold text-gray-700 mb-3">回覧フロー担当区分</p>
+
+            <!-- 業務管理課の場合 -->
+            <div id="opsAssign" style="${user?.role === 'operations' ? '' : 'display:none'}">
+              <p class="text-xs text-gray-500 mb-2">業務管理課として回覧フローに参加する区分を選択してください</p>
+              <div class="flex gap-4">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="ops_assignment" value="primary"
+                    ${(!opsStaff || opsStaff?.is_primary) ? 'checked' : ''}
+                    class="w-4 h-4 text-blue-600">
+                  <span class="text-sm">担当（主担当）</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="ops_assignment" value="backup"
+                    ${(opsStaff && !opsStaff?.is_primary) ? 'checked' : ''}
+                    class="w-4 h-4 text-blue-600">
+                  <span class="text-sm">予備（バックアップ）</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="ops_assignment" value="none"
+                    ${!opsStaff ? 'checked' : ''}
+                    class="w-4 h-4 text-gray-400">
+                  <span class="text-sm text-gray-500">担当なし</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 本社経理の場合 -->
+            <div id="honshaAssign" style="${user?.role === 'honsha' ? '' : 'display:none'}">
+              <p class="text-xs text-gray-500 mb-2">本社経理として回覧フローに参加するか設定してください</p>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" name="honsha_assignment" value="1"
+                  ${honshaStaff ? 'checked' : ''}
+                  class="w-4 h-4 text-purple-600 rounded">
+                <span class="text-sm">本社経理担当として回覧フローに参加する</span>
+              </label>
+            </div>
+          </div>
         </div>
         <div class="flex gap-3 mt-6">
           <a href="/admin/users" class="px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition">キャンセル</a>
@@ -303,6 +382,22 @@ function userForm(user: any, supervisors: any[]): string {
         </div>
       </form>
     </div>
+    <script>
+      // 役割変更で担当区分セクションを動的切り替え
+      document.querySelector('[name=role]')?.addEventListener('change', function() {
+        const v = this.value;
+        const sec = document.getElementById('assignSection');
+        const ops = document.getElementById('opsAssign');
+        const honsha = document.getElementById('honshaAssign');
+        if (v === 'operations' || v === 'honsha') {
+          sec.style.display = '';
+          if (ops) ops.style.display = v === 'operations' ? '' : 'none';
+          if (honsha) honsha.style.display = v === 'honsha' ? '' : 'none';
+        } else {
+          sec.style.display = 'none';
+        }
+      });
+    </script>
   `
 }
 
