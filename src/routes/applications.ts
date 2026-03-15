@@ -114,7 +114,7 @@ applications.get('/new', async (c) => {
 
   const db = c.env.DB
   const mansions = await db.prepare(
-    'SELECT * FROM mansions WHERE is_active = 1 ORDER BY name'
+    'SELECT * FROM mansions WHERE is_active = 1 ORDER BY CAST(mansion_number AS INTEGER)'
   ).all()
 
   const today = new Date().toISOString().substring(0, 10)
@@ -148,7 +148,7 @@ applications.get('/new', async (c) => {
               class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
               <option value="">マンションを選択してください</option>
               ${(mansions.results as any[]).map(m =>
-                `<option value="${m.id}">${m.name}</option>`
+                `<option value="${m.id}">${m.mansion_number ? `[${m.mansion_number}] ` : ''}${m.name}</option>`
               ).join('')}
             </select>
             <input type="hidden" name="title" id="titleInput">

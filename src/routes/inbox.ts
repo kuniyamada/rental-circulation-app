@@ -152,7 +152,7 @@ inbox.get('/new', async (c) => {
   if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
 
   const db = c.env.DB
-  const mansions = await db.prepare("SELECT * FROM mansions WHERE is_active = 1 ORDER BY name").all()
+  const mansions = await db.prepare("SELECT * FROM mansions WHERE is_active = 1 ORDER BY CAST(mansion_number AS INTEGER)").all()
   const fronts = await db.prepare("SELECT * FROM users WHERE role = 'front' AND is_active = 1 ORDER BY name").all()
 
   const content = `
@@ -174,7 +174,7 @@ inbox.get('/new', async (c) => {
               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">-- 選択してください --</option>
               ${(mansions.results as any[]).map(m =>
-                `<option value="${m.id}" data-front-id="${m.front_user_id || ''}">${m.name}</option>`
+                `<option value="${m.id}" data-front-id="${m.front_user_id || ''}">${m.mansion_number ? `[${m.mansion_number}] ` : ''}${m.name}</option>`
               ).join('')}
             </select>
           </div>

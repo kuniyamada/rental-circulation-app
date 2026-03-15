@@ -410,7 +410,7 @@ admin.get('/mansions', async (c) => {
     FROM mansions m
     LEFT JOIN users uf ON m.front_user_id = uf.id
     LEFT JOIN users ua ON m.accounting_user_id = ua.id
-    ORDER BY m.name
+    ORDER BY CAST(m.mansion_number AS INTEGER)
   `).all()
 
   const content = `
@@ -423,6 +423,7 @@ admin.get('/mansions', async (c) => {
         <table class="w-full text-sm">
           <thead class="bg-gray-50">
             <tr>
+              <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 w-16">番号</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">マンション名</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">担当フロント</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">組合会計担当者</th>
@@ -431,9 +432,10 @@ admin.get('/mansions', async (c) => {
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-50">
-            ${(mansions.results as any[]).length === 0 ? '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">マンションが登録されていません</td></tr>' :
+            ${(mansions.results as any[]).length === 0 ? '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">マンションが登録されていません</td></tr>' :
               (mansions.results as any[]).map(m => `
                 <tr class="hover:bg-gray-50">
+                  <td class="px-3 py-3 text-center font-mono text-xs text-gray-400 bg-gray-50">${m.mansion_number ?? '-'}</td>
                   <td class="px-4 py-3 font-medium">${m.name}</td>
                   <td class="px-4 py-3 text-gray-500">${m.front_name || '-'}</td>
                   <td class="px-4 py-3 text-gray-500">${m.accounting_name || '-'}</td>
@@ -462,9 +464,10 @@ admin.get('/mansions/new', async (c) => {
 admin.post('/mansions', async (c) => {
   const db = c.env.DB
   const body = await c.req.parseBody() as any
+  const mansionNumber = body.mansion_number ? parseInt(body.mansion_number) : null
   await db.prepare(
-    'INSERT INTO mansions (name, front_user_id, accounting_user_id) VALUES (?, ?, ?)'
-  ).bind(body.name, body.front_user_id || null, body.accounting_user_id || null).run()
+    'INSERT INTO mansions (name, mansion_number, front_user_id, accounting_user_id) VALUES (?, ?, ?, ?)'
+  ).bind(body.name, mansionNumber, body.front_user_id || null, body.accounting_user_id || null).run()
   return c.redirect('/admin/mansions')
 })
 
@@ -483,9 +486,10 @@ admin.post('/mansions/:id', async (c) => {
   const db = c.env.DB
   const id = c.req.param('id')
   const body = await c.req.parseBody() as any
+  const mansionNumber = body.mansion_number ? parseInt(body.mansion_number) : null
   await db.prepare(
-    'UPDATE mansions SET name=?, front_user_id=?, accounting_user_id=?, is_active=?, updated_at=datetime("now") WHERE id=?'
-  ).bind(body.name, body.front_user_id || null, body.accounting_user_id || null, body.is_active ? 1 : 0, id).run()
+    'UPDATE mansions SET name=?, mansion_number=?, front_user_id=?, accounting_user_id=?, is_active=?, updated_at=datetime("now") WHERE id=?'
+  ).bind(body.name, mansionNumber, body.front_user_id || null, body.accounting_user_id || null, body.is_active ? 1 : 0, id).run()
   return c.redirect('/admin/mansions')
 })
 
@@ -498,10 +502,17 @@ function mansionForm(mansion: any, users: any[]): string {
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-xl">
       <form method="POST" action="${isEdit ? `/admin/mansions/${mansion.id}` : '/admin/mansions'}">
         <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-semibold text-gray-700 mb-1.5">マンション名 <span class="text-red-500">*</span></label>
-            <input type="text" name="name" value="${mansion?.name || ''}" required
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">管理組合番号</label>
+              <input type="number" name="mansion_number" value="${mansion?.mansion_number ?? ''}" placeholder="例: 1"
+                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+            <div class="col-span-2">
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">マンション名 <span class="text-red-500">*</span></label>
+              <input type="text" name="name" value="${mansion?.name || ''}" required
+                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
           </div>
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">担当フロント</label>
