@@ -503,7 +503,7 @@ admin.get('/smtp', async (c) => {
             <div>
               <label class="block text-sm font-semibold text-gray-700 mb-1.5">送信者名（メールの差出人表示）</label>
               <input type="text" name="from_name"
-                value="${smtp?.from_name || '請求書回覧システム（東京デファンス）'}"
+                value="${smtp?.from_name || '請求書回覧システム（東京ディフェンス）'}"
                 class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
             </div>
 
@@ -512,7 +512,7 @@ admin.get('/smtp', async (c) => {
               <p class="font-semibold text-gray-600 mb-2">📋 現在の設定</p>
               <p>SMTPサーバー：smtp.gmail.com:587（TLS有効・固定）</p>
               <p>送信元アドレス：${smtp?.from_email || 'tokyo.defense.mail@gmail.com'}</p>
-              <p>送信者名：${smtp?.from_name || '請求書回覧システム（東京デファンス）'}</p>
+              <p>送信者名：${smtp?.from_name || '請求書回覧システム（東京ディフェンス）'}</p>
               <p>パスワード：${smtp?.password ? '設定済み ✅' : '未設定 ⚠️'}</p>
             </div>
           </div>
@@ -551,7 +551,7 @@ admin.post('/smtp', async (c) => {
   const use_tls = 1
   const username = body.username || 'tokyo.defense.mail@gmail.com'
   const from_email = body.from_email || username
-  const from_name = body.from_name || '請求書回覧システム（東京デファンス）'
+  const from_name = body.from_name || '請求書回覧システム（東京ディフェンス）'
 
   const existing = await db.prepare('SELECT id FROM smtp_settings LIMIT 1').first()
 

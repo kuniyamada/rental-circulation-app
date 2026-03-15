@@ -111,7 +111,7 @@ export function buildMailBody(type: string, data: {
     <!-- ヘッダー -->
     <div style="background:#1a56db;padding:20px 24px;">
       <h2 style="color:#fff;margin:0;font-size:18px;">📄 請求書回覧システム</h2>
-      <p style="color:#bfdbfe;margin:4px 0 0;font-size:13px;">東京デファンス株式会社</p>
+      <p style="color:#bfdbfe;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社</p>
     </div>
     <!-- 本文 -->
     <div style="padding:24px;">

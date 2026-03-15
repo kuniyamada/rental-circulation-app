@@ -6,7 +6,7 @@ SET
   username   = 'tokyo.defense.mail@gmail.com',
   password   = 'Td57421114',
   from_email = 'tokyo.defense.mail@gmail.com',
-  from_name  = '請求書回覧システム（東京デファンス）',
+  from_name  = '請求書回覧システム（東京ディフェンス）',
   use_tls    = 1,
   updated_at = datetime('now')
 WHERE id = 1;
@@ -19,6 +19,6 @@ VALUES (
   'tokyo.defense.mail@gmail.com',
   'Td57421114',
   'tokyo.defense.mail@gmail.com',
-  '請求書回覧システム（東京デファンス）',
+  '請求書回覧システム（東京ディフェンス）',
   1
 );
