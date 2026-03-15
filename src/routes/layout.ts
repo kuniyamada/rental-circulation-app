@@ -65,6 +65,10 @@ export function layout(title: string, content: string, user: any): string {
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
           申請一覧・検索
         </a>
+        <a href="/change-password" class="sidebar-item ${title === 'パスワード変更' ? 'active' : ''}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+          パスワード変更
+        </a>
         ${user.is_admin ? `
         <div class="pt-3 pb-1">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">管理者メニュー</p>

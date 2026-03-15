@@ -21,8 +21,9 @@ app.get('/', async (c) => {
   const sessionId = getSessionIdFromCookie(cookie)
   const user = await getSessionUser(c.env.DB, sessionId)
   if (!user) return c.redirect('/login')
-  if (user.must_change_password) return c.redirect('/change-password')
+  // パスワード変更は任意（強制リダイレクトなし）
 
+  const pwChanged = c.req.query('pw_changed') === '1'
   const db = c.env.DB
 
   const myApps = await db.prepare(`
@@ -79,6 +80,10 @@ app.get('/', async (c) => {
         <a href="/applications" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
           申請一覧・検索
+        </a>
+        <a href="/change-password" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+          パスワード変更
         </a>
         ${user.is_admin ? `
         <div class="pt-3 pb-1">
@@ -144,6 +149,7 @@ app.get('/', async (c) => {
     <main class="flex-1 lg:ml-60 p-6">
       <div class="max-w-6xl mx-auto">
         <h1 class="text-xl font-bold text-gray-800 mb-6">ダッシュボード</h1>
+        ${pwChanged ? `<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm mb-6">✅ パスワードを変更しました。</div>` : ''}
         <div class="space-y-8">
           <!-- 統計カード -->
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">

@@ -30,17 +30,7 @@ auth.post('/login', async (c) => {
     'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)'
   ).bind(sessionId, user.id, expires).run()
 
-  // 初回パスワード変更が必要な場合
-  if (user.must_change_password) {
-    return new Response(null, {
-      status: 302,
-      headers: {
-        'Set-Cookie': `session_id=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`,
-        'Location': '/change-password'
-      }
-    })
-  }
-
+  // 常にダッシュボードへ（パスワード変更は任意）
   return new Response(null, {
     status: 302,
     headers: {
@@ -104,7 +94,7 @@ auth.post('/change-password', async (c) => {
     'UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = datetime("now") WHERE id = ?'
   ).bind(newHash, session.user_id).run()
 
-  return c.redirect('/')
+  return c.redirect('/?pw_changed=1')
 })
 
 function loginPage(error?: string | null) {
@@ -164,7 +154,7 @@ function changePasswordPage(error?: string) {
 <body class="bg-gradient-to-br from-blue-50 to-blue-100 min-h-screen flex items-center justify-center">
   <div class="bg-white rounded-2xl shadow-lg p-10 w-full max-w-md">
     <h1 class="text-xl font-bold text-gray-800 mb-2">パスワード変更</h1>
-    <p class="text-sm text-gray-500 mb-6">初回ログインのため、パスワードを変更してください。</p>
+    <p class="text-sm text-gray-500 mb-6">新しいパスワードを設定してください。</p>
     ${error ? `<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">${error}</div>` : ''}
     <form method="POST" action="/change-password">
       <div class="mb-4">
