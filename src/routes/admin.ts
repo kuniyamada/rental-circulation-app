@@ -51,7 +51,6 @@ admin.get('/users', async (c) => {
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">氏名</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">メール</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">役割</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">担当区分</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">直属上長</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
               <th class="px-4 py-3"></th>
@@ -59,15 +58,6 @@ admin.get('/users', async (c) => {
           </thead>
           <tbody class="divide-y divide-gray-50">
             ${(users.results as any[]).map(u => {
-              // 担当区分バッジ生成
-              let assignBadge = '<span class="text-gray-300 text-xs">-</span>'
-              if (u.ops_staff_id) {
-                assignBadge = u.ops_is_primary
-                  ? '<span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">業務管理課（担当）</span>'
-                  : '<span class="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">業務管理課（予備）</span>'
-              } else if (u.honsha_staff_id) {
-                assignBadge = '<span class="bg-purple-100 text-purple-700 text-xs px-2 py-0.5 rounded-full">本社経理（担当）</span>'
-              }
               return `
               <tr class="hover:bg-gray-50">
                 <td class="px-4 py-3 font-mono text-xs">${u.employee_number}</td>
@@ -81,7 +71,6 @@ admin.get('/users', async (c) => {
                   honsha: 'bg-green-50 text-green-700',
                   admin: 'bg-red-50 text-red-700'
                 }[u.role] || 'bg-gray-100 text-gray-600'} text-xs px-2 py-0.5 rounded-full">${(u.supervisor_id ? roleLabels[u.role] + '/上司' : roleLabels[u.role]) || u.role}</span></td>
-                <td class="px-4 py-3">${assignBadge}</td>
                 <td class="px-4 py-3 text-gray-500 text-xs">${u.supervisor_name || '-'}</td>
                 <td class="px-4 py-3">
                   ${u.is_active ? '<span class="text-green-600 text-xs">● 有効</span>' : '<span class="text-red-400 text-xs">● 無効</span>'}
