@@ -4,6 +4,7 @@ import { getSessionUser, getSessionIdFromCookie } from './lib/auth'
 import auth from './routes/auth'
 import applications from './routes/applications'
 import admin from './routes/admin'
+import inbox from './routes/inbox'
 
 type Bindings = { DB: D1Database; R2: R2Bucket }
 
@@ -48,6 +49,30 @@ app.get('/', async (c) => {
     ORDER BY cs.created_at DESC
   `).bind(user.uid).all()
 
+  // 業務管理課・管理者向け：未申請の受付一覧
+  const pendingInbox = (user.role === 'operations' || user.is_admin)
+    ? await db.prepare(`
+        SELECT ii.*, m.name as mansion_name, f.name as front_name
+        FROM invoice_inbox ii
+        LEFT JOIN mansions m ON ii.mansion_id = m.id
+        LEFT JOIN users f ON ii.front_user_id = f.id
+        WHERE ii.status = 'pending'
+        ORDER BY ii.created_at ASC
+      `).all()
+    : { results: [] }
+
+  // フロント向け：自分宛の未申請受付
+  const myPendingInbox = (user.role === 'front')
+    ? await db.prepare(`
+        SELECT ii.*, m.name as mansion_name, r.name as registered_by_name
+        FROM invoice_inbox ii
+        LEFT JOIN mansions m ON ii.mansion_id = m.id
+        LEFT JOIN users r ON ii.registered_by = r.id
+        WHERE ii.front_user_id = ? AND ii.status = 'pending'
+        ORDER BY ii.created_at ASC
+      `).bind(user.uid).all()
+    : { results: [] }
+
   const statusBadge = (status: string) => {
     const map: Record<string, { label: string; cls: string }> = {
       draft:       { label: '下書き',   cls: 'bg-gray-100 text-gray-600' },
@@ -85,6 +110,15 @@ app.get('/', async (c) => {
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
           パスワード変更
         </a>
+        ${(user.role === 'operations' || user.is_admin) ? `
+        <div class="pt-3 pb-1">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">受付管理</p>
+        </div>
+        <a href="/inbox" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+          請求書受付管理
+        </a>
+        ` : ''}
         ${user.is_admin ? `
         <div class="pt-3 pb-1">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">管理者メニュー</p>
@@ -104,6 +138,10 @@ app.get('/', async (c) => {
         <a href="/admin/smtp" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
           メール設定
+        </a>
+        <a href="/admin/reminder" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+          リマインダー設定
         </a>
         ` : ''}
       </nav>
@@ -151,6 +189,60 @@ app.get('/', async (c) => {
         <h1 class="text-xl font-bold text-gray-800 mb-6">ダッシュボード</h1>
         ${pwChanged ? `<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm mb-6">✅ パスワードを変更しました。</div>` : ''}
         <div class="space-y-8">
+          <!-- フロント向け：対応待ち請求書 -->
+          ${(myPendingInbox.results as any[]).length > 0 ? `
+          <div class="bg-orange-50 border border-orange-200 rounded-xl p-4">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="w-3 h-3 bg-orange-500 rounded-full animate-pulse"></span>
+              <h2 class="font-bold text-orange-800">📥 対応が必要な請求書があります</h2>
+              <span class="ml-auto bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">${(myPendingInbox.results as any[]).length}件</span>
+            </div>
+            <div class="space-y-2">
+              ${(myPendingInbox.results as any[]).map((item: any) => `
+                <div class="bg-white rounded-lg px-4 py-3 flex items-center justify-between shadow-sm">
+                  <div>
+                    <p class="font-semibold text-gray-800 text-sm">${item.mansion_name || '-'}</p>
+                    <p class="text-xs text-gray-500 mt-0.5">登録：${item.registered_by_name}（業務管理課）/ ${item.created_at?.slice(0,10)}</p>
+                    ${item.note ? `<p class="text-xs text-gray-400 mt-0.5">備考: ${item.note}</p>` : ''}
+                  </div>
+                  <div class="flex gap-2 items-center">
+                    ${item.attachment_key ? `<a href="/inbox/${item.id}/download" class="text-xs text-blue-600 hover:underline">📎請求書</a>` : ''}
+                    <a href="/applications/new" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">回覧申請する</a>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
+
+          <!-- 業務管理課向け：未申請受付一覧 -->
+          ${(pendingInbox.results as any[]).length > 0 ? `
+          <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></span>
+              <h2 class="font-bold text-yellow-800">⚠️ 未申請の受付案件</h2>
+              <span class="ml-auto bg-yellow-500 text-white text-xs font-bold px-2 py-1 rounded-full">${(pendingInbox.results as any[]).length}件</span>
+            </div>
+            <div class="space-y-2">
+              ${(pendingInbox.results as any[]).map((item: any) => `
+                <div class="bg-white rounded-lg px-4 py-3 flex items-center justify-between shadow-sm">
+                  <div>
+                    <p class="font-semibold text-gray-800 text-sm">${item.mansion_name || '-'}</p>
+                    <p class="text-xs text-gray-500 mt-0.5">担当: ${item.front_name || '-'} / 登録: ${item.created_at?.slice(0,10)}</p>
+                    ${item.remind_count > 0 ? `<p class="text-xs text-orange-500 mt-0.5">リマインド ${item.remind_count}回送信済</p>` : '<p class="text-xs text-gray-400 mt-0.5">リマインド未送信</p>'}
+                  </div>
+                  <div class="flex gap-2">
+                    <form method="POST" action="/inbox/${item.id}/remind" onsubmit="return confirm('${item.front_name}さんにリマインドを送信しますか？')">
+                      <button type="submit" class="text-xs px-3 py-1.5 bg-orange-50 text-orange-600 hover:bg-orange-100 border border-orange-200 rounded-lg transition">再通知</button>
+                    </form>
+                    <a href="/inbox" class="text-xs px-3 py-1.5 bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 rounded-lg transition">管理画面へ</a>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
+
           <!-- 統計カード -->
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -308,5 +400,8 @@ app.get('/files/:attachId', async (c) => {
 
 // ===== 管理画面 =====
 app.route('/admin', admin)
+
+// ===== 請求書受付管理 =====
+app.route('/inbox', inbox)
 
 export default app

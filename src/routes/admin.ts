@@ -659,4 +659,154 @@ admin.post('/smtp', async (c) => {
   return c.redirect('/admin/smtp?saved=1')
 })
 
+// ============================================================
+// リマインダー設定
+// ============================================================
+admin.get('/reminder', async (c) => {
+  const user = (c as any).get('user')
+  const db = c.env.DB
+  const params = new URL(c.req.url).searchParams
+  const saved = params.get('saved') === '1'
+
+  const settings = await db.prepare('SELECT * FROM reminder_settings WHERE id = 1').first() as any
+
+  const content = `
+    <div class="max-w-xl space-y-4">
+      <h2 class="text-xl font-bold text-gray-800">⏰ リマインダー設定</h2>
+
+      ${saved ? '<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">✅ 設定を保存しました。</div>' : ''}
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <p class="text-sm text-gray-500 mb-5">
+          フロント担当者が請求書受付後に回覧申請を行っていない場合、<br>
+          指定した日数ごとに自動リマインドメールを送信します。
+        </p>
+
+        <form method="POST" action="/admin/reminder" class="space-y-5">
+
+          <!-- 有効/無効 -->
+          <div class="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" name="is_active" value="1" ${settings?.is_active ? 'checked' : ''}
+                class="sr-only peer" onchange="toggleForm(this)">
+              <div class="w-11 h-6 bg-gray-300 peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer
+                          peer-checked:after:translate-x-full peer-checked:bg-blue-600
+                          after:content-[''] after:absolute after:top-0.5 after:left-[2px]
+                          after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+            </label>
+            <span class="text-sm font-semibold text-gray-700">自動リマインドを有効にする</span>
+          </div>
+
+          <div id="reminderForm" class="${settings?.is_active ? '' : 'opacity-50 pointer-events-none'}">
+
+            <!-- リマインド間隔 -->
+            <div class="space-y-2">
+              <label class="block text-sm font-semibold text-gray-700">
+                リマインド間隔（日数）
+              </label>
+              <div class="flex items-center gap-3">
+                <input type="number" name="remind_interval_days"
+                  value="${settings?.remind_interval_days || 3}"
+                  min="1" max="30" required
+                  class="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm text-center focus:ring-2 focus:ring-blue-500 outline-none">
+                <span class="text-sm text-gray-600">日ごとにリマインドメールを送信</span>
+              </div>
+              <p class="text-xs text-gray-400">例：3日 → 申請がない場合、3日後・6日後・9日後に送信</p>
+            </div>
+
+            <!-- 最大回数 -->
+            <div class="space-y-2 mt-4">
+              <label class="block text-sm font-semibold text-gray-700">
+                最大リマインド回数
+              </label>
+              <div class="flex items-center gap-3">
+                <input type="number" name="remind_max_count"
+                  value="${settings?.remind_max_count || 3}"
+                  min="1" max="10" required
+                  class="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm text-center focus:ring-2 focus:ring-blue-500 outline-none">
+                <span class="text-sm text-gray-600">回まで送信</span>
+              </div>
+              <p class="text-xs text-gray-400">最大回数を超えた場合は自動送信を停止します</p>
+            </div>
+
+            <!-- プレビュー -->
+            <div class="mt-5 p-4 bg-blue-50 rounded-lg text-xs text-blue-700 space-y-1" id="preview">
+            </div>
+          </div>
+
+          <div class="flex gap-3 pt-2">
+            <button type="submit"
+              class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg transition text-sm">
+              保存する
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- 現在の動作説明 -->
+      <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
+        <p class="font-semibold mb-2">📝 リマインダーの動作について</p>
+        <ul class="list-disc list-inside space-y-1 text-xs">
+          <li>受付登録からリマインド間隔日数が経過した未申請案件に自動送信</li>
+          <li>「再通知」ボタンからいつでも手動でリマインドも可能</li>
+          <li>フロントが回覧申請を行うと自動的にリマインドは停止</li>
+          <li>キャンセルされた受付にはリマインドを送信しません</li>
+        </ul>
+      </div>
+    </div>
+
+    <script>
+      function toggleForm(cb) {
+        const form = document.getElementById('reminderForm');
+        form.classList.toggle('opacity-50', !cb.checked);
+        form.classList.toggle('pointer-events-none', !cb.checked);
+      }
+
+      function updatePreview() {
+        const interval = parseInt(document.querySelector('[name=remind_interval_days]')?.value || '3');
+        const maxCount = parseInt(document.querySelector('[name=remind_max_count]')?.value || '3');
+        const preview = document.getElementById('preview');
+        if (!preview) return;
+        let html = '<p class="font-semibold mb-2">📅 送信スケジュール（例）</p>';
+        for (let i = 1; i <= maxCount; i++) {
+          html += '<p>受付登録から ' + (interval * i) + ' 日後 → 第' + i + 'リマインド送信</p>';
+        }
+        preview.innerHTML = html;
+      }
+
+      document.querySelectorAll('[name=remind_interval_days],[name=remind_max_count]').forEach(el => {
+        el.addEventListener('input', updatePreview);
+      });
+      updatePreview();
+    </script>
+  `
+  return c.html(layout('リマインダー設定', content, user))
+})
+
+admin.post('/reminder', async (c) => {
+  const db = c.env.DB
+  const me = (c as any).get('user')
+  const body = await c.req.parseBody() as any
+
+  const isActive = body.is_active ? 1 : 0
+  const intervalDays = Math.max(1, Math.min(30, parseInt(body.remind_interval_days) || 3))
+  const maxCount = Math.max(1, Math.min(10, parseInt(body.remind_max_count) || 3))
+  const now = new Date().toISOString()
+
+  const existing = await db.prepare('SELECT id FROM reminder_settings LIMIT 1').first()
+  if (existing) {
+    await db.prepare(`
+      UPDATE reminder_settings
+      SET remind_interval_days=?, remind_max_count=?, is_active=?, updated_by=?, updated_at=?
+      WHERE id=1
+    `).bind(intervalDays, maxCount, isActive, me.id, now).run()
+  } else {
+    await db.prepare(`
+      INSERT INTO reminder_settings (remind_interval_days, remind_max_count, is_active, updated_by, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(intervalDays, maxCount, isActive, me.id, now).run()
+  }
+  return c.redirect('/admin/reminder?saved=1')
+})
+
 export default admin
