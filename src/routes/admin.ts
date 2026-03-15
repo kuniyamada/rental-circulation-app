@@ -28,7 +28,7 @@ admin.get('/users', async (c) => {
 
   const roleLabels: Record<string, string> = {
     front: 'フロント', manager: '上長', operations: '業務管理課',
-    accounting: '会計担当', honsha: '本社明利', admin: '管理者'
+    accounting: '会計担当', honsha: '本社経理', admin: '管理者'
   }
 
   const content = `
@@ -137,7 +137,7 @@ function userForm(user: any, supervisors: any[]): string {
     { value: 'manager', label: '上長' },
     { value: 'operations', label: '業務管理課' },
     { value: 'accounting', label: '会計担当（管理組合）' },
-    { value: 'honsha', label: '本社明利' },
+    { value: 'honsha', label: '本社経理' },
     { value: 'admin', label: '管理者' },
   ]
   const isEdit = !!user
@@ -348,7 +348,7 @@ function mansionForm(mansion: any, users: any[]): string {
   `
 }
 
-// 担当者設定（業務管理課・本社明利）
+// 担当者設定（業務管理課・本社経理）
 admin.get('/staff', async (c) => {
   const user = (c as any).get('user')
   const db = c.env.DB
@@ -390,9 +390,9 @@ admin.get('/staff', async (c) => {
         </form>
       </div>
 
-      <!-- 本社明利 -->
+      <!-- 本社経理 -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <h2 class="font-semibold text-gray-800 mb-4">本社明利担当者設定</h2>
+        <h2 class="font-semibold text-gray-800 mb-4">本社経理担当者設定</h2>
         <div class="space-y-2 mb-4">
           ${(honsha.results as any[]).map(h => `
             <div class="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3">

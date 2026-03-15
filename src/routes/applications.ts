@@ -433,7 +433,7 @@ async function createCirculationSteps(db: D1Database, appId: number, applicantId
       ).bind(appId, mansion.accounting_user_id).run()
     }
   } else {
-    // B) 本社明利
+    // B) 本社経理
     const honsha = await db.prepare(
       'SELECT user_id FROM honsha_staff LIMIT 1'
     ).first() as any

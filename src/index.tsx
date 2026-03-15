@@ -63,7 +63,7 @@ app.get('/', async (c) => {
 
   const roleLabel: Record<string, string> = {
     front: 'フロント', manager: '上長', operations: '業務管理課',
-    accounting: '会計担当', honsha: '本社明利', admin: '管理者',
+    accounting: '会計担当', honsha: '本社経理', admin: '管理者',
   }
 
   const sidebar = `

@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 CREATE TABLE IF NOT EXISTS circulation_steps (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   application_id INTEGER NOT NULL,
-  step_number INTEGER NOT NULL,                -- 1:上長, 2:業務管理課, 3:組合会計/本社明利
+  step_number INTEGER NOT NULL,                -- 1:上長, 2:業務管理課, 3:組合会計/本社経理
   reviewer_id INTEGER NOT NULL,                -- レビュー担当者ID
   status TEXT NOT NULL DEFAULT 'pending',      -- pending/approved/rejected/on_hold
   action_comment TEXT,                         -- 差し戻し理由・保留質問
@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS operations_staff (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- 本社明利設定テーブル（1名）
+-- 本社経理設定テーブル（1名）
 CREATE TABLE IF NOT EXISTS honsha_staff (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL UNIQUE,
