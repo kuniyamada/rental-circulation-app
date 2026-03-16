@@ -446,7 +446,14 @@ admin.get('/mansions', async (c) => {
                 <tr class="hover:bg-gray-50">
                   <td class="px-3 py-3 text-center font-mono text-xs text-gray-400 bg-gray-50">${m.mansion_number ?? '-'}</td>
                   <td class="px-4 py-3 font-medium">${m.name}</td>
-                  <td class="px-4 py-3">${m.is_active ? '<span class="text-green-600 text-xs">● 有効</span>' : '<span class="text-red-400 text-xs">● 無効</span>'}</td>
+                  <td class="px-4 py-3">
+                    <form method="POST" action="/admin/mansions/${m.id}/toggle" class="flex items-center gap-2">
+                      <button type="submit" class="relative inline-flex items-center w-11 h-6 rounded-full transition-colors focus:outline-none ${m.is_active ? 'bg-green-500' : 'bg-gray-300'}">
+                        <span class="inline-block w-4 h-4 bg-white rounded-full shadow transition-transform ${m.is_active ? 'translate-x-6' : 'translate-x-1'}"></span>
+                      </button>
+                      <span class="text-xs ${m.is_active ? 'text-green-600 font-medium' : 'text-gray-400'}">${m.is_active ? 'ON' : 'OFF'}</span>
+                    </form>
+                  </td>
                   <td class="px-4 py-3"><a href="/admin/mansions/${m.id}/edit" class="text-blue-600 hover:underline text-xs">編集</a></td>
                 </tr>
               `).join('')
@@ -486,6 +493,16 @@ admin.get('/mansions/:id/edit', async (c) => {
   const users = await db.prepare("SELECT * FROM users WHERE is_active = 1 ORDER BY name").all()
   if (!mansion) return c.redirect('/admin/mansions')
   return c.html(layout('マンション編集', mansionForm(mansion as any, users.results as any[]), user))
+})
+
+// 状態トグル
+admin.post('/mansions/:id/toggle', async (c) => {
+  const db = c.env.DB
+  const id = c.req.param('id')
+  await db.prepare(
+    'UPDATE mansions SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END, updated_at = datetime("now") WHERE id = ?'
+  ).bind(id).run()
+  return c.redirect('/admin/mansions')
 })
 
 // マンション更新
