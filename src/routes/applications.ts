@@ -105,6 +105,63 @@ applications.get('/', async (c) => {
   return c.html(layout('申請一覧', content, user))
 })
 
+// 承認者プレビューAPI
+applications.get('/preview-reviewers', async (c) => {
+  const cookie = c.req.header('Cookie')
+  const sessionId = getSessionIdFromCookie(cookie)
+  const user = await getSessionUser(c.env.DB, sessionId)
+  if (!user) return c.json({ error: 'unauthorized' }, 401)
+
+  const db = c.env.DB
+  const mansionId = c.req.query('mansion_id') ? parseInt(c.req.query('mansion_id')!) : null
+  const paymentTarget = c.req.query('payment_target') || ''
+
+  const reviewers: { step: number; label: string; name: string; role: string }[] = []
+
+  // Step1: 申請者の直属上長
+  const supervisor = await db.prepare(
+    'SELECT u2.id, u2.name, u2.role FROM users u1 JOIN users u2 ON u1.supervisor_id = u2.id WHERE u1.id = ?'
+  ).bind(user.uid).first() as any
+  if (supervisor) {
+    reviewers.push({ step: 1, label: '上長', name: supervisor.name, role: supervisor.role })
+  } else {
+    reviewers.push({ step: 1, label: '上長', name: '未設定', role: '' })
+  }
+
+  // Step2: 業務管理課（担当1名）
+  const opStaff = await db.prepare(
+    'SELECT u.id, u.name, u.role FROM operations_staff os JOIN users u ON os.user_id = u.id WHERE os.is_primary = 1 LIMIT 1'
+  ).first() as any
+  if (opStaff) {
+    reviewers.push({ step: 2, label: '業務管理課', name: opStaff.name, role: opStaff.role })
+  } else {
+    reviewers.push({ step: 2, label: '業務管理課', name: '未設定', role: '' })
+  }
+
+  // Step3: 支払先による分岐
+  if (paymentTarget === 'kumiai' && mansionId) {
+    const mansion = await db.prepare(
+      'SELECT u.id, u.name, u.role FROM mansions m JOIN users u ON m.accounting_user_id = u.id WHERE m.id = ?'
+    ).bind(mansionId).first() as any
+    if (mansion) {
+      reviewers.push({ step: 3, label: '会計担当（マンション）', name: mansion.name, role: mansion.role })
+    } else {
+      reviewers.push({ step: 3, label: '会計担当（マンション）', name: '未設定', role: '' })
+    }
+  } else if (paymentTarget === 'td') {
+    const honsha = await db.prepare(
+      'SELECT u.id, u.name, u.role FROM honsha_staff hs JOIN users u ON hs.user_id = u.id LIMIT 1'
+    ).first() as any
+    if (honsha) {
+      reviewers.push({ step: 3, label: '本社経理', name: honsha.name, role: honsha.role })
+    } else {
+      reviewers.push({ step: 3, label: '本社経理', name: '未設定', role: '' })
+    }
+  }
+
+  return c.json({ reviewers })
+})
+
 // 新規申請フォーム
 applications.get('/new', async (c) => {
   const cookie = c.req.header('Cookie')
@@ -265,6 +322,17 @@ applications.get('/new', async (c) => {
             </div>
           </div>
 
+          <!-- 送信先（承認者）プレビュー -->
+          <div id="reviewerPreview" class="hidden border border-indigo-200 bg-indigo-50 rounded-lg p-4">
+            <div class="flex items-center gap-2 mb-3">
+              <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+              </svg>
+              <span class="text-sm font-semibold text-indigo-700">送信先（承認順）</span>
+            </div>
+            <div id="reviewerList" class="space-y-2"></div>
+          </div>
+
           <!-- 備考 -->
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">備考</label>
@@ -333,12 +401,14 @@ applications.get('/new', async (c) => {
           notFoundEl.classList.add('hidden');
           idInput.value = found.id;
           titleInput.value = found.name;
+          updateReviewerPreview();
         } else {
           resultEl.textContent = '番号を入力するとマンション名が表示されます';
           resultEl.className = 'px-3 py-2.5 border border-dashed border-gray-300 rounded-lg text-sm text-gray-400 bg-gray-50 min-h-[42px] flex items-center';
           notFoundEl.classList.remove('hidden');
           idInput.value = '';
           titleInput.value = '';
+          updateReviewerPreview();
         }
       }
 
@@ -352,10 +422,45 @@ applications.get('/new', async (c) => {
         // TD選択時はrequiredを解除、それ以外は必須に
         const budgetInput = document.querySelector('input[name="budget_amount"]')
         if (budgetInput) budgetInput.required = (val !== 'td')
+        updateReviewerPreview()
       }
       function toggleMotouke() {
         const val = document.querySelector('input[name="td_type"]:checked')?.value
         document.getElementById('motoukeFields').classList.toggle('hidden', val !== 'motouke')
+      }
+
+      async function updateReviewerPreview() {
+        const mansionId = document.getElementById('mansionIdInput').value
+        const paymentTarget = document.querySelector('input[name="payment_target"]:checked')?.value
+        const previewEl = document.getElementById('reviewerPreview')
+        const listEl = document.getElementById('reviewerList')
+
+        if (!mansionId || !paymentTarget) {
+          previewEl.classList.add('hidden')
+          return
+        }
+
+        try {
+          const res = await fetch('/applications/preview-reviewers?mansion_id=' + mansionId + '&payment_target=' + paymentTarget)
+          const data = await res.json()
+          if (!data.reviewers) return
+
+          listEl.innerHTML = data.reviewers.map((r, i) => {
+            const isUnset = r.name === '未設定'
+            const stepColors = ['bg-blue-100 text-blue-700', 'bg-orange-100 text-orange-700', 'bg-green-100 text-green-700']
+            const color = stepColors[i] || 'bg-gray-100 text-gray-600'
+            return '<div class="flex items-center gap-3">' +
+              '<span class="text-xs font-bold text-indigo-400 w-5 text-center">Step ' + r.step + '</span>' +
+              '<svg class="w-3 h-3 text-indigo-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
+              '<span class="text-xs px-2 py-0.5 rounded-full font-medium ' + color + '">' + r.label + '</span>' +
+              '<span class="text-sm font-medium ' + (isUnset ? 'text-red-400 italic' : 'text-gray-800') + '">' + r.name + '</span>' +
+            '</div>'
+          }).join('')
+
+          previewEl.classList.remove('hidden')
+        } catch (e) {
+          previewEl.classList.add('hidden')
+        }
       }
     </script>
   `
