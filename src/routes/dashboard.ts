@@ -146,10 +146,12 @@ dashboard.get('/', async (c) => {
       <div class="bg-white rounded-xl shadow-sm border border-gray-100">
         <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 class="text-lg font-semibold text-gray-800">自分の申請一覧</h2>
+${(['admin','front','front_supervisor'].includes(user.role) || user.is_admin) ? `
           <a href="/applications/new" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
             新規申請
           </a>
+          ` : ''}
         </div>
         ${myApps.results.length === 0 ? `
           <div class="px-6 py-12 text-center text-gray-400">

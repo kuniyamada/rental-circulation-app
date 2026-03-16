@@ -66,7 +66,7 @@ applications.get('/', async (c) => {
     <div class="bg-white rounded-xl shadow-sm border border-gray-100">
       <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
         <h2 class="font-semibold text-gray-800">検索結果 <span class="text-blue-600">${apps.results.length}件</span></h2>
-        <a href="/applications/new" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">＋ 新規申請</a>
+        ${(['admin','front','front_supervisor'].includes(user.role) || user.is_admin) ? `<a href="/applications/new" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">＋ 新規申請</a>` : ''}
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
