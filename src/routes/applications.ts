@@ -175,15 +175,15 @@ applications.get('/new', async (c) => {
   ).all()
 
   // 回覧先候補取得
-  // 上長候補：operations ロールのアクティブユーザー
+  // 上長候補：担当者/上司（front_supervisor）ロールのアクティブユーザー
   const supervisorCandidates = await db.prepare(
-    "SELECT id, name FROM users WHERE role = 'operations' AND is_active = 1 ORDER BY name"
+    "SELECT id, name FROM users WHERE role = 'front_supervisor' AND is_active = 1 ORDER BY name"
   ).all()
 
-  // 業務管理課：primary スタッフ
-  const opStaff = await db.prepare(
-    'SELECT u.id, u.name FROM operations_staff os JOIN users u ON os.user_id = u.id WHERE os.is_primary = 1 LIMIT 1'
-  ).first() as any
+  // 業務管理課：operations ロールのアクティブユーザー（プルダウン）
+  const opStaffCandidates = await db.prepare(
+    "SELECT id, name FROM users WHERE role = 'operations' AND is_active = 1 ORDER BY name"
+  ).all()
 
   // 会計課ユーザー
   const accountingUsers = await db.prepare(
@@ -285,12 +285,15 @@ applications.get('/new', async (c) => {
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1.5">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold mr-1">2</span>
-                回覧・承認先（業務管理課）
+                回覧・承認先（業務管理課） <span class="text-red-500">*</span>
               </label>
-              <div class="px-3 py-2.5 border border-gray-200 bg-white rounded-lg text-sm text-gray-700">
-                ${opStaff ? opStaff.name : '<span class="text-red-400 italic">未設定（業務管理課担当者を先に設定してください）</span>'}
-              </div>
-              <input type="hidden" name="reviewer_step2" value="${opStaff ? opStaff.id : ''}">
+              <select name="reviewer_step2" required
+                class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                <option value="">選択してください</option>
+                ${(opStaffCandidates.results as any[]).map((u: any) =>
+                  `<option value="${u.id}">${u.name}</option>`
+                ).join('')}
+              </select>
             </div>
 
             <!-- Step3: 最終承認 -->
