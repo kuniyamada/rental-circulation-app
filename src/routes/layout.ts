@@ -69,6 +69,15 @@ export function layout(title: string, content: string, user: any): string {
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
           パスワード変更
         </a>
+        ${(user.role === 'operations' || user.is_admin) ? `
+        <div class="pt-3 pb-1">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">業務管理課</p>
+        </div>
+        <a href="/inbox" class="sidebar-item ${title.includes('請求書受付') ? 'active' : ''}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+          請求書受付管理
+        </a>
+        ` : ''}
         ${user.is_admin ? `
         <div class="pt-3 pb-1">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">管理者メニュー</p>
