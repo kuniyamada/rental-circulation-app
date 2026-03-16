@@ -174,6 +174,19 @@ applications.get('/new', async (c) => {
     'SELECT * FROM mansions WHERE is_active = 1 ORDER BY CAST(mansion_number AS INTEGER)'
   ).all()
 
+  // inboxからの引き継ぎデータ取得
+  const inboxId = c.req.query('inbox_id') ? parseInt(c.req.query('inbox_id')!) : null
+  let inboxData: any = null
+  if (inboxId) {
+    inboxData = await db.prepare(`
+      SELECT ii.*, m.name as mansion_name, m.mansion_number, f.name as front_name
+      FROM invoice_inbox ii
+      LEFT JOIN mansions m ON ii.mansion_id = m.id
+      LEFT JOIN users f ON ii.front_user_id = f.id
+      WHERE ii.id = ? AND ii.status = 'pending'
+    `).bind(inboxId).first()
+  }
+
   // 回覧先候補取得
   // 上長候補：担当者/上司（front_supervisor）ロールのアクティブユーザー
   const supervisorCandidates = await db.prepare(
@@ -218,6 +231,22 @@ applications.get('/new', async (c) => {
       </div>
 
       <form method="POST" action="/applications" enctype="multipart/form-data" id="appForm" onsubmit="return checkFeeRequired()">
+        ${inboxData ? `
+        <!-- inboxからの引き継ぎバナー -->
+        <div class="mb-5 bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
+          <span class="text-2xl">📥</span>
+          <div class="flex-1">
+            <p class="text-sm font-semibold text-blue-800">業務管理課から請求書が転送されています</p>
+            <p class="text-xs text-blue-600 mt-1">マンション・請求書を引き継ぎました。内容を確認のうえ申請してください。</p>
+            <div class="flex flex-wrap gap-3 mt-2 text-xs text-blue-700">
+              <span>🏢 ${inboxData.mansion_name}</span>
+              ${inboxData.attachment_name ? `<span>📎 ${inboxData.attachment_name}</span>` : ''}
+              ${inboxData.note ? `<span>💬 ${inboxData.note}</span>` : ''}
+            </div>
+          </div>
+        </div>
+        ` : ''}
+        <input type="hidden" name="inbox_id" value="${inboxId || ''}">
         <div class="space-y-5">
           <!-- 標題（マンション番号入力→名称表示） -->
           <div>
@@ -413,8 +442,19 @@ applications.get('/new', async (c) => {
             <h3 class="text-sm font-semibold text-gray-700">添付ファイル（請求書）</h3>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）① <span class="text-red-500">*</span></label>
+              ${inboxData?.attachment_key ? `
+              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+                <span class="text-blue-600 text-xs">📎 引き継ぎ：${inboxData.attachment_name || 'invoice.pdf'}</span>
+                <input type="hidden" name="inbox_attachment_key" value="${inboxData.attachment_key}">
+                <input type="hidden" name="inbox_attachment_name" value="${inboxData.attachment_name || ''}">
+                <span class="text-xs text-gray-400">（別ファイルを選択すると上書きされます）</span>
+              </div>
+              <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png"
+                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100">
+              ` : `
               <input type="file" name="invoice1" required accept=".pdf,.jpg,.jpeg,.png"
                 class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100">
+              `}
             </div>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）②</label>
@@ -478,6 +518,18 @@ applications.get('/new', async (c) => {
           name: m.name
         }))
       )};
+
+      // inboxからの自動セット
+      ${inboxData ? `
+      window.addEventListener('DOMContentLoaded', function() {
+        // マンションを自動セット
+        const numInput = document.getElementById('mansionNumberInput')
+        if (numInput) {
+          numInput.value = '${inboxData.mansion_number}'
+          searchMansion('${inboxData.mansion_number}')
+        }
+      })
+      ` : ''}
 
       // 会計課・本社経理ユーザーをJSに埋め込み
       const ACCOUNTING_USERS = ${JSON.stringify(
@@ -651,6 +703,11 @@ applications.post('/', async (c) => {
   // ファイル保存（R2）
   const fileKeys: Record<string, string> = {}
   const fileNames: Record<string, string> = {}
+
+  // inbox引き継ぎファイルがあり、新規ファイル未選択の場合はinboxのファイルをそのまま使用
+  const inboxAttachmentKey = body.inbox_attachment_key || null
+  const inboxAttachmentName = body.inbox_attachment_name || null
+
   for (const fileKey of ['invoice1', 'invoice2', 'other1', 'other2']) {
     const file = body[fileKey] as File | undefined
     if (file && file.size > 0) {
@@ -661,6 +718,10 @@ applications.post('/', async (c) => {
       })
       fileKeys[fileKey] = key
       fileNames[fileKey] = file.name
+    } else if (fileKey === 'invoice1' && inboxAttachmentKey && !fileKeys['invoice1']) {
+      // inbox引き継ぎファイルをinvoice1として使用
+      fileKeys['invoice1'] = inboxAttachmentKey
+      fileNames['invoice1'] = inboxAttachmentName || 'invoice.pdf'
     }
   }
 
@@ -719,6 +780,15 @@ applications.post('/', async (c) => {
         'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject) VALUES (?, ?, ?, ?, ?)'
       ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email, buildMailSubject('review_request', appNumber)).run()
     }
+  }
+
+  // inbox引き継ぎの場合、invoice_inboxのstatusをappliedに更新
+  const inboxIdFromBody = body.inbox_id ? parseInt(body.inbox_id) : null
+  if (inboxIdFromBody) {
+    const now = new Date().toISOString()
+    await db.prepare(
+      'UPDATE invoice_inbox SET status = ?, application_id = ?, updated_at = ? WHERE id = ? AND status = ?'
+    ).bind('applied', appId, now, inboxIdFromBody, 'pending').run()
   }
 
   return c.redirect(`/applications/${appId}`)

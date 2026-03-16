@@ -153,7 +153,7 @@ inbox.get('/new', async (c) => {
 
   const db = c.env.DB
   const mansions = await db.prepare("SELECT * FROM mansions WHERE is_active = 1 ORDER BY CAST(mansion_number AS INTEGER)").all()
-  const fronts = await db.prepare("SELECT * FROM users WHERE role = 'front' AND is_active = 1 ORDER BY name").all()
+  const fronts = await db.prepare("SELECT * FROM users WHERE role IN ('front', 'front_supervisor') AND is_active = 1 ORDER BY name").all()
 
   const content = `
     <div class="max-w-xl mx-auto">
@@ -348,8 +348,8 @@ inbox.post('/', async (c) => {
 
   // メール通知送信
   if (frontUser && frontUser.email && smtpSettings) {
-    const appUrl = `${new URL(c.req.url).origin}/applications/new`
-    const subject = `【請求書受付】${mansion?.name || ''} の請求書が届きました`
+    const appUrl = `${new URL(c.req.url).origin}/applications/new?inbox_id=${inboxId}`
+    const subject = `【請求書受付】${mansion?.name || 'マンション'} の請求書が届きました`
     const html = buildInboxNotificationBody({
       frontName: frontUser.name,
       mansionName: mansion?.name || '',
@@ -429,7 +429,7 @@ inbox.post('/:id/remind', async (c) => {
 
   if (item.front_email && smtpSettings) {
     const newCount = (item.remind_count || 0) + 1
-    const appUrl = `${new URL(c.req.url).origin}/applications/new`
+    const appUrl = `${new URL(c.req.url).origin}/applications/new?inbox_id=${item.id}`
     const subject = `【リマインド${newCount}回目】${item.mansion_name} の請求書回覧申請をお願いします`
     const html = buildInboxNotificationBody({
       frontName: item.front_name,
