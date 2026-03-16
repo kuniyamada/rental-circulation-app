@@ -162,12 +162,18 @@ applications.get('/preview-reviewers', async (c) => {
   return c.json({ reviewers })
 })
 
+// 新規申請を許可するロール（管理者・担当者・担当者/上司）
+const ALLOWED_NEW_APP_ROLES = ['admin', 'front', 'front_supervisor']
+
 // 新規申請フォーム
 applications.get('/new', async (c) => {
   const cookie = c.req.header('Cookie')
   const sessionId = getSessionIdFromCookie(cookie)
   const user = await getSessionUser(c.env.DB, sessionId)
   if (!user) return c.redirect('/login')
+  if (!ALLOWED_NEW_APP_ROLES.includes(user.role) && !user.is_admin) {
+    return c.html(`<p style="padding:2rem;font-family:sans-serif;color:#dc2626">⛔ この画面へのアクセス権限がありません。</p>`, 403)
+  }
 
   const db = c.env.DB
   const mansions = await db.prepare(
@@ -684,6 +690,9 @@ applications.post('/', async (c) => {
   const sessionId = getSessionIdFromCookie(cookie)
   const user = await getSessionUser(c.env.DB, sessionId)
   if (!user) return c.redirect('/login')
+  if (!ALLOWED_NEW_APP_ROLES.includes(user.role) && !user.is_admin) {
+    return c.html(`<p style="padding:2rem;font-family:sans-serif;color:#dc2626">⛔ この画面へのアクセス権限がありません。</p>`, 403)
+  }
 
   const db = c.env.DB
   const body = await c.req.parseBody({ all: true }) as any
