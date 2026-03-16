@@ -306,13 +306,13 @@ applications.get('/new', async (c) => {
               <div class="flex gap-4">
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="reviewer_step3_role" value="accounting" required
-                    onchange="updateStep3Users()"
+                    onchange="updateStep3Users(); setPaymentTarget('kumiai')"
                     class="w-4 h-4 text-purple-600">
                   <span class="text-sm">マンション会計課</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="reviewer_step3_role" value="honsha"
-                    onchange="updateStep3Users()"
+                    onchange="updateStep3Users(); setPaymentTarget('td')"
                     class="w-4 h-4 text-purple-600">
                   <span class="text-sm">本社経理</span>
                 </label>
@@ -495,6 +495,12 @@ applications.get('/new', async (c) => {
           ? '<option value="">先に役割を選択してください</option>'
           : '<option value="">担当者を選択してください</option>' +
             users.map(u => '<option value="' + u.id + '">' + u.name + '</option>').join('')
+      }
+
+      function setPaymentTarget(val) {
+        // 支払先ラジオを自動選択
+        const radio = document.querySelector('input[name="payment_target"][value="' + val + '"]')
+        if (radio) { radio.checked = true; togglePaymentFields() }
       }
 
       function searchMansion(val) {
