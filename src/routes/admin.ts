@@ -57,7 +57,6 @@ admin.get('/users', async (c) => {
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">氏名</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">メール</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">役割</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">直属上長</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
               <th class="px-4 py-3"></th>
             </tr>
@@ -79,7 +78,6 @@ admin.get('/users', async (c) => {
                     return `<span class="${cls} text-xs px-2 py-0.5 rounded-full">${label}</span>`
                   })()} 
                 </td>
-                <td class="px-4 py-3 text-gray-500 text-xs">${u.supervisor_name || '-'}</td>
                 <td class="px-4 py-3">
                   ${u.is_active ? '<span class="text-green-600 text-xs">● 有効</span>' : '<span class="text-red-400 text-xs">● 無効</span>'}
                   ${u.must_change_password ? '<span class="ml-2 text-xs text-orange-500">PW要変更</span>' : ''}
