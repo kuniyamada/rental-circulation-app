@@ -308,7 +308,7 @@ applications.get('/new', async (c) => {
                   <input type="radio" name="reviewer_step3_role" value="accounting" required
                     onchange="updateStep3Users()"
                     class="w-4 h-4 text-purple-600">
-                  <span class="text-sm">会計課</span>
+                  <span class="text-sm">マンション会計課</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="reviewer_step3_role" value="honsha"
