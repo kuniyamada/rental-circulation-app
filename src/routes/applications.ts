@@ -237,7 +237,7 @@ applications.get('/new', async (c) => {
           </div>
 
           <!-- 金額 -->
-          <div class="grid grid-cols-2 gap-4">
+          <div id="amountFields" class="grid grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-semibold text-gray-700 mb-1.5">予算額（円） <span class="text-red-500">*</span></label>
               <div class="relative">
@@ -350,6 +350,11 @@ applications.get('/new', async (c) => {
         document.getElementById('kumiaiFields').classList.toggle('hidden', val !== 'kumiai')
         document.getElementById('tdFields').classList.toggle('hidden', val !== 'td')
         if (val !== 'td') document.getElementById('motoukeFields').classList.add('hidden')
+        // 会社（TD）選択時は予算額・手数料を非表示
+        document.getElementById('amountFields').classList.toggle('hidden', val === 'td')
+        // TD選択時はrequiredを解除、それ以外は必須に
+        const budgetInput = document.querySelector('input[name="budget_amount"]')
+        if (budgetInput) budgetInput.required = (val !== 'td')
       }
       function toggleMotouke() {
         const val = document.querySelector('input[name="td_type"]:checked')?.value
