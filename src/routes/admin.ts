@@ -20,7 +20,6 @@ admin.use('*', async (c, next) => {
 admin.get('/users', async (c) => {
   const user = (c as any).get('user')
   const db = c.env.DB
-  // operations_staff・honsha_staff の担当区分も取得
   const users = await db.prepare(`
     SELECT u.*, s.name as supervisor_name,
       os.id as ops_staff_id, os.is_primary as ops_is_primary,
@@ -29,12 +28,19 @@ admin.get('/users', async (c) => {
     LEFT JOIN users s ON u.supervisor_id = s.id
     LEFT JOIN operations_staff os ON os.user_id = u.id
     LEFT JOIN honsha_staff hs ON hs.user_id = u.id
-    ORDER BY u.employee_number
+    ORDER BY CAST(u.employee_number AS INTEGER)
   `).all()
 
-  const roleLabels: Record<string, string> = {
-    front: '担当者', manager: '業務管理課', operations: '業務管理課',
-    accounting: '会計課', honsha: '本社経理', admin: '管理者'
+  // rolesテーブルからラベル・色を取得
+  const rolesData = await db.prepare("SELECT * FROM roles WHERE is_active = 1").all()
+  const roleMap: Record<string, {label: string, color: string}> = {}
+  ;(rolesData.results as any[]).forEach((r: any) => { roleMap[r.value] = {label: r.label, color: r.color} })
+  // フォールバック
+  const roleColorClass: Record<string, string> = {
+    blue: 'bg-blue-50 text-blue-700', indigo: 'bg-indigo-50 text-indigo-700',
+    orange: 'bg-orange-50 text-orange-700', yellow: 'bg-yellow-50 text-yellow-700',
+    green: 'bg-green-50 text-green-700', red: 'bg-red-50 text-red-700',
+    purple: 'bg-purple-50 text-purple-700', gray: 'bg-gray-100 text-gray-600'
   }
 
   const content = `
@@ -63,14 +69,16 @@ admin.get('/users', async (c) => {
                 <td class="px-4 py-3 font-mono text-xs">${u.employee_number}</td>
                 <td class="px-4 py-3 font-medium">${u.name} ${u.is_admin ? '<span class="text-xs bg-red-100 text-red-600 px-1.5 rounded">管理者</span>' : ''}</td>
                 <td class="px-4 py-3 text-gray-500 text-xs">${u.email}</td>
-                <td class="px-4 py-3"><span class="${{
-                  front: 'bg-blue-50 text-blue-700',
-                  manager: 'bg-orange-50 text-orange-700',
-                  operations: 'bg-orange-50 text-orange-700',
-                  accounting: 'bg-yellow-50 text-yellow-700',
-                  honsha: 'bg-green-50 text-green-700',
-                  admin: 'bg-red-50 text-red-700'
-                }[u.role] || 'bg-gray-100 text-gray-600'} text-xs px-2 py-0.5 rounded-full">${(u.supervisor_id ? roleLabels[u.role] + '/上司' : roleLabels[u.role]) || u.role}</span></td>
+                <td class="px-4 py-3">
+                  ${(() => {
+                    const rm = roleMap[u.role]
+                    const baseLabel = rm ? rm.label : u.role
+                    const label = (u.is_supervisor && u.role === 'front') ? baseLabel + '/上司' : baseLabel
+                    const colorKey = rm ? rm.color : 'gray'
+                    const cls = roleColorClass[colorKey] || 'bg-gray-100 text-gray-600'
+                    return `<span class="${cls} text-xs px-2 py-0.5 rounded-full">${label}</span>`
+                  })()} 
+                </td>
                 <td class="px-4 py-3 text-gray-500 text-xs">${u.supervisor_name || '-'}</td>
                 <td class="px-4 py-3">
                   ${u.is_active ? '<span class="text-green-600 text-xs">● 有効</span>' : '<span class="text-red-400 text-xs">● 無効</span>'}
@@ -183,7 +191,8 @@ admin.get('/users/new', async (c) => {
   const user = (c as any).get('user')
   const db = c.env.DB
   const supervisors = await db.prepare("SELECT * FROM users WHERE is_active = 1 ORDER BY name").all()
-  return c.html(layout('ユーザー追加', userForm(null, supervisors.results as any[]), user))
+  const roles = await db.prepare("SELECT * FROM roles WHERE is_active = 1 ORDER BY sort_order").all()
+  return c.html(layout('ユーザー追加', userForm(null, supervisors.results as any[], undefined, undefined, roles.results as any[]), user))
 })
 
 // ユーザー追加処理
@@ -192,11 +201,11 @@ admin.post('/users', async (c) => {
   const body = await c.req.parseBody() as any
   const hash = await hashPassword(body.employee_number) // 初期PW=社員番号
   await db.prepare(`
-    INSERT INTO users (employee_number, name, email, department, role, is_admin, supervisor_id, password_hash, must_change_password)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+    INSERT INTO users (employee_number, name, email, department, role, is_supervisor, is_admin, supervisor_id, password_hash, must_change_password)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
   `).bind(
     body.employee_number, body.name, body.email, body.department || null,
-    body.role, body.is_admin ? 1 : 0,
+    body.role, body.is_supervisor ? 1 : 0, body.is_admin ? 1 : 0,
     body.supervisor_id ? parseInt(body.supervisor_id) : null, hash
   ).run()
   return c.redirect('/admin/users')
@@ -208,11 +217,12 @@ admin.get('/users/:id/edit', async (c) => {
   const db = c.env.DB
   const target = await db.prepare('SELECT * FROM users WHERE id = ?').bind(c.req.param('id')).first() as any
   const supervisors = await db.prepare("SELECT * FROM users WHERE is_active = 1 ORDER BY name").all()
+  const roles = await db.prepare("SELECT * FROM roles WHERE is_active = 1 ORDER BY sort_order").all()
   if (!target) return c.redirect('/admin/users')
   // 担当区分情報を取得
   const opsStaff = await db.prepare('SELECT * FROM operations_staff WHERE user_id = ?').bind(target.id).first() as any
   const honshaStaff = await db.prepare('SELECT * FROM honsha_staff WHERE user_id = ?').bind(target.id).first() as any
-  return c.html(layout('ユーザー編集', userForm(target, supervisors.results as any[], opsStaff, honshaStaff), user))
+  return c.html(layout('ユーザー編集', userForm(target, supervisors.results as any[], opsStaff, honshaStaff, roles.results as any[]), user))
 })
 
 // ユーザー更新処理
@@ -221,11 +231,11 @@ admin.post('/users/:id', async (c) => {
   const id = c.req.param('id')
   const body = await c.req.parseBody() as any
   await db.prepare(`
-    UPDATE users SET name=?, email=?, department=?, role=?, is_admin=?, supervisor_id=?, is_active=?, updated_at=datetime("now")
+    UPDATE users SET name=?, email=?, department=?, role=?, is_supervisor=?, is_admin=?, supervisor_id=?, is_active=?, updated_at=datetime("now")
     WHERE id=?
   `).bind(
     body.name, body.email, body.department || null,
-    body.role, body.is_admin ? 1 : 0,
+    body.role, body.is_supervisor ? 1 : 0, body.is_admin ? 1 : 0,
     body.supervisor_id ? parseInt(body.supervisor_id) : null,
     body.is_active ? 1 : 0, id
   ).run()
@@ -255,14 +265,17 @@ admin.post('/users/:id', async (c) => {
   return c.redirect('/admin/users')
 })
 
-function userForm(user: any, supervisors: any[], opsStaff?: any, honshaStaff?: any): string {
-  const roles = [
-    { value: 'front', label: '担当者（フロント）' },
-    { value: 'operations', label: '業務管理課' },
-    { value: 'accounting', label: '会計課' },
-    { value: 'honsha', label: '本社経理' },
-    { value: 'admin', label: '管理者' },
-  ]
+function userForm(user: any, supervisors: any[], opsStaff?: any, honshaStaff?: any, roles: any[] = []): string {
+  // rolesが空の場合はデフォルト
+  if (roles.length === 0) {
+    roles = [
+      { value: 'front', label: '担当者' },
+      { value: 'operations', label: '業務管理課' },
+      { value: 'accounting', label: '会計課' },
+      { value: 'honsha', label: '本社経理' },
+      { value: 'admin', label: '管理者' },
+    ]
+  }
   const isEdit = !!user
 
   return `
@@ -308,7 +321,12 @@ function userForm(user: any, supervisors: any[], opsStaff?: any, honshaStaff?: a
               ).join('')}
             </select>
           </div>
-          <div class="flex gap-4">
+          <div class="flex gap-4 flex-wrap">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="is_supervisor" value="1" ${user?.is_supervisor ? 'checked' : ''}
+                class="w-4 h-4 text-indigo-600 rounded">
+              <span class="text-sm text-indigo-700">上司フラグ（担当者/上司として表示）</span>
+            </label>
             <label class="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" name="is_admin" value="1" ${user?.is_admin ? 'checked' : ''}
                 class="w-4 h-4 text-blue-600 rounded">
@@ -908,6 +926,237 @@ admin.post('/reminder', async (c) => {
     `).bind(intervalDays, maxCount, isActive, me.id, now).run()
   }
   return c.redirect('/admin/reminder?saved=1')
+})
+
+// ============================================================
+// 役割マスタ管理
+// ============================================================
+admin.get('/roles', async (c) => {
+  const user = (c as any).get('user')
+  const db = c.env.DB
+  const roles = await db.prepare('SELECT * FROM roles ORDER BY sort_order').all()
+  const saved = c.req.query('saved')
+  const deleted = c.req.query('deleted')
+
+  const content = `
+    <div class="space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-bold text-gray-800">🏷️ 役割マスタ管理</h2>
+        <button onclick="document.getElementById('addModal').classList.remove('hidden')"
+          class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">
+          ＋ 役割を追加
+        </button>
+      </div>
+
+      ${saved ? '<div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-2 rounded-lg">✅ 保存しました</div>' : ''}
+      ${deleted ? '<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2 rounded-lg">🗑 削除しました</div>' : ''}
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">表示名</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">内部値</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">バッジ色</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">順番</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
+              <th class="px-4 py-3"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-50">
+            ${(roles.results as any[]).map(r => {
+              const colorMap: Record<string,string> = {
+                blue:'bg-blue-50 text-blue-700', indigo:'bg-indigo-50 text-indigo-700',
+                orange:'bg-orange-50 text-orange-700', yellow:'bg-yellow-50 text-yellow-700',
+                green:'bg-green-50 text-green-700', red:'bg-red-50 text-red-700',
+                purple:'bg-purple-50 text-purple-700', gray:'bg-gray-100 text-gray-600'
+              }
+              const cls = colorMap[r.color] || 'bg-gray-100 text-gray-600'
+              return `
+              <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3">
+                  <span class="${cls} text-xs px-2 py-0.5 rounded-full font-medium">${r.label}</span>
+                </td>
+                <td class="px-4 py-3 font-mono text-xs text-gray-400">${r.value}</td>
+                <td class="px-4 py-3">
+                  <span class="text-xs ${cls} px-2 py-0.5 rounded">${r.color}</span>
+                </td>
+                <td class="px-4 py-3 text-gray-500 text-xs">${r.sort_order}</td>
+                <td class="px-4 py-3">
+                  ${r.is_active
+                    ? '<span class="text-green-600 text-xs">● 有効</span>'
+                    : '<span class="text-gray-400 text-xs">● 無効</span>'}
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex gap-2">
+                    <button onclick="openEditModal(${r.id},'${r.value}','${r.label}','${r.color}',${r.sort_order},${r.is_active})"
+                      class="text-xs px-2 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded transition">編集</button>
+                    ${r.value !== 'admin' && r.value !== 'front' ? `
+                    <form method="POST" action="/admin/roles/${r.id}/delete" onsubmit="return confirm('「${r.label}」を削除しますか？')">
+                      <button type="submit" class="text-xs px-2 py-1 bg-red-50 text-red-500 hover:bg-red-100 rounded transition">削除</button>
+                    </form>` : '<span class="text-xs text-gray-300 px-2">-</span>'}
+                  </div>
+                </td>
+              </tr>`
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-700">
+        <p class="font-semibold mb-1">💡 役割について</p>
+        <ul class="text-xs space-y-1 text-blue-600">
+          <li>• <strong>担当者（front）</strong>・<strong>管理者（admin）</strong>は削除できません</li>
+          <li>• 追加した役割はユーザー編集画面のプルダウンにすぐ反映されます</li>
+          <li>• 「担当者/上司」はユーザー編集の <strong>上司フラグ</strong> で設定してください</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 追加モーダル -->
+    <div id="addModal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+        <h3 class="font-bold text-gray-800 text-lg mb-4">＋ 役割を追加</h3>
+        <form method="POST" action="/admin/roles" class="space-y-4">
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">表示名 <span class="text-red-500">*</span></label>
+            <input type="text" name="label" required placeholder="例：不動産部"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">内部値（英数字）<span class="text-red-500">*</span></label>
+            <input type="text" name="value" required placeholder="例：realestate" pattern="[a-z0-9_]+"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            <p class="text-xs text-gray-400 mt-1">小文字英数字とアンダースコアのみ</p>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1">バッジ色</label>
+              <select name="color" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="blue">青（blue）</option>
+                <option value="indigo">藍（indigo）</option>
+                <option value="orange">橙（orange）</option>
+                <option value="yellow">黄（yellow）</option>
+                <option value="green">緑（green）</option>
+                <option value="red">赤（red）</option>
+                <option value="purple">紫（purple）</option>
+                <option value="gray">灰（gray）</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1">表示順</label>
+              <input type="number" name="sort_order" value="100" min="0"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="button" onclick="document.getElementById('addModal').classList.add('hidden')"
+              class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition">キャンセル</button>
+            <button type="submit"
+              class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-sm transition">追加する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 編集モーダル -->
+    <div id="editModal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+        <h3 class="font-bold text-gray-800 text-lg mb-4">✏️ 役割を編集</h3>
+        <form id="editForm" method="POST" action="" class="space-y-4">
+          <input type="hidden" name="_method" value="PUT">
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">表示名 <span class="text-red-500">*</span></label>
+            <input type="text" id="editLabel" name="label" required
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">内部値</label>
+            <input type="text" id="editValue" name="value" readonly
+              class="w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-lg text-sm text-gray-400">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1">バッジ色</label>
+              <select id="editColor" name="color" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="blue">青（blue）</option>
+                <option value="indigo">藍（indigo）</option>
+                <option value="orange">橙（orange）</option>
+                <option value="yellow">黄（yellow）</option>
+                <option value="green">緑（green）</option>
+                <option value="red">赤（red）</option>
+                <option value="purple">紫（purple）</option>
+                <option value="gray">灰（gray）</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1">表示順</label>
+              <input type="number" id="editSortOrder" name="sort_order" min="0"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" id="editIsActive" name="is_active" value="1"
+                class="w-4 h-4 text-blue-600 rounded">
+              <span class="text-sm">有効</span>
+            </label>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="button" onclick="document.getElementById('editModal').classList.add('hidden')"
+              class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition">キャンセル</button>
+            <button type="submit"
+              class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-sm transition">更新する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      function openEditModal(id, value, label, color, sortOrder, isActive) {
+        document.getElementById('editForm').action = '/admin/roles/' + id;
+        document.getElementById('editLabel').value = label;
+        document.getElementById('editValue').value = value;
+        document.getElementById('editColor').value = color;
+        document.getElementById('editSortOrder').value = sortOrder;
+        document.getElementById('editIsActive').checked = isActive == 1;
+        document.getElementById('editModal').classList.remove('hidden');
+      }
+    </script>
+  `
+  return c.html(layout('役割マスタ管理', content, user))
+})
+
+// 役割追加
+admin.post('/roles', async (c) => {
+  const db = c.env.DB
+  const body = await c.req.parseBody() as any
+  await db.prepare(
+    'INSERT OR IGNORE INTO roles (value, label, color, sort_order) VALUES (?, ?, ?, ?)'
+  ).bind(body.value, body.label, body.color || 'blue', parseInt(body.sort_order) || 100).run()
+  return c.redirect('/admin/roles?saved=1')
+})
+
+// 役割更新
+admin.post('/roles/:id', async (c) => {
+  const db = c.env.DB
+  const id = c.req.param('id')
+  const body = await c.req.parseBody() as any
+  await db.prepare(
+    'UPDATE roles SET label=?, color=?, sort_order=?, is_active=? WHERE id=?'
+  ).bind(body.label, body.color || 'blue', parseInt(body.sort_order) || 0, body.is_active ? 1 : 0, id).run()
+  return c.redirect('/admin/roles?saved=1')
+})
+
+// 役割削除
+admin.post('/roles/:id/delete', async (c) => {
+  const db = c.env.DB
+  const id = c.req.param('id')
+  // front・adminは削除不可
+  const role = await db.prepare('SELECT value FROM roles WHERE id = ?').bind(id).first() as any
+  if (!role || role.value === 'front' || role.value === 'admin') return c.redirect('/admin/roles')
+  await db.prepare('DELETE FROM roles WHERE id = ?').bind(id).run()
+  return c.redirect('/admin/roles?deleted=1')
 })
 
 export default admin
