@@ -258,14 +258,6 @@ applications.get('/new', async (c) => {
             </div>
           </div>
 
-          <!-- 備考 -->
-          <div>
-            <label class="block text-sm font-semibold text-gray-700 mb-1.5">備考</label>
-            <textarea name="remarks" rows="3"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-              placeholder="備考があれば入力してください"></textarea>
-          </div>
-
           <!-- 添付ファイル -->
           <div class="border border-gray-200 rounded-lg p-4 space-y-3">
             <h3 class="text-sm font-semibold text-gray-700">添付ファイル</h3>
@@ -289,6 +281,14 @@ applications.get('/new', async (c) => {
               <input type="file" name="other2" accept=".pdf,.jpg,.jpeg,.png"
                 class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100">
             </div>
+          </div>
+
+          <!-- 備考 -->
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1.5">備考</label>
+            <textarea name="remarks" rows="3"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              placeholder="備考があれば入力してください"></textarea>
           </div>
         </div>
 
