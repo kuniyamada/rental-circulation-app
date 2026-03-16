@@ -196,7 +196,7 @@ applications.get('/new', async (c) => {
         </div>
       </div>
 
-      <form method="POST" action="/applications" enctype="multipart/form-data" id="appForm">
+      <form method="POST" action="/applications" enctype="multipart/form-data" id="appForm" onsubmit="return checkFeeRequired()">
         <div class="space-y-5">
           <!-- 標題（マンション番号入力→名称表示） -->
           <div>
@@ -294,25 +294,29 @@ applications.get('/new', async (c) => {
           </div>
 
           <!-- 金額 -->
-          <div id="amountFields" class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">手数料（円） <span class="text-red-500">*</span></label>
-              <div class="relative">
-                <input type="number" name="budget_amount" required min="0"
-                  class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="0">
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
+          <div id="amountFields">
+            <p class="text-xs text-gray-500 mb-2">手数料（円）または手数料（％）のどちらか一方を必ず入力してください <span class="text-red-500">*</span></p>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1.5">手数料（円）</label>
+                <div class="relative">
+                  <input type="number" id="budgetAmountInput" name="budget_amount" min="0"
+                    class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="0" oninput="validateFeeFields()">
+                  <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
+                </div>
+              </div>
+              <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1.5">手数料（％）</label>
+                <div class="relative">
+                  <input type="number" id="commissionRateInput" name="commission_rate" min="0" max="100" step="0.1"
+                    class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="0" oninput="validateFeeFields()">
+                  <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
+                </div>
               </div>
             </div>
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">手数料（％）</label>
-              <div class="relative">
-                <input type="number" name="commission_rate" min="0" max="100" step="0.1"
-                  class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="0">
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
-              </div>
-            </div>
+            <p id="feeValidationMsg" class="hidden text-xs text-red-500 mt-1.5">⚠ 手数料（円）または手数料（％）のいずれかを入力してください</p>
           </div>
 
           <!-- 添付ファイル（請求書） -->
@@ -437,6 +441,40 @@ applications.get('/new', async (c) => {
         document.getElementById('motoukeFields').classList.toggle('hidden', val !== 'motouke')
       }
 
+      function validateFeeFields() {
+        const amountFields = document.getElementById('amountFields')
+        if (amountFields.classList.contains('hidden')) return
+        const budget = document.getElementById('budgetAmountInput')?.value
+        const commission = document.getElementById('commissionRateInput')?.value
+        const msg = document.getElementById('feeValidationMsg')
+        const hasValue = (budget !== '' && budget !== null) || (commission !== '' && commission !== null)
+        const budgetEl = document.getElementById('budgetAmountInput')
+        const commissionEl = document.getElementById('commissionRateInput')
+        if (!hasValue) {
+          msg.classList.remove('hidden')
+          budgetEl.classList.add('border-red-400')
+          commissionEl.classList.add('border-red-400')
+        } else {
+          msg.classList.add('hidden')
+          budgetEl.classList.remove('border-red-400')
+          commissionEl.classList.remove('border-red-400')
+        }
+      }
+
+      function checkFeeRequired() {
+        const amountFields = document.getElementById('amountFields')
+        if (amountFields.classList.contains('hidden')) return true
+        const budget = document.getElementById('budgetAmountInput')?.value
+        const commission = document.getElementById('commissionRateInput')?.value
+        const hasValue = (budget !== '' && budget !== null) || (commission !== '' && commission !== null)
+        if (!hasValue) {
+          validateFeeFields()
+          document.getElementById('budgetAmountInput').focus()
+          return false
+        }
+        return true
+      }
+
       async function updateReviewerPreview() {
         const mansionId = document.getElementById('mansionIdInput').value
         const paymentTarget = document.querySelector('input[name="payment_target"]:checked')?.value
@@ -487,6 +525,15 @@ applications.post('/', async (c) => {
 
   const appNumber = generateApplicationNumber()
   const mansionId = body.mansion_id ? parseInt(body.mansion_id) : null
+
+  // 手数料バリデーション（管理組合の場合、円か％どちらか必須）
+  if (body.payment_target !== 'td') {
+    const hasBudget = body.budget_amount !== '' && body.budget_amount != null
+    const hasCommission = body.commission_rate !== '' && body.commission_rate != null
+    if (!hasBudget && !hasCommission) {
+      return c.redirect('/applications/new?error=fee_required')
+    }
+  }
 
   // ファイル保存（R2）
   const fileKeys: Record<string, string> = {}
