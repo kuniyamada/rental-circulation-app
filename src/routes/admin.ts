@@ -436,20 +436,16 @@ admin.get('/mansions', async (c) => {
             <tr>
               <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 w-16">番号</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">マンション名</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">担当フロント</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">組合会計担当者</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
               <th class="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-50">
-            ${(mansions.results as any[]).length === 0 ? '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">マンションが登録されていません</td></tr>' :
+            ${(mansions.results as any[]).length === 0 ? '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400">マンションが登録されていません</td></tr>' :
               (mansions.results as any[]).map(m => `
                 <tr class="hover:bg-gray-50">
                   <td class="px-3 py-3 text-center font-mono text-xs text-gray-400 bg-gray-50">${m.mansion_number ?? '-'}</td>
                   <td class="px-4 py-3 font-medium">${m.name}</td>
-                  <td class="px-4 py-3 text-gray-500">${m.front_name || '-'}</td>
-                  <td class="px-4 py-3 text-gray-500">${m.accounting_name || '-'}</td>
                   <td class="px-4 py-3">${m.is_active ? '<span class="text-green-600 text-xs">● 有効</span>' : '<span class="text-red-400 text-xs">● 無効</span>'}</td>
                   <td class="px-4 py-3"><a href="/admin/mansions/${m.id}/edit" class="text-blue-600 hover:underline text-xs">編集</a></td>
                 </tr>
