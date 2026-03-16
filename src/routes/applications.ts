@@ -830,6 +830,18 @@ applications.get('/:id', async (c) => {
     on_hold: '⏸',
   }
 
+  // タイムライン用ヘルパー
+  const timelineItemClass = (status: string, isCurrent: boolean) => {
+    if (status === 'approved') return { dot: 'bg-green-500 border-green-500', card: 'bg-green-50 border-green-200', text: 'text-green-700' }
+    if (status === 'rejected') return { dot: 'bg-red-500 border-red-500', card: 'bg-red-50 border-red-200', text: 'text-red-700' }
+    if (status === 'on_hold') return { dot: 'bg-yellow-400 border-yellow-400', card: 'bg-yellow-50 border-yellow-200', text: 'text-yellow-700' }
+    if (isCurrent) return { dot: 'bg-orange-400 border-orange-400', card: 'bg-orange-50 border-orange-200', text: 'text-orange-700' }
+    return { dot: 'bg-gray-300 border-gray-300', card: 'bg-gray-50 border-gray-200', text: 'text-gray-400' }
+  }
+  const statusLabel: Record<string, string> = {
+    approved: '承認済', rejected: '否決', on_hold: '保留中', pending: '待機中'
+  }
+
   const isApplicant = app.applicant_id === user.uid
   const isRejected = app.status === 'rejected'
 
@@ -879,30 +891,65 @@ applications.get('/:id', async (c) => {
       </div>
       ` : ''}
 
-      <!-- 回覧フロー -->
+      <!-- 回覧フロー タイムライン -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <h3 class="font-semibold text-gray-800 mb-4">回覧フロー</h3>
-        <div class="space-y-3">
-          <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-            <div class="w-8 h-8 bg-green-500 text-white rounded-full flex items-center justify-center text-xs font-bold">申</div>
-            <div>
-              <p class="text-sm font-semibold">${app.applicant_name}（申請者）</p>
-              <p class="text-xs text-gray-400">${app.created_at?.substring(0,16)}</p>
-            </div>
-            <span class="ml-auto text-green-500 text-lg">✅</span>
-          </div>
-          ${(steps.results as any[]).map(step => `
-            <div class="flex items-start gap-3 p-3 rounded-lg ${step.status === 'pending' && app.current_step === step.step_number ? 'bg-orange-50 border border-orange-200' : 'bg-gray-50'}">
-              <div class="w-8 h-8 ${step.status === 'approved' ? 'bg-green-500' : step.status === 'rejected' ? 'bg-red-500' : step.status === 'on_hold' ? 'bg-yellow-500' : 'bg-gray-300'} text-white rounded-full flex items-center justify-center text-xs font-bold shrink-0">${step.step_number}</div>
-              <div class="flex-1">
-                <p class="text-sm font-semibold">${step.reviewer_name} <span class="text-xs text-gray-400">(${stepLabels[step.step_number] || 'レビュー'})</span></p>
-                ${step.action_comment ? `<p class="text-xs text-gray-600 mt-0.5 bg-white rounded p-2 mt-1">${step.status === 'on_hold' ? '❓ ' : '💬 '}${step.action_comment}</p>` : ''}
-                ${step.hold_answer ? `<p class="text-xs text-blue-600 mt-1 bg-blue-50 rounded p-2">📝 回答: ${step.hold_answer}</p>` : ''}
-                ${step.acted_at ? `<p class="text-xs text-gray-400 mt-0.5">${step.acted_at?.substring(0,16)}</p>` : ''}
+        <h3 class="font-semibold text-gray-800 mb-5">回覧フロー</h3>
+        <div class="relative">
+          <!-- 縦線 -->
+          <div class="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200"></div>
+
+          <div class="space-y-0">
+            <!-- 申請者（回覧開始日） -->
+            <div class="relative flex gap-4 pb-6">
+              <div class="w-8 h-8 rounded-full bg-blue-500 border-2 border-blue-500 text-white flex items-center justify-center text-xs font-bold z-10 shrink-0">申</div>
+              <div class="flex-1 border border-blue-200 bg-blue-50 rounded-lg p-3 ml-1">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span class="text-sm font-semibold text-gray-800">${app.applicant_name}</span>
+                    <span class="ml-2 text-xs text-gray-400">申請者</span>
+                  </div>
+                  <span class="text-xs font-medium bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">申請</span>
+                </div>
+                <div class="flex items-center gap-4 mt-1.5 flex-wrap">
+                  <span class="text-xs text-gray-500">📅 申請日：${app.created_at?.substring(0,16)}</span>
+                  <span class="text-xs text-gray-500">🔄 回覧開始日：${app.circulation_start_date || '-'}</span>
+                </div>
               </div>
-              <span class="text-lg">${stepStatusIcon[step.status] || '⏳'}</span>
             </div>
-          `).join('')}
+
+            <!-- 各承認ステップ -->
+            ${(steps.results as any[]).map((step: any) => {
+              const isCurrent = app.current_step === step.step_number && step.status === 'pending'
+              const c2 = timelineItemClass(step.status, isCurrent)
+              const iconMap: Record<string, string> = { approved: '✅', rejected: '❌', on_hold: '⏸', pending: isCurrent ? '▶' : '○' }
+              const icon = iconMap[step.status] || '○'
+              return `
+            <div class="relative flex gap-4 pb-6">
+              <div class="w-8 h-8 rounded-full ${c2.dot} border-2 text-white flex items-center justify-center text-xs font-bold z-10 shrink-0">${step.step_number}</div>
+              <div class="flex-1 border ${c2.card} rounded-lg p-3 ml-1">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span class="text-sm font-semibold text-gray-800">${step.reviewer_name}</span>
+                    <span class="ml-2 text-xs text-gray-400">${stepLabels[step.step_number] || 'レビュー'}</span>
+                    ${isCurrent ? '<span class="ml-1 text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-medium">承認待ち</span>' : ''}
+                  </div>
+                  <span class="text-xs font-medium px-2 py-0.5 rounded-full ${
+                    step.status === 'approved' ? 'bg-green-100 text-green-700' :
+                    step.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                    step.status === 'on_hold'  ? 'bg-yellow-100 text-yellow-700' :
+                    isCurrent ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'
+                  }">${statusLabel[step.status] || '待機中'}</span>
+                </div>
+                ${step.acted_at ? `
+                <div class="mt-1.5">
+                  <span class="text-xs text-gray-500">🕐 ${step.status === 'approved' ? '承認日時' : step.status === 'rejected' ? '否決日時' : '対応日時'}：<span class="font-medium text-gray-700">${step.acted_at.substring(0,16)}</span></span>
+                </div>` : ''}
+                ${step.action_comment ? `<p class="text-xs text-gray-600 mt-2 bg-white rounded p-2 border border-gray-200">${step.status === 'on_hold' ? '❓ ' : '💬 '}${step.action_comment}</p>` : ''}
+                ${step.hold_answer ? `<p class="text-xs text-blue-600 mt-1.5 bg-blue-50 rounded p-2 border border-blue-100">📝 回答：${step.hold_answer}</p>` : ''}
+              </div>
+            </div>`
+            }).join('')}
+          </div>
         </div>
       </div>
 
