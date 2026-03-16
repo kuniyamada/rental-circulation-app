@@ -87,7 +87,7 @@ app.get('/', async (c) => {
   }
 
   const roleLabel: Record<string, string> = {
-    front: '担当者', manager: '業務管理課', operations: '業務管理課',
+    front: '担当者', front_supervisor: '担当者/上司', manager: '業務管理課', operations: '業務管理課',
     accounting: '会計課', honsha: '本社経理', admin: '管理者',
   }
 
@@ -98,10 +98,12 @@ app.get('/', async (c) => {
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
           ダッシュボード
         </a>
+        ${(['admin','front','front_supervisor'].includes(user.role)) ? `
         <a href="/applications/new" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           新規申請
         </a>
+        ` : ''}
         <a href="/applications" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
           申請一覧・検索
@@ -320,10 +322,12 @@ app.get('/', async (c) => {
           <div class="bg-white rounded-xl shadow-sm border border-gray-100">
             <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h2 class="text-lg font-semibold text-gray-800">自分の申請一覧</h2>
+              ${(['admin','front','front_supervisor'].includes(user.role)) ? `
               <a href="/applications/new" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                 新規申請
               </a>
+              ` : ''}
             </div>
             ${myApps.results.length === 0 ? `
               <div class="px-6 py-12 text-center text-gray-400">
