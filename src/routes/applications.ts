@@ -174,6 +174,27 @@ applications.get('/new', async (c) => {
     'SELECT * FROM mansions WHERE is_active = 1 ORDER BY CAST(mansion_number AS INTEGER)'
   ).all()
 
+  // 回覧先候補取得
+  // 上長候補：operations ロールのアクティブユーザー
+  const supervisorCandidates = await db.prepare(
+    "SELECT id, name FROM users WHERE role = 'operations' AND is_active = 1 ORDER BY name"
+  ).all()
+
+  // 業務管理課：primary スタッフ
+  const opStaff = await db.prepare(
+    'SELECT u.id, u.name FROM operations_staff os JOIN users u ON os.user_id = u.id WHERE os.is_primary = 1 LIMIT 1'
+  ).first() as any
+
+  // 会計課ユーザー
+  const accountingUsers = await db.prepare(
+    "SELECT id, name FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name"
+  ).all()
+
+  // 本社経理ユーザー
+  const honshaUsers = await db.prepare(
+    "SELECT id, name FROM users WHERE role = 'honsha' AND is_active = 1 ORDER BY name"
+  ).all()
+
   const today = new Date().toISOString().substring(0, 10)
 
   const content = `
@@ -233,6 +254,71 @@ applications.get('/new', async (c) => {
               <label class="block text-sm font-semibold text-gray-700 mb-1.5">回覧開始日</label>
               <input type="date" name="circulation_start_date" value="${today}" required
                 class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+          </div>
+
+          <!-- 回覧・承認先 -->
+          <div class="border border-purple-200 bg-purple-50 rounded-lg p-4 space-y-4">
+            <div class="flex items-center gap-2 mb-1">
+              <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/>
+              </svg>
+              <span class="text-sm font-semibold text-purple-700">回覧・承認先</span>
+            </div>
+
+            <!-- Step1: 上長 -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                <span class="inline-flex items-center justify-center w-5 h-5 bg-blue-100 text-blue-700 rounded-full text-xs font-bold mr-1">1</span>
+                回覧・承認先（上長） <span class="text-red-500">*</span>
+              </label>
+              <select name="reviewer_step1" required
+                class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                <option value="">選択してください</option>
+                ${(supervisorCandidates.results as any[]).map((u: any) =>
+                  `<option value="${u.id}">${u.name}</option>`
+                ).join('')}
+              </select>
+            </div>
+
+            <!-- Step2: 業務管理課 -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                <span class="inline-flex items-center justify-center w-5 h-5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold mr-1">2</span>
+                回覧・承認先（業務管理課）
+              </label>
+              <div class="px-3 py-2.5 border border-gray-200 bg-white rounded-lg text-sm text-gray-700">
+                ${opStaff ? opStaff.name : '<span class="text-red-400 italic">未設定（業務管理課担当者を先に設定してください）</span>'}
+              </div>
+              <input type="hidden" name="reviewer_step2" value="${opStaff ? opStaff.id : ''}">
+            </div>
+
+            <!-- Step3: 最終承認 -->
+            <div class="space-y-3">
+              <label class="block text-sm font-medium text-gray-700">
+                <span class="inline-flex items-center justify-center w-5 h-5 bg-green-100 text-green-700 rounded-full text-xs font-bold mr-1">3</span>
+                回覧・承認先（最終） <span class="text-red-500">*</span>
+              </label>
+              <!-- 役割選択 -->
+              <div class="flex gap-4">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="reviewer_step3_role" value="accounting" required
+                    onchange="updateStep3Users()"
+                    class="w-4 h-4 text-purple-600">
+                  <span class="text-sm">会計課</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="reviewer_step3_role" value="honsha"
+                    onchange="updateStep3Users()"
+                    class="w-4 h-4 text-purple-600">
+                  <span class="text-sm">本社経理</span>
+                </label>
+              </div>
+              <!-- 担当者プルダウン -->
+              <select name="reviewer_step3" id="step3UserSelect" required
+                class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                <option value="">先に役割を選択してください</option>
+              </select>
             </div>
           </div>
 
@@ -389,6 +475,24 @@ applications.get('/new', async (c) => {
           name: m.name
         }))
       )};
+
+      // 会計課・本社経理ユーザーをJSに埋め込み
+      const ACCOUNTING_USERS = ${JSON.stringify(
+        (accountingUsers.results as any[]).map((u: any) => ({ id: u.id, name: u.name }))
+      )};
+      const HONSHA_USERS = ${JSON.stringify(
+        (honshaUsers.results as any[]).map((u: any) => ({ id: u.id, name: u.name }))
+      )};
+
+      function updateStep3Users() {
+        const role = document.querySelector('input[name="reviewer_step3_role"]:checked')?.value
+        const sel = document.getElementById('step3UserSelect')
+        const users = role === 'accounting' ? ACCOUNTING_USERS : role === 'honsha' ? HONSHA_USERS : []
+        sel.innerHTML = users.length === 0
+          ? '<option value="">先に役割を選択してください</option>'
+          : '<option value="">担当者を選択してください</option>' +
+            users.map(u => '<option value="' + u.id + '">' + u.name + '</option>').join('')
+      }
 
       function searchMansion(val) {
         const num = parseInt(val);
@@ -582,8 +686,11 @@ applications.post('/', async (c) => {
     ).bind(appId, fk, fileNames[fk], key).run()
   }
 
-  // 回覧ステップ作成
-  await createCirculationSteps(db, appId as number, user.uid, body.payment_target, mansionId)
+  // 回覧ステップ作成（フォームの選択値を優先）
+  const reviewerStep1 = body.reviewer_step1 ? parseInt(body.reviewer_step1) : null
+  const reviewerStep2 = body.reviewer_step2 ? parseInt(body.reviewer_step2) : null
+  const reviewerStep3 = body.reviewer_step3 ? parseInt(body.reviewer_step3) : null
+  await createCirculationSteps(db, appId as number, user.uid, body.payment_target, mansionId, reviewerStep1, reviewerStep2, reviewerStep3)
 
   // 最初の承認者にメール通知
   const firstStep = await db.prepare(
@@ -609,49 +716,63 @@ applications.post('/', async (c) => {
 })
 
 // 回覧ステップ作成関数
-async function createCirculationSteps(db: D1Database, appId: number, applicantId: number, paymentTarget: string, mansionId: number | null) {
-  // Step1: 直属上長
-  const supervisor = await db.prepare(
-    'SELECT supervisor_id FROM users WHERE id = ?'
-  ).bind(applicantId).first() as any
-
-  if (supervisor?.supervisor_id) {
+async function createCirculationSteps(
+  db: D1Database,
+  appId: number,
+  applicantId: number,
+  paymentTarget: string,
+  mansionId: number | null,
+  step1UserId: number | null = null,
+  step2UserId: number | null = null,
+  step3UserId: number | null = null
+) {
+  // Step1: フォーム指定 → なければ直属上長
+  let s1 = step1UserId
+  if (!s1) {
+    const supervisor = await db.prepare(
+      'SELECT supervisor_id FROM users WHERE id = ?'
+    ).bind(applicantId).first() as any
+    s1 = supervisor?.supervisor_id || null
+  }
+  if (s1) {
     await db.prepare(
       'INSERT INTO circulation_steps (application_id, step_number, reviewer_id, status) VALUES (?, 1, ?, "pending")'
-    ).bind(appId, supervisor.supervisor_id).run()
+    ).bind(appId, s1).run()
   }
 
-  // Step2: 業務管理課（担当1名）
-  const opStaff = await db.prepare(
-    'SELECT user_id FROM operations_staff WHERE is_primary = 1 LIMIT 1'
-  ).first() as any
-  if (opStaff) {
+  // Step2: フォーム指定 → なければ業務管理課primary
+  let s2 = step2UserId
+  if (!s2) {
+    const opStaff = await db.prepare(
+      'SELECT user_id FROM operations_staff WHERE is_primary = 1 LIMIT 1'
+    ).first() as any
+    s2 = opStaff?.user_id || null
+  }
+  if (s2) {
     await db.prepare(
       'INSERT INTO circulation_steps (application_id, step_number, reviewer_id, status) VALUES (?, 2, ?, "pending")'
-    ).bind(appId, opStaff.user_id).run()
+    ).bind(appId, s2).run()
   }
 
-  // Step3: 支払先による分岐
-  if (paymentTarget === 'kumiai' && mansionId) {
-    // A) マンション担当会計担当者
-    const mansion = await db.prepare(
-      'SELECT accounting_user_id FROM mansions WHERE id = ?'
-    ).bind(mansionId).first() as any
-    if (mansion?.accounting_user_id) {
-      await db.prepare(
-        'INSERT INTO circulation_steps (application_id, step_number, reviewer_id, status) VALUES (?, 3, ?, "pending")'
-      ).bind(appId, mansion.accounting_user_id).run()
+  // Step3: フォーム指定 → なければ支払先で自動
+  let s3 = step3UserId
+  if (!s3) {
+    if (paymentTarget === 'kumiai' && mansionId) {
+      const mansion = await db.prepare(
+        'SELECT accounting_user_id FROM mansions WHERE id = ?'
+      ).bind(mansionId).first() as any
+      s3 = mansion?.accounting_user_id || null
+    } else {
+      const honsha = await db.prepare(
+        'SELECT user_id FROM honsha_staff LIMIT 1'
+      ).first() as any
+      s3 = honsha?.user_id || null
     }
-  } else {
-    // B) 本社経理
-    const honsha = await db.prepare(
-      'SELECT user_id FROM honsha_staff LIMIT 1'
-    ).first() as any
-    if (honsha) {
-      await db.prepare(
-        'INSERT INTO circulation_steps (application_id, step_number, reviewer_id, status) VALUES (?, 3, ?, "pending")'
-      ).bind(appId, honsha.user_id).run()
-    }
+  }
+  if (s3) {
+    await db.prepare(
+      'INSERT INTO circulation_steps (application_id, step_number, reviewer_id, status) VALUES (?, 3, ?, "pending")'
+    ).bind(appId, s3).run()
   }
 }
 
