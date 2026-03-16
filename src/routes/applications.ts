@@ -780,14 +780,18 @@ applications.post('/', async (c) => {
     const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
     if (smtp) {
       const appUrl = `${new URL(c.req.url).origin}/applications/${appId}`
-      await sendMail(smtp, {
+      const subject = buildMailSubject('review_request', appNumber)
+      const mailOk = await sendMail(smtp, {
         to: firstStep.email,
-        subject: buildMailSubject('review_request', appNumber),
+        subject,
         html: buildMailBody('review_request', { appNumber, title: body.title, applicantName: user.name, appUrl })
       })
       await db.prepare(
-        'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject) VALUES (?, ?, ?, ?, ?)'
-      ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email, buildMailSubject('review_request', appNumber)).run()
+        'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status, error_message) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email, subject,
+        mailOk ? 'sent' : 'failed',
+        mailOk ? null : 'sendMail returned false'
+      ).run()
     }
   }
 

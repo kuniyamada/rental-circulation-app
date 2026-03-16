@@ -1,7 +1,7 @@
 // メール送信ユーティリティ
-// Cloudflare Workers環境ではSMTP直接接続が不可のため
-// MailChannels API（Cloudflare Workers対応の無料メールリレー）を使用
-// Gmail SMTPを送信元として設定
+// nodemailer を使った SMTP 直接送信（nodejs_compat フラグ有効時に動作）
+
+import nodemailer from 'nodemailer'
 
 export interface SmtpConfig {
   host: string
@@ -19,57 +19,30 @@ export interface MailOptions {
   html: string
 }
 
-// MailChannels API経由でメール送信
+// nodemailer 経由で SMTP 送信
 export async function sendMail(config: SmtpConfig, options: MailOptions): Promise<boolean> {
   try {
-    const payload = {
-      personalizations: [
-        {
-          to: [{ email: options.to }],
-        },
-      ],
-      from: {
-        email: config.from_email,
-        name: config.from_name,
-      },
-      subject: options.subject,
-      content: [
-        {
-          type: 'text/html',
-          value: options.html,
-        },
-      ],
-      // Gmail SMTPを送信元として認証（MailChannels DKIM/SPF経由）
-      ...(config.username && config.password
-        ? {
-            mail_settings: {
-              smtp_api: {
-                host: config.host || 'smtp.gmail.com',
-                port: config.port || 587,
-                username: config.username,
-                password: config.password,
-              },
-            },
-          }
-        : {}),
-    }
-
-    const res = await fetch('https://api.mailchannels.net/tx/v1/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+    const transporter = nodemailer.createTransport({
+      host: config.host || 'smtp.gmail.com',
+      port: config.port || 587,
+      secure: config.port === 465,   // 465 の場合は SSL、それ以外は STARTTLS
+      auth: (config.username && config.password)
+        ? { user: config.username, pass: config.password }
+        : undefined,
+      tls: { rejectUnauthorized: false },  // 自己署名証明書も許可
     })
 
-    if (res.status === 202 || res.status === 200) {
-      console.log(`[MAIL] ✅ 送信成功: To=${options.to}, Subject=${options.subject}`)
-      return true
-    } else {
-      const body = await res.text()
-      console.error(`[MAIL] ❌ 送信失敗: status=${res.status}, body=${body}`)
-      return false
-    }
-  } catch (err) {
-    console.error(`[MAIL] ❌ 送信エラー:`, err)
+    const info = await transporter.sendMail({
+      from: `"${config.from_name}" <${config.from_email}>`,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+    })
+
+    console.log(`[MAIL] ✅ 送信成功: To=${options.to}, Subject=${options.subject}, messageId=${info.messageId}`)
+    return true
+  } catch (err: any) {
+    console.error(`[MAIL] ❌ 送信エラー: To=${options.to}, Subject=${options.subject}, Error=${err?.message || err}`)
     return false
   }
 }
@@ -206,7 +179,7 @@ export function buildMailBody(type: string, data: {
     <div style="background:#f9fafb;padding:16px 24px;border-top:1px solid #e5e7eb;">
       <p style="margin:0;font-size:11px;color:#9ca3af;">
         このメールは請求書回覧システムから自動送信されています。返信しないでください。<br>
-        送信元：tokyo.defense.mail@gmail.com
+        送信元：${data.appUrl.split('/applications')[0]}
       </p>
     </div>
   </div>
