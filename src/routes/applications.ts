@@ -247,15 +247,7 @@ applications.get('/new', async (c) => {
                 <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
               </div>
             </div>
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">手数料（%）キックバック</label>
-              <div class="relative">
-                <input type="number" name="commission_rate" min="0" max="100" step="0.1"
-                  class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="0.0">
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
-              </div>
-            </div>
+
           </div>
 
           <!-- 添付ファイル（請求書） -->
@@ -355,7 +347,7 @@ applications.get('/new', async (c) => {
         document.getElementById('kumiaiFields').classList.toggle('hidden', val !== 'kumiai')
         document.getElementById('tdFields').classList.toggle('hidden', val !== 'td')
         if (val !== 'td') document.getElementById('motoukeFields').classList.add('hidden')
-        // 会社（TD）選択時は予算額・手数料を非表示
+        // 会社（TD）選択時は予算額を非表示
         document.getElementById('amountFields').classList.toggle('hidden', val === 'td')
         // TD選択時はrequiredを解除、それ以外は必須に
         const budgetInput = document.querySelector('input[name="budget_amount"]')
@@ -417,7 +409,7 @@ applications.post('/', async (c) => {
     body.td_type || null,
     body.kumiai_amount ? parseInt(body.kumiai_amount) : null,
     parseInt(body.budget_amount) || 0,
-    body.commission_rate ? parseFloat(body.commission_rate) : null,
+    null,
     body.remarks || null
   ).run()
 
@@ -571,7 +563,7 @@ applications.get('/:id', async (c) => {
           <div><span class="text-gray-400">支払先</span><p class="font-medium mt-0.5">${paymentLabel(app.payment_target, app.td_type)}</p></div>
           ${app.account_item ? `<div><span class="text-gray-400">勘定科目</span><p class="font-medium mt-0.5">${app.account_item}</p></div>` : ''}
           <div><span class="text-gray-400">予算額</span><p class="font-medium mt-0.5">${Number(app.budget_amount).toLocaleString()}円</p></div>
-          ${app.commission_rate ? `<div><span class="text-gray-400">手数料</span><p class="font-medium mt-0.5">${app.commission_rate}%</p></div>` : ''}
+
           ${app.kumiai_amount ? `<div><span class="text-gray-400">組合請求金額</span><p class="font-medium mt-0.5">${Number(app.kumiai_amount).toLocaleString()}円</p></div>` : ''}
           ${app.remarks ? `<div class="col-span-2"><span class="text-gray-400">備考</span><p class="font-medium mt-0.5">${app.remarks}</p></div>` : ''}
         </div>
@@ -702,7 +694,7 @@ applications.get('/:id/review/:stepId', async (c) => {
           <div><span class="text-gray-400">支払先</span><p class="font-medium">${paymentLabel(app.payment_target, app.td_type)}</p></div>
           ${app.account_item ? `<div><span class="text-gray-400">勘定科目</span><p class="font-medium">${app.account_item}</p></div>` : ''}
           <div><span class="text-gray-400">予算額</span><p class="font-medium">${Number(app.budget_amount).toLocaleString()}円</p></div>
-          ${app.commission_rate ? `<div><span class="text-gray-400">手数料</span><p class="font-medium">${app.commission_rate}%</p></div>` : ''}
+
           ${app.kumiai_amount ? `<div><span class="text-gray-400">組合請求金額</span><p class="font-medium">${Number(app.kumiai_amount).toLocaleString()}円</p></div>` : ''}
           ${app.remarks ? `<div class="col-span-2"><span class="text-gray-400">備考</span><p class="font-medium">${app.remarks}</p></div>` : ''}
         </div>
@@ -890,7 +882,7 @@ applications.post('/:id/resubmit', async (c) => {
   `).bind(
     newNumber, orig.title, orig.mansion_id, orig.applicant_id, orig.circulation_start_date,
     orig.payment_target, orig.account_item, orig.td_type, orig.kumiai_amount, orig.budget_amount,
-    orig.commission_rate, orig.remarks, (orig.resubmit_count || 0) + 1, orig.id
+    null, orig.remarks, (orig.resubmit_count || 0) + 1, orig.id
   ).run()
 
   const newId = result.meta.last_row_id
