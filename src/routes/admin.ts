@@ -772,19 +772,21 @@ admin.post('/smtp', async (c) => {
   const username = body.username || 'tokyo.defense.mail@gmail.com'
   const from_email = body.from_email || username
   const from_name = body.from_name || '請求書回覧システム（東京ディフェンス）'
+  // アプリパスワードのスペースを自動除去（例: "abcd efgh ijkl mnop" → "abcdefghijklmnop"）
+  const cleanPassword = body.password ? (body.password as string).replace(/\s/g, '') : null
 
   const existing = await db.prepare('SELECT id FROM smtp_settings LIMIT 1').first()
 
   if (existing) {
     let sql = 'UPDATE smtp_settings SET host=?, port=?, username=?, from_email=?, from_name=?, use_tls=?, updated_at=datetime("now")'
     const params: any[] = [host, port, username, from_email, from_name, use_tls]
-    if (body.password) { sql += ', password=?'; params.push(body.password) }
+    if (cleanPassword) { sql += ', password=?'; params.push(cleanPassword) }
     sql += ' WHERE id=?'; params.push((existing as any).id)
     await db.prepare(sql).bind(...params).run()
   } else {
     await db.prepare(
       'INSERT INTO smtp_settings (host, port, username, password, from_email, from_name, use_tls) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(host, port, username, body.password || null, from_email, from_name, use_tls).run()
+    ).bind(host, port, username, cleanPassword, from_email, from_name, use_tls).run()
   }
   return c.redirect('/admin/smtp?saved=1')
 })
