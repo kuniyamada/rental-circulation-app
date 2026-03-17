@@ -516,6 +516,14 @@ applications.get('/new', async (c) => {
     </div>
 
     <script>
+      // ページ読み込み時に手数料フィールドのrequiredを除去（ブラウザネイティブバリデーション無効化）
+      document.addEventListener('DOMContentLoaded', function() {
+        const budgetEl = document.getElementById('budgetAmountInput')
+        const commissionEl = document.getElementById('commissionRateInput')
+        if (budgetEl) budgetEl.required = false
+        if (commissionEl) commissionEl.required = false
+      })
+
       // マンションデータをJSに埋め込み
       const MANSIONS = ${JSON.stringify(
         (mansions.results as any[]).map((m: any) => ({
@@ -602,9 +610,9 @@ applications.get('/new', async (c) => {
         if (val !== 'td') document.getElementById('motoukeFields').classList.add('hidden')
         // 会社（TD）選択時は手数料を非表示
         document.getElementById('amountFields').classList.toggle('hidden', val === 'td')
-        // TD選択時はrequiredを解除、それ以外は必須に
+        // TD選択時はrequiredを完全解除（手数料バリデーションはcheckFeeRequired()で行う）
         const budgetInput = document.querySelector('input[name="budget_amount"]')
-        if (budgetInput) budgetInput.required = (val !== 'td')
+        if (budgetInput) budgetInput.required = false
         updateReviewerPreview()
       }
       function toggleMotouke() {
@@ -618,9 +626,14 @@ applications.get('/new', async (c) => {
         const budget = document.getElementById('budgetAmountInput')?.value
         const commission = document.getElementById('commissionRateInput')?.value
         const msg = document.getElementById('feeValidationMsg')
-        const hasValue = (budget !== '' && budget !== null) || (commission !== '' && commission !== null)
+        // どちらか一方でも値があればOK（0も有効な値として扱う）
+        const hasValue = (budget !== '' && budget !== null && budget !== undefined) ||
+                         (commission !== '' && commission !== null && commission !== undefined)
         const budgetEl = document.getElementById('budgetAmountInput')
         const commissionEl = document.getElementById('commissionRateInput')
+        // requiredを完全に外す（ブラウザネイティブバリデーションを無効化）
+        budgetEl.required = false
+        commissionEl.required = false
         if (!hasValue) {
           msg.classList.remove('hidden')
           budgetEl.classList.add('border-red-400')
@@ -637,7 +650,9 @@ applications.get('/new', async (c) => {
         if (amountFields.classList.contains('hidden')) return true
         const budget = document.getElementById('budgetAmountInput')?.value
         const commission = document.getElementById('commissionRateInput')?.value
-        const hasValue = (budget !== '' && budget !== null) || (commission !== '' && commission !== null)
+        // どちらか一方でも値があればOK（0も有効な値）
+        const hasValue = (budget !== '' && budget !== null && budget !== undefined) ||
+                         (commission !== '' && commission !== null && commission !== undefined)
         if (!hasValue) {
           validateFeeFields()
           document.getElementById('budgetAmountInput').focus()
