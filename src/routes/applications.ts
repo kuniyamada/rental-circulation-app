@@ -53,7 +53,25 @@ async function sendNotification(
     if (lwConfig && recipient.lineworks_user_id) {
       const config = rowToConfig(lwConfig)
       const message = buildLineWorksMessage(type, data)
-      await sendLineWorksMessage(config, recipient.lineworks_user_id, message)
+      const lwResult = await sendLineWorksMessage(config, recipient.lineworks_user_id, message,
+        // Refresh Token でトークンが更新された場合に DB を更新するコールバック
+        async (tokenData) => {
+          const expiresAt = Math.floor(Date.now() / 1000) + Number(tokenData.expires_in || 86400)
+          await db.prepare(`
+            UPDATE lineworks_config
+            SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=datetime("now")
+            WHERE is_active=1
+          `).bind(
+            tokenData.access_token,
+            tokenData.refresh_token || config.refreshToken || null,
+            expiresAt
+          ).run()
+          console.log('[LW] DBのアクセストークンを更新しました')
+        }
+      )
+      if (lwResult !== true) {
+        console.error(`[LW] 通知失敗 type=${type} userId=${recipient.lineworks_user_id}: ${lwResult}`)
+      }
     }
   }
 }

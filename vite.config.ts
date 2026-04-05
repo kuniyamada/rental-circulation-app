@@ -10,5 +10,12 @@ export default defineConfig({
       adapter,
       entry: 'src/index.tsx'
     })
-  ]
+  ],
+  build: {
+    rollupOptions: {
+      // child_process は sendmail トランスポートでのみ使用されるため外部化
+      // SMTP トランスポート使用時は実際には呼ばれない
+      external: ['child_process'],
+    }
+  }
 })

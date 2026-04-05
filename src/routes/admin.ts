@@ -151,6 +151,13 @@ admin.get('/users', async (c) => {
                       <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                       編集
                     </a>
+                    ${hasLw ? `
+                    <button type="button" onclick="lwTest(${u.id}, '${u.name.replace(/'/g, "\\'")}')"
+                      class="flex items-center gap-1 text-green-600 hover:text-green-800 text-xs font-medium px-2 py-1 bg-green-50 hover:bg-green-100 rounded transition whitespace-nowrap">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                      LWテスト
+                    </button>
+                    ` : ''}
                     ${u.employee_number !== 'admin' ? `
                     <button type="button" onclick="deleteUser(${u.id}, '${u.name.replace(/'/g, "\\'")}')"
                       class="flex items-center gap-1 text-red-500 hover:text-red-700 text-xs font-medium px-2 py-1 bg-red-50 hover:bg-red-100 rounded transition whitespace-nowrap">
@@ -191,6 +198,31 @@ admin.get('/users', async (c) => {
     <!-- 削除用隠しフォーム -->
     <form id="deleteForm" method="POST" action="" class="hidden"></form>
 
+    <!-- LINE WORKS テスト送信モーダル -->
+    <div id="lwTestModal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-xl" style="color:#00B900;">●</div>
+          <div>
+            <h3 class="font-bold text-gray-800 text-base">LINE WORKS テスト送信</h3>
+            <p class="text-xs text-gray-500" id="lwTestTargetName"></p>
+          </div>
+        </div>
+        <!-- スピナー -->
+        <div id="lwTestSpinner" class="flex flex-col items-center py-4 gap-2">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+          <p class="text-sm text-gray-500">送信中...</p>
+        </div>
+        <!-- 結果 -->
+        <p id="lwTestStatus" class="hidden"></p>
+        <p id="lwTestMessage" class="text-sm text-gray-600 text-center mt-2 min-h-[1.5rem]"></p>
+        <!-- 閉じるボタン -->
+        <div id="lwTestCloseBtn" class="hidden mt-5">
+          <button onclick="closeLwTestModal()" class="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition">閉じる</button>
+        </div>
+      </div>
+    </div>
+
     <script>
       function deleteUser(userId, userName) {
         document.getElementById('deleteTargetName').textContent = '【' + userName + '】';
@@ -206,6 +238,52 @@ admin.get('/users', async (c) => {
       document.getElementById('deleteModal').addEventListener('click', function(e) {
         if (e.target === this) closeDeleteModal();
       });
+      document.getElementById('lwTestModal').addEventListener('click', function(e) {
+        if (e.target === this) closeLwTestModal();
+      });
+
+      // LINE WORKS テスト送信
+      async function lwTest(userId, userName) {
+        const modal = document.getElementById('lwTestModal');
+        const nameEl = document.getElementById('lwTestTargetName');
+        const statusEl = document.getElementById('lwTestStatus');
+        const msgEl = document.getElementById('lwTestMessage');
+
+        nameEl.textContent = userName + ' さん';
+        statusEl.className = 'hidden';
+        msgEl.textContent = '';
+        document.getElementById('lwTestSpinner').classList.remove('hidden');
+        document.getElementById('lwTestCloseBtn').classList.add('hidden');
+        modal.classList.remove('hidden');
+
+        try {
+          const res = await fetch('/admin/users/' + userId + '/lw-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const data = await res.json();
+          document.getElementById('lwTestSpinner').classList.add('hidden');
+          document.getElementById('lwTestCloseBtn').classList.remove('hidden');
+          if (data.ok) {
+            statusEl.textContent = '✅ 送信成功';
+            statusEl.className = 'text-center text-green-600 font-semibold text-base';
+            msgEl.textContent = data.message || '送信しました';
+          } else {
+            statusEl.textContent = '❌ 送信失敗';
+            statusEl.className = 'text-center text-red-600 font-semibold text-base';
+            msgEl.textContent = data.error || '不明なエラー';
+          }
+        } catch(e) {
+          document.getElementById('lwTestSpinner').classList.add('hidden');
+          document.getElementById('lwTestCloseBtn').classList.remove('hidden');
+          statusEl.textContent = '❌ 通信エラー';
+          statusEl.className = 'text-center text-red-600 font-semibold text-base';
+          msgEl.textContent = String(e);
+        }
+      }
+      function closeLwTestModal() {
+        document.getElementById('lwTestModal').classList.add('hidden');
+      }
 
       // 通知トグル: メール or LINE WORKS を即時保存
       async function toggleNotify(userId, type, btn) {
@@ -318,6 +396,53 @@ admin.post('/users/:id/notify', async (c) => {
     .bind(newMethod, id).run()
 
   return c.json({ ok: true, notify_method: newMethod })
+})
+
+// LINE WORKS テスト送信 AJAX API（ユーザー管理画面から）
+admin.post('/users/:id/lw-test', async (c) => {
+  const db = c.env.DB
+  const id = c.req.param('id')
+
+  // 対象ユーザーを取得
+  const target = await db.prepare(
+    'SELECT id, name, lineworks_user_id FROM users WHERE id = ?'
+  ).bind(id).first() as any
+  if (!target) return c.json({ ok: false, error: 'ユーザーが見つかりません' }, 404)
+  if (!target.lineworks_user_id) return c.json({ ok: false, error: 'LINE WORKS IDが未設定です' })
+
+  // LINE WORKS設定を取得
+  const lwConfig = await db.prepare(
+    'SELECT * FROM lineworks_config WHERE is_active = 1 LIMIT 1'
+  ).first() as any
+  if (!lwConfig) return c.json({ ok: false, error: 'LINE WORKS設定が未登録です' })
+
+  try {
+    const { sendLineWorksMessage, rowToConfig } = await import('../lib/lineworks')
+    const config = rowToConfig(lwConfig)
+
+    // アクセストークン未設定チェック
+    const now = Math.floor(Date.now() / 1000)
+    if (!config.accessToken && !config.refreshToken) {
+      return c.json({
+        ok: false,
+        error: 'LINE WORKSアクセストークンが設定されていません。管理画面の「LINE WORKS設定」→「トークン設定」からアクセストークンを登録してください。',
+        needsToken: true
+      })
+    }
+
+    const msg = {
+      type: 'text' as const,
+      text: `【テスト通知】\n宛先: ${target.name} さん\nこのメッセージはユーザー管理画面から送信されたテストです。\nLINE WORKS通知は正常に動作しています。`,
+    }
+    const result = await sendLineWorksMessage(config, target.lineworks_user_id, msg)
+    if (result === true) {
+      return c.json({ ok: true, message: `${target.name} さんへ送信しました` })
+    } else {
+      return c.json({ ok: false, error: result })
+    }
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message || '不明なエラー' })
+  }
 })
 
 // ユーザー一覧 CSV出力
@@ -1766,7 +1891,144 @@ admin.get('/lineworks', async (c) => {
           </div>
         ` : '<p class="text-sm text-gray-400">設定が登録されていません。上のフォームから登録してください。</p>'}
       </div>
+
+      <!-- アクセストークン設定 -->
+      ${config ? `
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-2xl">
+        <h3 class="text-base font-semibold text-gray-800 mb-1">アクセストークン設定</h3>
+        <p class="text-xs text-gray-500 mb-4">
+          LINE WORKS通知を送信するにはアクセストークンが必要です。<br>
+          LINE WORKS Developer Consoleで取得したアクセストークン（または以下のcurlコマンドで取得）を登録してください。
+        </p>
+
+        <!-- トークン現在の状態 -->
+        <div class="mb-4 p-3 rounded-lg text-sm ${
+          config.access_token && config.token_expires_at && (config.token_expires_at > Math.floor(Date.now()/1000))
+            ? 'bg-green-50 border border-green-200'
+            : config.refresh_token
+            ? 'bg-yellow-50 border border-yellow-200'
+            : 'bg-red-50 border border-red-200'
+        }">
+          ${config.access_token && config.token_expires_at && (config.token_expires_at > Math.floor(Date.now()/1000))
+            ? `<span class="text-green-700 font-semibold">✅ アクセストークン有効</span>
+               <span class="text-green-600 ml-2 text-xs">（有効期限: ${new Date((config.token_expires_at || 0) * 1000).toLocaleString('ja-JP', {timeZone:'Asia/Tokyo'})}）</span>`
+            : config.refresh_token
+            ? `<span class="text-yellow-700 font-semibold">⚠️ アクセストークン期限切れ</span>
+               <span class="text-yellow-600 ml-2 text-xs">（Refresh Tokenで更新可能）</span>`
+            : '<span class="text-red-700 font-semibold">❌ アクセストークン未設定</span>'}
+        </div>
+
+        <!-- Refresh Token 更新ボタン -->
+        ${config.refresh_token ? `
+        <div class="mb-4">
+          <button onclick="refreshToken()" class="bg-[#396999] hover:bg-[#2E5580] text-white font-semibold px-4 py-2 rounded-lg text-sm transition">
+            🔄 Refresh Tokenでトークンを更新
+          </button>
+          <span id="refresh-status" class="ml-3 text-sm text-gray-500"></span>
+        </div>
+        ` : ''}
+
+        <!-- アクセストークン手動設定フォーム -->
+        <div class="border-t pt-4">
+          <h4 class="text-sm font-semibold text-gray-700 mb-3">トークンを手動で登録</h4>
+          <div class="bg-gray-50 rounded-lg p-3 mb-4">
+            <p class="text-xs text-gray-600 mb-2 font-semibold">取得用curlコマンド（ターミナルで実行）：</p>
+            <pre class="text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-all">JWT="eyJ..." # JWTを事前に生成してセット
+curl -X POST https://auth.worksmobile.com/oauth2/v2.0/token \\
+  -d "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \\
+  -d "assertion=$JWT" \\
+  -d "client_id=${config.client_id}" \\
+  -d "client_secret=${config.client_secret}" \\
+  -d "scope=bot"</pre>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs font-semibold text-gray-700 mb-1">Access Token <span class="text-red-500">*</span></label>
+              <textarea id="manual-access-token" rows="3" placeholder="kr1AAABFNKyxc7xs..."
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-[#396999] outline-none"></textarea>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-700 mb-1">Refresh Token（任意）</label>
+              <input type="text" id="manual-refresh-token" placeholder="kr1AAAAVq8kTe..."
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-[#396999] outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-700 mb-1">有効期間（秒）</label>
+              <input type="number" id="manual-expires-in" value="86400" placeholder="86400"
+                class="w-48 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+              <span class="text-xs text-gray-500 ml-2">（86400 = 24時間、3600 = 1時間）</span>
+            </div>
+            <button onclick="saveToken()" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition">
+              トークンを保存
+            </button>
+            <span id="save-token-status" class="ml-3 text-sm"></span>
+          </div>
+        </div>
+      </div>
+      ` : ''}
     </div>
+
+    <script>
+    async function refreshToken() {
+      const btn = event.target
+      const status = document.getElementById('refresh-status')
+      btn.disabled = true
+      status.textContent = '更新中...'
+      status.className = 'ml-3 text-sm text-gray-500'
+      try {
+        const res = await fetch('/admin/lineworks/refresh-token', { method: 'POST', headers: {'Content-Type':'application/json'} })
+        const data = await res.json()
+        if (data.ok) {
+          status.textContent = '✅ 更新成功'
+          status.className = 'ml-3 text-sm text-green-600'
+          setTimeout(() => location.reload(), 1500)
+        } else {
+          status.textContent = '❌ ' + data.error
+          status.className = 'ml-3 text-sm text-red-600'
+          btn.disabled = false
+        }
+      } catch(e) {
+        status.textContent = '❌ 通信エラー'
+        status.className = 'ml-3 text-sm text-red-600'
+        btn.disabled = false
+      }
+    }
+
+    async function saveToken() {
+      const accessToken = document.getElementById('manual-access-token').value.trim()
+      const refreshToken = document.getElementById('manual-refresh-token').value.trim()
+      const expiresIn = parseInt(document.getElementById('manual-expires-in').value) || 86400
+      const status = document.getElementById('save-token-status')
+
+      if (!accessToken) {
+        status.textContent = '❌ Access Tokenを入力してください'
+        status.className = 'ml-3 text-sm text-red-600'
+        return
+      }
+
+      status.textContent = '保存中...'
+      status.className = 'ml-3 text-sm text-gray-500'
+      try {
+        const res = await fetch('/admin/lineworks/set-token', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ access_token: accessToken, refresh_token: refreshToken || undefined, expires_in: expiresIn })
+        })
+        const data = await res.json()
+        if (data.ok) {
+          status.textContent = '✅ 保存しました'
+          status.className = 'ml-3 text-sm text-green-600'
+          setTimeout(() => location.reload(), 1500)
+        } else {
+          status.textContent = '❌ ' + data.error
+          status.className = 'ml-3 text-sm text-red-600'
+        }
+      } catch(e) {
+        status.textContent = '❌ 通信エラー'
+        status.className = 'ml-3 text-sm text-red-600'
+      }
+    }
+    </script>
   `
   return c.html((await import('./layout')).layout('LINE WORKS設定', content, user))
 })
@@ -1789,6 +2051,80 @@ admin.post('/lineworks', async (c) => {
   }
 
   return c.redirect('/admin/lineworks?saved=1')
+})
+
+// LINE WORKS アクセストークン手動設定 API
+// Cloudflare Workers では RSA 署名が制限されるため、
+// 事前に取得したアクセストークンを直接登録する
+admin.post('/lineworks/set-token', async (c) => {
+  const db = c.env.DB
+  const body = await c.req.json() as {
+    access_token?: string
+    refresh_token?: string
+    expires_in?: number
+  }
+
+  if (!body.access_token) {
+    return c.json({ ok: false, error: 'access_token は必須です' }, 400)
+  }
+
+  const existing = await db.prepare('SELECT id FROM lineworks_config LIMIT 1').first() as any
+  if (!existing) {
+    return c.json({ ok: false, error: 'LINE WORKS設定が登録されていません' }, 404)
+  }
+
+  const expiresAt = body.expires_in
+    ? Math.floor(Date.now() / 1000) + Number(body.expires_in)
+    : Math.floor(Date.now() / 1000) + 86400 // デフォルト24時間
+
+  await db.prepare(`
+    UPDATE lineworks_config
+    SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=datetime("now")
+    WHERE id=?
+  `).bind(
+    body.access_token,
+    body.refresh_token || null,
+    expiresAt,
+    existing.id
+  ).run()
+
+  return c.json({ ok: true, message: 'アクセストークンを保存しました', expires_at: expiresAt })
+})
+
+// LINE WORKS Refresh Token でアクセストークン更新 API
+admin.post('/lineworks/refresh-token', async (c) => {
+  const db = c.env.DB
+  const config = await db.prepare('SELECT * FROM lineworks_config WHERE is_active = 1 LIMIT 1').first() as any
+
+  if (!config) {
+    return c.json({ ok: false, error: 'LINE WORKS設定が未登録です' }, 404)
+  }
+
+  if (!config.refresh_token) {
+    return c.json({ ok: false, error: 'Refresh Tokenが設定されていません。先にアクセストークンを手動設定してください。', needsToken: true })
+  }
+
+  try {
+    const { refreshAccessToken } = await import('../lib/lineworks')
+    const tokenData = await refreshAccessToken(config.client_id, config.client_secret, config.refresh_token)
+
+    const expiresAt = Math.floor(Date.now() / 1000) + Number(tokenData.expires_in || 86400)
+
+    await db.prepare(`
+      UPDATE lineworks_config
+      SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=datetime("now")
+      WHERE id=?
+    `).bind(
+      tokenData.access_token,
+      tokenData.refresh_token || config.refresh_token, // 新しいrefresh_tokenがあれば更新
+      expiresAt,
+      config.id
+    ).run()
+
+    return c.json({ ok: true, message: 'アクセストークンを更新しました', expires_at: expiresAt })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message || '更新に失敗しました' })
+  }
 })
 
 // LINE WORKS テスト送信
@@ -1817,8 +2153,9 @@ admin.get('/lineworks/test', async (c) => {
       type: 'text' as const,
       text: `【テスト通知】\n請求書回覧システムからのテストメッセージです。\n送信日時: ${new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'})}\n送信者: ${user.name}`,
     }
-    const ok = await sendLineWorksMessage(lwConfig, adminUser.lineworks_user_id, msg)
-    const errParam = ok ? '' : '&detail=send_failed'
+    const result = await sendLineWorksMessage(lwConfig, adminUser.lineworks_user_id, msg)
+    const ok = result === true
+    const errParam = ok ? '' : `&detail=${encodeURIComponent(String(result).slice(0, 100))}`
     return c.redirect(`/admin/lineworks?test=${ok ? 'ok' : 'fail'}${errParam}`)
   } catch (e: any) {
     console.error('[LW Test]', e?.message || e)
