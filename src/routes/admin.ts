@@ -16,6 +16,12 @@ admin.use('*', async (c, next) => {
   await next()
 })
 
+// /admin トップ → /admin/users へリダイレクト
+admin.get('/', (c) => c.redirect('/admin/users'))
+
+// /admin/settings → /admin/smtp へリダイレクト（後方互換）
+admin.get('/settings', (c) => c.redirect('/admin/smtp'))
+
 // ユーザー一覧
 admin.get('/users', async (c) => {
   const user = (c as any).get('user')

@@ -289,6 +289,11 @@ applications.get('/new', async (c) => {
     "SELECT id, name FROM users WHERE role = 'honsha' AND is_active = 1 ORDER BY name"
   ).all()
 
+  // 本社経理デフォルト：山崎 修（employee_number=049）
+  const defaultHonshaUser = await db.prepare(
+    "SELECT id FROM users WHERE employee_number = '049' AND is_active = 1 LIMIT 1"
+  ).first() as any
+
   const today = new Date().toISOString().substring(0, 10)
 
   const content = `
@@ -645,6 +650,7 @@ applications.get('/new', async (c) => {
       const HONSHA_USERS = ${JSON.stringify(
         (honshaUsers.results as any[]).map((u: any) => ({ id: u.id, name: u.name }))
       )};
+      const DEFAULT_HONSHA_USER_ID = ${defaultHonshaUser ? defaultHonshaUser.id : 'null'};
 
       function updateStep3Users() {
         const role = document.querySelector('input[name="reviewer_step3_role"]:checked')?.value
@@ -654,9 +660,13 @@ applications.get('/new', async (c) => {
           ? '<option value="">先に役割を選択してください</option>'
           : '<option value="">担当者を選択してください</option>' +
             users.map(u => '<option value="' + u.id + '">' + u.name + '</option>').join('')
-        // 本社経理を選択した場合、デフォルトで最初のユーザー（山崎 修）を自動選択
+        // 本社経理を選択した場合、デフォルトで山崎 修を自動選択
         if (role === 'honsha' && users.length > 0) {
-          sel.value = String(users[0].id)
+          if (DEFAULT_HONSHA_USER_ID && users.some(u => u.id === DEFAULT_HONSHA_USER_ID)) {
+            sel.value = String(DEFAULT_HONSHA_USER_ID)
+          } else {
+            sel.value = String(users[0].id)
+          }
         }
       }
 
