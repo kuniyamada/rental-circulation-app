@@ -29,7 +29,7 @@ export async function sendMail(config: SmtpConfig, options: MailOptions): Promis
       auth: (config.username && config.password)
         ? { user: config.username, pass: config.password }
         : undefined,
-      tls: { rejectUnauthorized: false },  // 自己署名証明書も許可
+      // Cloudflare Workers の nodejs_compat では tls オプション不要
     })
 
     const info = await transporter.sendMail({
@@ -59,7 +59,7 @@ export function buildInboxNotificationBody(data: {
   isReminder: boolean
   remindCount: number
 }): string {
-  const headerBg = data.isReminder ? '#d97706' : '#1a56db'
+  const headerBg = data.isReminder ? '#d97706' : '#396999'
   const headerLabel = data.isReminder
     ? `⚠️ リマインド（${data.remindCount}回目）`
     : '📥 請求書受付のお知らせ'
@@ -114,7 +114,7 @@ export function buildInboxNotificationBody(data: {
 </html>`
 }
 
-export function buildMailSubject(type: string, appNumber: string): string {
+export function buildMailSubject(type: string, appNumber: string, extra?: string): string {
   const subjects: Record<string, string> = {
     review_request: `【回覧依頼】${appNumber} - 請求書の確認をお願いします`,
     rejected:       `【差し戻し】${appNumber} - 請求書が差し戻されました`,
@@ -122,6 +122,8 @@ export function buildMailSubject(type: string, appNumber: string): string {
     answered:       `【保留回答】${appNumber} - 保留質問への回答があります`,
     completed:      `【承認完了】${appNumber} - 請求書の回覧が完了しました`,
     resubmitted:    `【再提出】${appNumber} - 請求書が再提出されました`,
+    returned:       `【差し戻し】${appNumber} - ${extra || '請求書が差し戻されました。修正の上、再申請してください'}`,
+    reapplied:      `【差し戻し再申請】${appNumber} - 差し戻し後の再申請が届きました`,
   }
   return subjects[type] || `【通知】${appNumber}`
 }
@@ -131,6 +133,10 @@ export function buildMailBody(type: string, data: {
   title: string
   applicantName: string
   comment?: string
+  returnedReason?: string
+  reapplyReason?: string
+  returnedFromStep?: number
+  returnedByName?: string
   appUrl: string
 }): string {
   const messages: Record<string, string> = {
@@ -140,6 +146,23 @@ export function buildMailBody(type: string, data: {
     answered:       `<p>保留質問への回答がありました。</p>${data.comment ? `<p style="background:#f0fff4;border-left:4px solid #38a169;padding:8px 12px;margin:8px 0;"><strong>回答：</strong>${data.comment}</p>` : ''}`,
     completed:      `<p>下記の請求書の回覧が<strong style="color:#38a169;">完了</strong>しました。</p>`,
     resubmitted:    `<p>差し戻された請求書が再提出されました。</p>`,
+    returned: `
+      <p>下記の申請が<strong style="color:#dc2626;">差し戻し</strong>されました。</p>
+      <p>差し戻し理由をご確認いただき、修正の上、再申請をお願いします。</p>
+      ${data.returnedByName ? `<p style="background:#fff3f3;border-left:4px solid #dc2626;padding:8px 12px;margin:8px 0;font-size:13px;">
+        <strong>差し戻した担当者：</strong>ステップ${data.returnedFromStep}（${data.returnedByName}）
+      </p>` : ''}
+      ${data.returnedReason ? `<p style="background:#fff3f3;border-left:4px solid #dc2626;padding:8px 12px;margin:8px 0;font-size:13px;">
+        <strong>差し戻し理由：</strong><br>${data.returnedReason}
+      </p>` : ''}`,
+    reapplied: `
+      <p>差し戻し後の<strong style="color:#7c3aed;">再申請</strong>が届きました。内容をご確認の上、承認をお願いします。</p>
+      ${data.returnedReason ? `<p style="background:#fff3f3;border-left:4px solid #dc2626;padding:8px 12px;margin:8px 0;font-size:13px;">
+        <strong>差し戻し理由（参考）：</strong><br>${data.returnedReason}
+      </p>` : ''}
+      ${data.reapplyReason ? `<p style="background:#f5f3ff;border-left:4px solid #7c3aed;padding:8px 12px;margin:8px 0;font-size:13px;">
+        <strong>再申請理由・修正内容：</strong><br>${data.reapplyReason}
+      </p>` : ''}`,
   }
 
   return `
@@ -149,7 +172,7 @@ export function buildMailBody(type: string, data: {
 <body style="font-family:sans-serif;color:#333;margin:0;padding:0;background:#f5f5f5;">
   <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
     <!-- ヘッダー -->
-    <div style="background:#1a56db;padding:20px 24px;">
+    <div style="background:#396999;padding:20px 24px;">
       <h2 style="color:#fff;margin:0;font-size:18px;">📄 請求書回覧システム</h2>
       <p style="color:#bfdbfe;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社</p>
     </div>
@@ -171,7 +194,7 @@ export function buildMailBody(type: string, data: {
         </tr>
       </table>
       <a href="${data.appUrl}"
-        style="display:inline-block;padding:12px 28px;background:#1a56db;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-top:8px;">
+        style="display:inline-block;padding:12px 28px;background:#396999;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-top:8px;">
         詳細を確認する →
       </a>
     </div>

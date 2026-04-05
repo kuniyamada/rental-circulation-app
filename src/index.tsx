@@ -38,6 +38,7 @@ app.get('/', async (c) => {
     FROM circulation_steps cs JOIN applications a ON cs.application_id = a.id
     LEFT JOIN mansions m ON a.mansion_id = m.id
     WHERE cs.reviewer_id = ? AND cs.status = 'pending' AND a.status = 'circulating'
+      AND a.current_step = cs.step_number
     ORDER BY a.created_at ASC
   `).bind(user.uid).all()
 
@@ -47,6 +48,14 @@ app.get('/', async (c) => {
     LEFT JOIN mansions m ON a.mansion_id = m.id
     WHERE a.applicant_id = ? AND cs.status = 'on_hold'
     ORDER BY cs.created_at DESC
+  `).bind(user.uid).all()
+
+  // 差し戻し案件（自分が申請者で status = 'returned'）
+  const returnedApps = await db.prepare(`
+    SELECT a.*, m.name as mansion_name
+    FROM applications a LEFT JOIN mansions m ON a.mansion_id = m.id
+    WHERE a.applicant_id = ? AND a.status = 'returned'
+    ORDER BY a.updated_at DESC
   `).bind(user.uid).all()
 
   // 業務管理課・管理者向け：未申請の受付一覧
@@ -76,9 +85,10 @@ app.get('/', async (c) => {
   const statusBadge = (status: string) => {
     const map: Record<string, { label: string; cls: string }> = {
       draft:       { label: '下書き',   cls: 'bg-gray-100 text-gray-600' },
-      circulating: { label: '回覧中',   cls: 'bg-blue-100 text-blue-600' },
+      circulating: { label: '回覧中',   cls: 'bg-[#D5E5F2] text-[#396999]' },
       approved:    { label: '承認済',   cls: 'bg-green-100 text-green-700' },
-      rejected:    { label: '差し戻し', cls: 'bg-red-100 text-red-600' },
+      rejected:    { label: '否決',     cls: 'bg-red-100 text-red-600' },
+      returned:    { label: '差し戻し', cls: 'bg-orange-100 text-orange-700' },
       on_hold:     { label: '保留中',   cls: 'bg-yellow-100 text-yellow-700' },
       completed:   { label: '完了',     cls: 'bg-purple-100 text-purple-700' },
     }
@@ -94,21 +104,21 @@ app.get('/', async (c) => {
   const sidebar = `
     <aside id="sidebar" class="w-60 bg-white border-r border-gray-200 fixed left-0 top-14 bottom-0 overflow-y-auto z-40 transform -translate-x-full lg:translate-x-0 transition-transform duration-200">
       <nav class="p-3 space-y-1">
-        <a href="/" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm bg-blue-50 text-blue-600 font-semibold">
+        <a href="/" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm bg-[#EEF4FA] text-[#396999] font-semibold">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
           ダッシュボード
         </a>
-        ${(['admin','front','front_supervisor'].includes(user.role)) ? `
-        <a href="/applications/new" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+        ${(user.is_admin || ['admin','front','front_supervisor'].includes(user.role)) ? `
+        <a href="/applications/new" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           新規申請
         </a>
         ` : ''}
-        <a href="/applications" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+        <a href="/applications" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
           申請一覧・検索
         </a>
-        <a href="/change-password" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+        <a href="/change-password" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
           パスワード変更
         </a>
@@ -116,7 +126,7 @@ app.get('/', async (c) => {
         <div class="pt-3 pb-1">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">受付管理</p>
         </div>
-        <a href="/inbox" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+        <a href="/inbox" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
           請求書受付管理
         </a>
@@ -125,19 +135,19 @@ app.get('/', async (c) => {
         <div class="pt-3 pb-1">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">管理者メニュー</p>
         </div>
-        <a href="/admin/users" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+        <a href="/admin/users" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
           ユーザー管理
         </a>
-        <a href="/admin/mansions" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+        <a href="/admin/mansions" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
           マンション管理
         </a>
-        <a href="/admin/smtp" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+        <a href="/admin/smtp" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
           メール設定
         </a>
-        <a href="/admin/reminder" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition">
+        <a href="/admin/reminder" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
           リマインダー設定
         </a>
@@ -162,7 +172,7 @@ app.get('/', async (c) => {
           <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
         <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+          <div class="w-8 h-8 bg-[#396999] rounded-lg flex items-center justify-center">
             <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
           </div>
           <span class="font-bold text-gray-800 text-sm">請求書回覧システム</span>
@@ -204,7 +214,7 @@ app.get('/', async (c) => {
                     ${item.note ? `<p class="text-xs text-gray-400 mt-0.5">備考: ${item.note}</p>` : ''}
                   </div>
                   <div class="flex gap-2 items-center">
-                    ${item.attachment_key ? `<a href="/inbox/${item.id}/download" class="text-xs text-blue-600 hover:underline">📎請求書</a>` : ''}
+                    ${item.attachment_key ? `<a href="/inbox/${item.id}/download" class="text-xs text-[#396999] hover:underline">📎請求書</a>` : ''}
                     <a href="/applications/new" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">回覧申請する</a>
                   </div>
                 </div>
@@ -242,28 +252,36 @@ app.get('/', async (c) => {
           ` : ''}
 
           <!-- 統計カード -->
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <div class="flex items-center justify-between">
-                <div><p class="text-sm text-gray-500">承認待ち</p><p class="text-3xl font-bold text-orange-500 mt-1">${pendingReviews.results.length}</p></div>
-                <div class="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
-                  <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <div><p class="text-xs text-gray-500">承認待ち</p><p class="text-3xl font-bold text-orange-500 mt-1">${pendingReviews.results.length}</p></div>
+                <div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                  <svg class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 </div>
               </div>
             </div>
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <div class="flex items-center justify-between">
-                <div><p class="text-sm text-gray-500">回答待ち（保留）</p><p class="text-3xl font-bold text-yellow-500 mt-1">${holdApps.results.length}</p></div>
-                <div class="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center">
-                  <svg class="w-6 h-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <div><p class="text-xs text-gray-500">回答待ち（保留）</p><p class="text-3xl font-bold text-yellow-500 mt-1">${holdApps.results.length}</p></div>
+                <div class="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
+                  <svg class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 </div>
               </div>
             </div>
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <div class="flex items-center justify-between">
-                <div><p class="text-sm text-gray-500">自分の申請件数</p><p class="text-3xl font-bold text-blue-500 mt-1">${myApps.results.length}</p></div>
-                <div class="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                  <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <div><p class="text-xs text-gray-500">差し戻し</p><p class="text-3xl font-bold text-orange-600 mt-1">${returnedApps.results.length}</p></div>
+                <div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                  <svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                </div>
+              </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+              <div class="flex items-center justify-between">
+                <div><p class="text-xs text-gray-500">自分の申請件数</p><p class="text-3xl font-bold text-[#396999] mt-1">${myApps.results.length}</p></div>
+                <div class="w-10 h-10 bg-[#D5E5F2] rounded-full flex items-center justify-center">
+                  <svg class="w-5 h-5 text-[#396999]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 </div>
               </div>
             </div>
@@ -288,7 +306,7 @@ app.get('/', async (c) => {
                       <p class="font-semibold text-gray-800">${app.mansion_name || app.title}</p>
                       <p class="text-sm text-gray-500 mt-0.5">ステップ ${app.step_number}</p>
                     </div>
-                    <a href="/applications/${app.id}/review/${app.step_id}" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">承認する</a>
+                    <a href="/applications/${app.id}/review/${app.step_id}" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">確認する</a>
                   </div>
                 </div>
               `).join('')}
@@ -318,12 +336,37 @@ app.get('/', async (c) => {
           </div>
           ` : ''}
 
+          <!-- 差し戻し案件（再申請が必要） -->
+          ${(returnedApps.results as any[]).length > 0 ? `
+          <div class="bg-orange-50 border border-orange-300 rounded-xl">
+            <div class="px-6 py-4 border-b border-orange-200 flex items-center gap-2">
+              <span class="w-3 h-3 bg-orange-500 rounded-full animate-pulse"></span>
+              <h2 class="text-lg font-semibold text-orange-800">↩ 差し戻し – 再申請が必要です</h2>
+              <span class="ml-auto bg-orange-500 text-white text-xs font-semibold px-2 py-1 rounded-full">${(returnedApps.results as any[]).length}件</span>
+            </div>
+            <div class="divide-y divide-orange-100">
+              ${(returnedApps.results as any[]).map((app: any) => `
+                <div class="px-6 py-4 hover:bg-orange-100 transition">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="flex-1 min-w-0">
+                      <p class="font-semibold text-gray-800 truncate">${app.mansion_name || app.title}</p>
+                      <p class="text-xs text-orange-700 mt-1 line-clamp-2">↩ 差し戻し理由：${app.returned_reason || '-'}</p>
+                      <p class="text-xs text-gray-400 mt-0.5">${app.updated_at?.substring(0,16)}</p>
+                    </div>
+                    <a href="/applications/${app.id}" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition shrink-0">再申請する</a>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
+
           <!-- 自分の申請一覧 -->
           <div class="bg-white rounded-xl shadow-sm border border-gray-100">
             <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h2 class="text-lg font-semibold text-gray-800">自分の申請一覧</h2>
-              ${(['admin','front','front_supervisor'].includes(user.role)) ? `
-              <a href="/applications/new" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1">
+              ${(user.is_admin || ['admin','front','front_supervisor'].includes(user.role)) ? `
+              <a href="/applications/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                 新規申請
               </a>
@@ -351,13 +394,13 @@ app.get('/', async (c) => {
                   <tbody class="divide-y divide-gray-50">
                     ${(myApps.results as any[]).map(app => `
                       <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${app.resubmit_count > 0 ? `<span class="ml-1 bg-purple-100 text-purple-600 text-xs px-1.5 rounded">再提出</span>` : ''}</td>
+                        <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${app.resubmit_count > 0 && app.returned_reason ? `<span class="ml-1 bg-orange-100 text-orange-700 text-xs px-1.5 rounded">差し戻し再申請</span>` : app.resubmit_count > 0 ? `<span class="ml-1 bg-purple-100 text-purple-600 text-xs px-1.5 rounded">再提出</span>` : ''}</td>
                         <td class="px-4 py-3 font-medium text-gray-800">${app.mansion_name || app.title}</td>
-                        <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
+                        <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
                         <td class="px-4 py-3 text-gray-700">${Number(app.budget_amount).toLocaleString()}円</td>
                         <td class="px-4 py-3">${statusBadge(app.status)}</td>
                         <td class="px-4 py-3 text-gray-400 text-xs">${app.created_at?.substring(0,10)}</td>
-                        <td class="px-4 py-3"><a href="/applications/${app.id}" class="text-blue-600 hover:underline text-xs">詳細</a></td>
+                        <td class="px-4 py-3"><a href="/applications/${app.id}" class="text-[#396999] hover:underline text-xs">詳細</a></td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -403,5 +446,189 @@ app.route('/admin', admin)
 
 // ===== 請求書受付管理 =====
 app.route('/inbox', inbox)
+
+// ===== 承認リマインド自動送信API =====
+// このエンドポイントを定期的に呼び出す（外部cronや管理画面の手動実行）
+app.get('/api/trigger-review-reminders', async (c) => {
+  const db = c.env.DB
+
+  // リマインダー設定を取得
+  const settings = await db.prepare('SELECT * FROM reminder_settings WHERE id = 1').first() as any
+  if (!settings || !settings.review_remind_is_active) {
+    return c.json({ message: '承認リマインドは無効です', sent: 0 })
+  }
+
+  const intervalDays = settings.review_remind_interval_days || 2
+  const maxCount = settings.review_remind_max_count || 3
+
+  // 承認待ち中（current_step と一致）でリマインド対象のステップを取得
+  // 最終リマインドから interval_days 日以上経過、または一度もリマインドされていない
+  const targets = await db.prepare(`
+    SELECT
+      cs.id as step_id, cs.application_id, cs.step_number,
+      cs.reviewer_id, cs.remind_count, cs.last_reminded_at, cs.created_at as step_created_at,
+      u.name as reviewer_name, u.email as reviewer_email,
+      a.application_number, a.title, a.current_step,
+      m.name as mansion_name,
+      ap.name as applicant_name
+    FROM circulation_steps cs
+    JOIN applications a ON cs.application_id = a.id
+    JOIN users u ON cs.reviewer_id = u.id
+    LEFT JOIN mansions m ON a.mansion_id = m.id
+    LEFT JOIN users ap ON a.applicant_id = ap.id
+    WHERE cs.status = 'pending'
+      AND a.status = 'circulating'
+      AND a.current_step = cs.step_number
+      AND (cs.remind_count IS NULL OR cs.remind_count < ?)
+      AND (
+        cs.last_reminded_at IS NULL
+        AND julianday('now') - julianday(cs.created_at) >= ?
+        OR
+        cs.last_reminded_at IS NOT NULL
+        AND julianday('now') - julianday(cs.last_reminded_at) >= ?
+      )
+  `).bind(maxCount, intervalDays, intervalDays).all()
+
+  const { sendMail, buildMailSubject } = await import('./lib/mail')
+  const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
+
+  let sentCount = 0
+  const now = new Date().toISOString()
+
+  for (const t of (targets.results as any[])) {
+    if (!t.reviewer_email || !smtp) continue
+
+    const newCount = (t.remind_count || 0) + 1
+    const stepLabel: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終承認者' }
+    const appUrl = `${new URL(c.req.url).origin}/applications/${t.application_id}`
+    const subject = `【承認リマインド第${newCount}回】${t.application_number} - ${t.mansion_name || t.title} の確認をお願いします`
+    const html = `
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"></head>
+<body style="font-family:sans-serif;color:#333;margin:0;padding:0;background:#f5f5f5;">
+  <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    <div style="background:#d97706;padding:20px 24px;">
+      <h2 style="color:#fff;margin:0;font-size:18px;">⚠️ 承認リマインド（第${newCount}回）</h2>
+      <p style="color:#fde68a;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 請求書回覧システム</p>
+    </div>
+    <div style="padding:24px;">
+      <p style="color:#92400e;background:#fffbeb;border-left:4px solid #d97706;padding:8px 12px;border-radius:4px;">
+        <strong>${t.reviewer_name} さん</strong><br>
+        下記の請求書回覧について、まだ${stepLabel[t.step_number] || '承認'}が完了していません。<br>
+        お手数ですが、至急ご確認・ご承認をお願いします。
+      </p>
+      <table style="border-collapse:collapse;margin:16px 0;width:100%;">
+        <tr style="border-bottom:1px solid #e5e7eb;">
+          <td style="padding:8px 12px 8px 0;color:#6b7280;font-size:13px;white-space:nowrap;">申請番号</td>
+          <td style="padding:8px 0;font-size:13px;"><strong>${t.application_number}</strong></td>
+        </tr>
+        <tr style="border-bottom:1px solid #e5e7eb;">
+          <td style="padding:8px 12px 8px 0;color:#6b7280;font-size:13px;white-space:nowrap;">件名</td>
+          <td style="padding:8px 0;font-size:13px;">${t.mansion_name || t.title}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e5e7eb;">
+          <td style="padding:8px 12px 8px 0;color:#6b7280;font-size:13px;white-space:nowrap;">申請者</td>
+          <td style="padding:8px 0;font-size:13px;">${t.applicant_name}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 12px 8px 0;color:#6b7280;font-size:13px;white-space:nowrap;">あなたの役割</td>
+          <td style="padding:8px 0;font-size:13px;"><strong>${stepLabel[t.step_number] || 'レビュアー'}</strong>（Step ${t.step_number}）</td>
+        </tr>
+      </table>
+      <a href="${appUrl}"
+        style="display:inline-block;padding:12px 28px;background:#396999;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-top:8px;">
+        確認・承認する →
+      </a>
+    </div>
+    <div style="background:#f9fafb;padding:16px 24px;border-top:1px solid #e5e7eb;">
+      <p style="margin:0;font-size:11px;color:#9ca3af;">
+        このメールは請求書回覧システムから自動送信されています。返信しないでください。
+      </p>
+    </div>
+  </div>
+</body>
+</html>`
+
+    const ok = await sendMail(smtp, { to: t.reviewer_email, subject, html })
+    if (ok) {
+      await db.prepare(
+        'UPDATE circulation_steps SET remind_count = ?, last_reminded_at = ? WHERE id = ?'
+      ).bind(newCount, now, t.step_id).run()
+
+      // notification_logs に記録
+      await db.prepare(
+        'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(t.application_id, t.reviewer_id, 'review_reminder', t.reviewer_email, subject, 'sent').run()
+
+      sentCount++
+    }
+  }
+
+  return c.json({ message: `承認リマインド送信完了`, sent: sentCount, targets: targets.results.length })
+})
+
+// 手動リマインド（管理画面から特定ステップへ）
+app.post('/api/review-remind/:stepId', async (c) => {
+  const cookie = c.req.header('Cookie')
+  const sessionId = getSessionIdFromCookie(cookie)
+  const user = await getSessionUser(c.env.DB, sessionId)
+  if (!user || (user.role !== 'operations' && user.role !== 'admin' && !user.is_admin)) {
+    return c.json({ error: 'unauthorized' }, 403)
+  }
+
+  const db = c.env.DB
+  const stepId = c.req.param('stepId')
+
+  const step = await db.prepare(`
+    SELECT cs.*, u.name as reviewer_name, u.email as reviewer_email,
+           a.application_number, a.title, a.id as app_id,
+           m.name as mansion_name, ap.name as applicant_name
+    FROM circulation_steps cs
+    JOIN applications a ON cs.application_id = a.id
+    JOIN users u ON cs.reviewer_id = u.id
+    LEFT JOIN mansions m ON a.mansion_id = m.id
+    LEFT JOIN users ap ON a.applicant_id = ap.id
+    WHERE cs.id = ? AND cs.status = 'pending' AND a.status = 'circulating'
+      AND a.current_step = cs.step_number
+  `).bind(stepId).first() as any
+
+  if (!step) return c.json({ error: 'ステップが見つかりません' }, 404)
+
+  const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
+  if (!smtp) return c.json({ error: 'SMTP設定がありません' }, 500)
+
+  const { sendMail } = await import('./lib/mail')
+  const newCount = (step.remind_count || 0) + 1
+  const stepLabel: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終承認者' }
+  const appUrl = `${new URL(c.req.url).origin}/applications/${step.app_id}`
+  const subject = `【承認リマインド第${newCount}回】${step.application_number} - ${step.mansion_name || step.title} の確認をお願いします`
+  const html = `
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"></head>
+<body style="font-family:sans-serif;color:#333;background:#f5f5f5;">
+  <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    <div style="background:#d97706;padding:20px 24px;">
+      <h2 style="color:#fff;margin:0;font-size:18px;">⚠️ 承認リマインド（第${newCount}回）</h2>
+      <p style="color:#fde68a;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 請求書回覧システム</p>
+    </div>
+    <div style="padding:24px;">
+      <p>${step.reviewer_name} さん、${step.mansion_name || step.title} の${stepLabel[step.step_number] || '承認'}がまだ完了していません。ご確認をお願いします。</p>
+      <a href="${appUrl}" style="display:inline-block;padding:12px 28px;background:#396999;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;">確認・承認する →</a>
+    </div>
+  </div>
+</body></html>`
+
+  const now = new Date().toISOString()
+  const ok = await sendMail(smtp, { to: step.reviewer_email, subject, html })
+  if (ok) {
+    await db.prepare('UPDATE circulation_steps SET remind_count = ?, last_reminded_at = ? WHERE id = ?')
+      .bind(newCount, now, stepId).run()
+    await db.prepare('INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(step.app_id, step.reviewer_id, 'review_reminder', step.reviewer_email, subject, 'sent').run()
+  }
+
+  return c.json({ ok, sent: ok, reviewer: step.reviewer_name, count: newCount })
+})
 
 export default app

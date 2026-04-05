@@ -106,10 +106,10 @@ function loginPage(error?: string | null) {
   <title>ログイン - 請求書回覧システム</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gradient-to-br from-blue-50 to-blue-100 min-h-screen flex items-center justify-center">
+<body class="bg-gradient-to-br from-[#EEF4FA] to-[#D5E5F2] min-h-screen flex items-center justify-center">
   <div class="bg-white rounded-2xl shadow-lg p-10 w-full max-w-md">
     <div class="text-center mb-8">
-      <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-full mb-4">
+      <div class="inline-flex items-center justify-center w-16 h-16 bg-[#396999] rounded-full mb-4">
         <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
         </svg>
@@ -122,17 +122,17 @@ function loginPage(error?: string | null) {
       <div class="mb-5">
         <label class="block text-sm font-medium text-gray-700 mb-2">社員番号</label>
         <input type="text" name="employee_number" required
-          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#396999] focus:border-transparent outline-none transition"
           placeholder="例: U001">
       </div>
       <div class="mb-6">
         <label class="block text-sm font-medium text-gray-700 mb-2">パスワード</label>
         <input type="password" name="password" required
-          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#396999] focus:border-transparent outline-none transition"
           placeholder="初期値は社員番号と同じです">
       </div>
       <button type="submit"
-        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition duration-200">
+        class="w-full bg-[#396999] hover:bg-[#2E5580] text-white font-semibold py-3 rounded-lg transition duration-200">
         ログイン
       </button>
     </form>
@@ -151,7 +151,7 @@ function changePasswordPage(error?: string) {
   <title>パスワード変更 - 請求書回覧システム</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gradient-to-br from-blue-50 to-blue-100 min-h-screen flex items-center justify-center">
+<body class="bg-gradient-to-br from-[#EEF4FA] to-[#D5E5F2] min-h-screen flex items-center justify-center">
   <div class="bg-white rounded-2xl shadow-lg p-10 w-full max-w-md">
     <h1 class="text-xl font-bold text-gray-800 mb-2">パスワード変更</h1>
     <p class="text-sm text-gray-500 mb-6">新しいパスワードを設定してください。</p>
@@ -159,17 +159,17 @@ function changePasswordPage(error?: string) {
     <form method="POST" action="/change-password">
       <div class="mb-4">
         <label class="block text-sm font-medium text-gray-700 mb-2">現在のパスワード</label>
-        <input type="password" name="current_password" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+        <input type="password" name="current_password" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#396999] outline-none">
       </div>
       <div class="mb-4">
         <label class="block text-sm font-medium text-gray-700 mb-2">新しいパスワード（6文字以上）</label>
-        <input type="password" name="new_password" required minlength="6" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+        <input type="password" name="new_password" required minlength="6" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#396999] outline-none">
       </div>
       <div class="mb-6">
         <label class="block text-sm font-medium text-gray-700 mb-2">新しいパスワード（確認）</label>
-        <input type="password" name="confirm_password" required minlength="6" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+        <input type="password" name="confirm_password" required minlength="6" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#396999] outline-none">
       </div>
-      <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition">変更する</button>
+      <button type="submit" class="w-full bg-[#396999] hover:bg-[#2E5580] text-white font-semibold py-3 rounded-lg transition">変更する</button>
     </form>
   </div>
 </body>

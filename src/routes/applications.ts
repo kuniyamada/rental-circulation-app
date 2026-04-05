@@ -2,9 +2,61 @@ import { Hono } from 'hono'
 import { getSessionUser, getSessionIdFromCookie, generateApplicationNumber } from '../lib/auth'
 import { layout, statusBadge, paymentLabel } from './layout'
 import { buildMailSubject, buildMailBody, sendMail } from '../lib/mail'
+import { sendLineWorksMessage, buildLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
 
 type Bindings = { DB: D1Database; R2: R2Bucket }
 const applications = new Hono<{ Bindings: Bindings }>()
+
+// ============================================================
+// 統合通知ヘルパー: メール + LINE WORKS を通知設定に応じて送信
+// ============================================================
+async function sendNotification(
+  db: D1Database,
+  type: string,
+  recipientId: number,
+  data: {
+    appNumber: string
+    title: string
+    applicantName: string
+    comment?: string
+    returnedReason?: string
+    reapplyReason?: string
+    returnedByName?: string
+    returnedFromStep?: number
+    appUrl: string
+  }
+): Promise<void> {
+  // 受信者の通知設定とLINE WORKS IDを取得
+  const recipient = await db.prepare(
+    'SELECT email, notify_method, lineworks_user_id FROM users WHERE id = ?'
+  ).bind(recipientId).first() as { email: string; notify_method: string; lineworks_user_id: string | null } | null
+
+  if (!recipient) return
+
+  const method = recipient.notify_method || 'email'
+
+  // メール送信
+  if (method === 'email' || method === 'both') {
+    const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
+    if (smtp && recipient.email) {
+      await sendMail(smtp, {
+        to: recipient.email,
+        subject: buildMailSubject(type, data.appNumber),
+        html: buildMailBody(type, data),
+      })
+    }
+  }
+
+  // LINE WORKS送信
+  if (method === 'lineworks' || method === 'both') {
+    const lwConfig = await db.prepare('SELECT * FROM lineworks_config WHERE is_active = 1 LIMIT 1').first() as LineWorksConfigRow | null
+    if (lwConfig && recipient.lineworks_user_id) {
+      const config = rowToConfig(lwConfig)
+      const message = buildLineWorksMessage(type, data)
+      await sendLineWorksMessage(config, recipient.lineworks_user_id, message)
+    }
+  }
+}
 
 // 申請一覧・検索
 applications.get('/', async (c) => {
@@ -39,8 +91,8 @@ applications.get('/', async (c) => {
     <form method="GET" action="/applications" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
         <input type="text" name="q" value="${q}" placeholder="マンション名・申請番号で検索"
-          class="col-span-2 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-        <select name="status" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          class="col-span-2 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+        <select name="status" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
           <option value="">すべての状態</option>
           <option value="circulating" ${status==='circulating'?'selected':''}>回覧中</option>
           <option value="completed" ${status==='completed'?'selected':''}>完了</option>
@@ -48,16 +100,16 @@ applications.get('/', async (c) => {
           <option value="on_hold" ${status==='on_hold'?'selected':''}>保留中</option>
           <option value="draft" ${status==='draft'?'selected':''}>下書き</option>
         </select>
-        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">検索</button>
+        <button type="submit" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition">検索</button>
       </div>
       <div class="grid grid-cols-2 gap-3 mt-3">
         <div class="flex items-center gap-2">
           <label class="text-sm text-gray-500 whitespace-nowrap">期間（開始）</label>
-          <input type="date" name="from" value="${from}" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          <input type="date" name="from" value="${from}" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
         </div>
         <div class="flex items-center gap-2">
           <label class="text-sm text-gray-500 whitespace-nowrap">期間（終了）</label>
-          <input type="date" name="to" value="${to}" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          <input type="date" name="to" value="${to}" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
         </div>
       </div>
     </form>
@@ -65,8 +117,8 @@ applications.get('/', async (c) => {
     <!-- 結果一覧 -->
     <div class="bg-white rounded-xl shadow-sm border border-gray-100">
       <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-        <h2 class="font-semibold text-gray-800">検索結果 <span class="text-blue-600">${apps.results.length}件</span></h2>
-        ${(['admin','front','front_supervisor'].includes(user.role)) ? `<a href="/applications/new" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">＋ 新規申請</a>` : ''}
+        <h2 class="font-semibold text-gray-800">検索結果 <span class="text-[#396999]">${apps.results.length}件</span></h2>
+        ${(['admin','front','front_supervisor'].includes(user.role)) ? `<a href="/applications/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition">＋ 新規申請</a>` : ''}
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -89,11 +141,11 @@ applications.get('/', async (c) => {
                   <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${app.resubmit_count > 0 ? `<span class="ml-1 bg-purple-100 text-purple-600 text-xs px-1.5 rounded">再提出</span>` : ''}</td>
                   <td class="px-4 py-3 font-medium text-gray-800">${app.mansion_name || app.title}</td>
                   <td class="px-4 py-3 text-gray-600">${app.applicant_name}</td>
-                  <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
+                  <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
                   <td class="px-4 py-3 text-gray-700">${Number(app.budget_amount).toLocaleString()}円</td>
                   <td class="px-4 py-3">${statusBadge(app.status)}</td>
                   <td class="px-4 py-3 text-gray-400 text-xs">${app.created_at?.substring(0,10)}</td>
-                  <td class="px-4 py-3"><a href="/applications/${app.id}" class="text-blue-600 hover:underline text-xs">詳細</a></td>
+                  <td class="px-4 py-3"><a href="/applications/${app.id}" class="text-[#396999] hover:underline text-xs">詳細</a></td>
                 </tr>
               `).join('')
             }
@@ -171,7 +223,7 @@ applications.get('/new', async (c) => {
   const sessionId = getSessionIdFromCookie(cookie)
   const user = await getSessionUser(c.env.DB, sessionId)
   if (!user) return c.redirect('/login')
-  if (!ALLOWED_NEW_APP_ROLES.includes(user.role)) {
+  if (!user.is_admin && !ALLOWED_NEW_APP_ROLES.includes(user.role)) {
     return c.html(`<p style="padding:2rem;font-family:sans-serif;color:#dc2626">⛔ この画面へのアクセス権限がありません。</p>`, 403)
   }
 
@@ -204,6 +256,11 @@ applications.get('/new', async (c) => {
     "SELECT id, name FROM users WHERE role = 'operations' AND is_active = 1 ORDER BY name"
   ).all()
 
+  // 業務管理課デフォルト：本橋 美由紀（employee_number=030）
+  const defaultStep2User = await db.prepare(
+    "SELECT id FROM users WHERE employee_number = '030' AND is_active = 1 LIMIT 1"
+  ).first() as any
+
   // 会計課ユーザー
   const accountingUsers = await db.prepare(
     "SELECT id, name FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name"
@@ -221,8 +278,8 @@ applications.get('/new', async (c) => {
       <!-- ステップ表示 -->
       <div class="flex items-center gap-2 mb-8">
         <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-bold">1</div>
-          <span class="text-sm font-semibold text-blue-600">内容の入力</span>
+          <div class="w-8 h-8 bg-[#396999] text-white rounded-full flex items-center justify-center text-sm font-bold">1</div>
+          <span class="text-sm font-semibold text-[#396999]">内容の入力</span>
         </div>
         <div class="flex-1 h-px bg-gray-200"></div>
         <div class="flex items-center gap-2">
@@ -239,12 +296,12 @@ applications.get('/new', async (c) => {
       <form method="POST" action="/applications" enctype="multipart/form-data" id="appForm" onsubmit="return checkFeeRequired()">
         ${inboxData ? `
         <!-- inboxからの引き継ぎバナー -->
-        <div class="mb-5 bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
+        <div class="mb-5 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg p-4 flex items-start gap-3">
           <span class="text-2xl">📥</span>
           <div class="flex-1">
-            <p class="text-sm font-semibold text-blue-800">業務管理課から請求書が転送されています</p>
-            <p class="text-xs text-blue-600 mt-1">マンション・請求書を引き継ぎました。内容を確認のうえ申請してください。</p>
-            <div class="flex flex-wrap gap-3 mt-2 text-xs text-blue-700">
+            <p class="text-sm font-semibold text-[#234166]">業務管理課から請求書が転送されています</p>
+            <p class="text-xs text-[#396999] mt-1">マンション・請求書を引き継ぎました。内容を確認のうえ申請してください。</p>
+            <div class="flex flex-wrap gap-3 mt-2 text-xs text-[#2E5580]">
               <span>🏢 ${inboxData.mansion_name}</span>
               ${inboxData.attachment_name ? `<span>📎 ${inboxData.attachment_name}</span>` : ''}
               ${inboxData.note ? `<span>💬 ${inboxData.note}</span>` : ''}
@@ -261,7 +318,7 @@ applications.get('/new', async (c) => {
               <!-- 番号入力 -->
               <div class="w-28">
                 <input type="number" id="mansionNumberInput" placeholder="番号" min="1"
-                  class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none text-center"
+                  class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none text-center"
                   oninput="searchMansion(this.value)">
                 <p class="text-xs text-gray-400 mt-1 text-center">番号を入力</p>
               </div>
@@ -288,7 +345,7 @@ applications.get('/new', async (c) => {
             <div>
               <label class="block text-sm font-semibold text-gray-700 mb-1.5">回覧開始日</label>
               <input type="date" name="circulation_start_date" value="${today}" required
-                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
             </div>
           </div>
 
@@ -304,10 +361,11 @@ applications.get('/new', async (c) => {
             <!-- Step1: 上長 -->
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1.5">
-                <span class="inline-flex items-center justify-center w-5 h-5 bg-blue-100 text-blue-700 rounded-full text-xs font-bold mr-1">1</span>
+                <span class="inline-flex items-center justify-center w-5 h-5 bg-[#D5E5F2] text-[#2E5580] rounded-full text-xs font-bold mr-1">1</span>
                 回覧・承認先（上長） <span class="text-red-500">*</span>
               </label>
               <select name="reviewer_step1" required
+                onchange="updateReviewerPreview()"
                 class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
                 <option value="">選択してください</option>
                 ${(supervisorCandidates.results as any[]).map((u: any) =>
@@ -323,10 +381,11 @@ applications.get('/new', async (c) => {
                 回覧・承認先（業務管理課） <span class="text-red-500">*</span>
               </label>
               <select name="reviewer_step2" required
+                onchange="updateReviewerPreview()"
                 class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
                 <option value="">選択してください</option>
                 ${(opStaffCandidates.results as any[]).map((u: any) =>
-                  `<option value="${u.id}">${u.name}</option>`
+                  `<option value="${u.id}"${defaultStep2User && u.id === defaultStep2User.id ? ' selected' : ''}>${u.name}</option>`
                 ).join('')}
               </select>
             </div>
@@ -341,19 +400,20 @@ applications.get('/new', async (c) => {
               <div class="flex gap-4">
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="reviewer_step3_role" value="accounting" required
-                    onchange="updateStep3Users(); setPaymentTarget('kumiai')"
+                    onchange="updateStep3Users(); setPaymentTarget('kumiai'); updateReviewerPreview()"
                     class="w-4 h-4 text-purple-600">
                   <span class="text-sm">マンション会計課</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="reviewer_step3_role" value="honsha"
-                    onchange="updateStep3Users(); setPaymentTarget('td')"
+                    onchange="updateStep3Users(); setPaymentTarget('td'); updateReviewerPreview()"
                     class="w-4 h-4 text-purple-600">
                   <span class="text-sm">本社経理</span>
                 </label>
               </div>
               <!-- 担当者プルダウン -->
               <select name="reviewer_step3" id="step3UserSelect" required
+                onchange="updateReviewerPreview()"
                 class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
                 <option value="">先に役割を選択してください</option>
               </select>
@@ -366,12 +426,12 @@ applications.get('/new', async (c) => {
             <div class="flex gap-4">
               <label class="flex items-center gap-2 cursor-pointer">
                 <input type="radio" name="payment_target" value="kumiai" required onchange="togglePaymentFields()"
-                  class="w-4 h-4 text-blue-600">
+                  class="w-4 h-4 text-[#396999]">
                 <span class="text-sm">管理組合</span>
               </label>
               <label class="flex items-center gap-2 cursor-pointer">
                 <input type="radio" name="payment_target" value="td" onchange="togglePaymentFields()"
-                  class="w-4 h-4 text-blue-600">
+                  class="w-4 h-4 text-[#396999]">
                 <span class="text-sm">会社（TD）</span>
               </label>
             </div>
@@ -381,7 +441,7 @@ applications.get('/new', async (c) => {
           <div id="kumiaiFields" class="hidden bg-green-50 border border-green-200 rounded-lg p-4">
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">勘定科目 <span class="text-red-500">*</span></label>
             <select name="account_item"
-              class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+              class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
               <option value="">選択してください</option>
               <option value="予備費">予備費</option>
               <option value="小修繕費">小修繕費</option>
@@ -392,18 +452,18 @@ applications.get('/new', async (c) => {
           </div>
 
           <!-- TD（会社）の場合 -->
-          <div id="tdFields" class="hidden bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-4">
+          <div id="tdFields" class="hidden bg-[#EEF4FA] border border-[#AECBE5] rounded-lg p-4 space-y-4">
             <div>
               <label class="block text-sm font-semibold text-gray-700 mb-1.5">区分 <span class="text-red-500">*</span></label>
               <div class="flex gap-4">
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="td_type" value="ittaku" onchange="toggleMotouke()"
-                    class="w-4 h-4 text-blue-600">
+                    class="w-4 h-4 text-[#396999]">
                   <span class="text-sm">委託内</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="td_type" value="motouke" onchange="toggleMotouke()"
-                    class="w-4 h-4 text-blue-600">
+                    class="w-4 h-4 text-[#396999]">
                   <span class="text-sm">元請</span>
                 </label>
               </div>
@@ -411,9 +471,13 @@ applications.get('/new', async (c) => {
             <!-- 元請の場合：管理組合への請求金額 -->
             <div id="motoukeFields" class="hidden">
               <label class="block text-sm font-semibold text-gray-700 mb-1.5">管理組合への請求金額（円）</label>
-              <input type="number" name="kumiai_amount" min="0"
-                class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                placeholder="0">
+              <div class="relative">
+                <input type="text" id="kumiaiAmountDisplay" inputmode="numeric"
+                  class="w-full px-3 py-2.5 pr-8 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
+                  placeholder="0" oninput="formatComma(this, 'kumiai_amount')">
+                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
+              </div>
+              <input type="hidden" name="kumiai_amount" id="kumiaiAmountHidden">
             </div>
           </div>
 
@@ -424,9 +488,10 @@ applications.get('/new', async (c) => {
               <div>
                 <label class="block text-sm font-semibold text-gray-700 mb-1.5">手数料（円）</label>
                 <div class="relative">
-                  <input type="number" id="budgetAmountInput" name="budget_amount" min="0"
-                    class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="0" oninput="validateFeeFields()">
+                  <input type="text" id="budgetAmountInput" inputmode="numeric"
+                    class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
+                    placeholder="0" oninput="formatComma(this, 'budget_amount'); validateFeeFields()">
+                  <input type="hidden" name="budget_amount" id="budgetAmountHidden">
                   <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
                 </div>
               </div>
@@ -434,7 +499,7 @@ applications.get('/new', async (c) => {
                 <label class="block text-sm font-semibold text-gray-700 mb-1.5">手数料（％）</label>
                 <div class="relative">
                   <input type="number" id="commissionRateInput" name="commission_rate" min="0" max="100" step="0.1"
-                    class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
                     placeholder="0" oninput="validateFeeFields()">
                   <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
                 </div>
@@ -449,28 +514,28 @@ applications.get('/new', async (c) => {
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）① <span class="text-red-500">*</span></label>
               ${inboxData?.attachment_key ? `
-              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
-                <span class="text-blue-600 text-xs">📎 引き継ぎ：${inboxData.attachment_name || 'invoice.pdf'}</span>
+              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg">
+                <span class="text-[#396999] text-xs">📎 引き継ぎ：${inboxData.attachment_name || 'invoice.pdf'}</span>
                 <input type="hidden" name="inbox_attachment_key" value="${inboxData.attachment_key}">
                 <input type="hidden" name="inbox_attachment_name" value="${inboxData.attachment_name || ''}">
                 <span class="text-xs text-gray-400">（別ファイルを選択すると上書きされます）</span>
               </div>
               <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100">
+                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
               ` : `
               <input type="file" name="invoice1" required accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100">
+                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
               `}
             </div>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）②</label>
               <input type="file" name="invoice2" accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100">
+                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
             </div>
           </div>
 
           <!-- 送信先（承認者）プレビュー -->
-          <div id="reviewerPreview" class="hidden border border-indigo-200 bg-indigo-50 rounded-lg p-4">
+          <div id="reviewerPreview" class="border border-indigo-200 bg-indigo-50 rounded-lg p-4">
             <div class="flex items-center gap-2 mb-3">
               <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
@@ -484,7 +549,7 @@ applications.get('/new', async (c) => {
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">備考</label>
             <textarea name="remarks" rows="3"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none resize-none"
               placeholder="備考があれば入力してください"></textarea>
           </div>
 
@@ -494,12 +559,12 @@ applications.get('/new', async (c) => {
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料①</label>
               <input type="file" name="other1" accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100">
+                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
             </div>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料②</label>
               <input type="file" name="other2" accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100">
+                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
             </div>
           </div>
         </div>
@@ -508,7 +573,7 @@ applications.get('/new', async (c) => {
           <a href="/" class="flex-1 text-center px-4 py-3 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 transition text-sm font-semibold">
             キャンセル
           </a>
-          <button type="submit" class="flex-2 flex-grow-[2] bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-8 rounded-lg transition text-sm">
+          <button type="submit" class="flex-2 flex-grow-[2] bg-[#396999] hover:bg-[#2E5580] text-white font-semibold py-3 px-8 rounded-lg transition text-sm">
             次へ：回覧先の確認 →
           </button>
         </div>
@@ -516,12 +581,22 @@ applications.get('/new', async (c) => {
     </div>
 
     <script>
+      // カンマ区切りフォーマット関数
+      function formatComma(el, hiddenId) {
+        const raw = el.value.replace(/[^0-9]/g, '')
+        el.value = raw === '' ? '' : Number(raw).toLocaleString()
+        const hidden = document.getElementById(hiddenId + 'Hidden')
+        if (hidden) hidden.value = raw
+      }
+
       // ページ読み込み時に手数料フィールドのrequiredを除去（ブラウザネイティブバリデーション無効化）
       document.addEventListener('DOMContentLoaded', function() {
         const budgetEl = document.getElementById('budgetAmountInput')
         const commissionEl = document.getElementById('commissionRateInput')
         if (budgetEl) budgetEl.required = false
         if (commissionEl) commissionEl.required = false
+        // 送信先プレビューを初期表示
+        updateReviewerPreview()
       })
 
       // マンションデータをJSに埋め込み
@@ -561,6 +636,10 @@ applications.get('/new', async (c) => {
           ? '<option value="">先に役割を選択してください</option>'
           : '<option value="">担当者を選択してください</option>' +
             users.map(u => '<option value="' + u.id + '">' + u.name + '</option>').join('')
+        // 本社経理を選択した場合、デフォルトで最初のユーザー（山崎 修）を自動選択
+        if (role === 'honsha' && users.length > 0) {
+          sel.value = String(users[0].id)
+        }
       }
 
       function setPaymentTarget(val) {
@@ -587,8 +666,8 @@ applications.get('/new', async (c) => {
 
         const found = MANSIONS.find(m => m.number === num);
         if (found) {
-          resultEl.innerHTML = '<span class="text-blue-700 font-bold text-base mr-2">' + found.number + '</span><span class="font-semibold text-gray-800">' + found.name + '</span>';
-          resultEl.className = 'px-3 py-2.5 border-2 border-blue-400 rounded-lg text-sm bg-blue-50 min-h-[42px] flex items-center gap-1';
+          resultEl.innerHTML = '<span class="text-[#2E5580] font-bold text-base mr-2">' + found.number + '</span><span class="font-semibold text-gray-800">' + found.name + '</span>';
+          resultEl.className = 'px-3 py-2.5 border-2 border-[#5B8AB5] rounded-lg text-sm bg-[#EEF4FA] min-h-[42px] flex items-center gap-1';
           notFoundEl.classList.add('hidden');
           idInput.value = found.id;
           titleInput.value = found.name;
@@ -623,7 +702,9 @@ applications.get('/new', async (c) => {
       function validateFeeFields() {
         const amountFields = document.getElementById('amountFields')
         if (amountFields.classList.contains('hidden')) return
-        const budget = document.getElementById('budgetAmountInput')?.value
+        // hiddenフィールドの値（カンマなし数値）で判定
+        const budget = document.getElementById('budgetAmountHidden')?.value ||
+                       document.getElementById('budgetAmountInput')?.value.replace(/,/g, '')
         const commission = document.getElementById('commissionRateInput')?.value
         const msg = document.getElementById('feeValidationMsg')
         // どちらか一方でも値があればOK（0も有効な値として扱う）
@@ -648,7 +729,8 @@ applications.get('/new', async (c) => {
       function checkFeeRequired() {
         const amountFields = document.getElementById('amountFields')
         if (amountFields.classList.contains('hidden')) return true
-        const budget = document.getElementById('budgetAmountInput')?.value
+        const budget = document.getElementById('budgetAmountHidden')?.value ||
+                       document.getElementById('budgetAmountInput')?.value.replace(/,/g, '')
         const commission = document.getElementById('commissionRateInput')?.value
         // どちらか一方でも値があればOK（0も有効な値）
         const hasValue = (budget !== '' && budget !== null && budget !== undefined) ||
@@ -662,37 +744,50 @@ applications.get('/new', async (c) => {
       }
 
       async function updateReviewerPreview() {
-        const mansionId = document.getElementById('mansionIdInput').value
-        const paymentTarget = document.querySelector('input[name="payment_target"]:checked')?.value
         const previewEl = document.getElementById('reviewerPreview')
         const listEl = document.getElementById('reviewerList')
 
-        if (!mansionId || !paymentTarget) {
-          previewEl.classList.add('hidden')
-          return
-        }
+        // フォームで選択中の値を直接参照してプレビューを構築（常時表示）
+        const reviewers = []
 
-        try {
-          const res = await fetch('/applications/preview-reviewers?mansion_id=' + mansionId + '&payment_target=' + paymentTarget)
-          const data = await res.json()
-          if (!data.reviewers) return
+        // Step1: 上長プルダウンの選択値
+        const step1Select = document.querySelector('select[name="reviewer_step1"]')
+        const step1Name = step1Select?.options[step1Select.selectedIndex]?.text || ''
+        reviewers.push({
+          step: 1, label: '上長',
+          name: (step1Select?.value && step1Name !== '選択してください') ? step1Name : '未選択',
+          unset: !step1Select?.value
+        })
 
-          listEl.innerHTML = data.reviewers.map((r, i) => {
-            const isUnset = r.name === '未設定'
-            const stepColors = ['bg-blue-100 text-blue-700', 'bg-orange-100 text-orange-700', 'bg-green-100 text-green-700']
-            const color = stepColors[i] || 'bg-gray-100 text-gray-600'
-            return '<div class="flex items-center gap-3">' +
-              '<span class="text-xs font-bold text-indigo-400 w-5 text-center">Step ' + r.step + '</span>' +
-              '<svg class="w-3 h-3 text-indigo-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
-              '<span class="text-xs px-2 py-0.5 rounded-full font-medium ' + color + '">' + r.label + '</span>' +
-              '<span class="text-sm font-medium ' + (isUnset ? 'text-red-400 italic' : 'text-gray-800') + '">' + r.name + '</span>' +
-            '</div>'
-          }).join('')
+        // Step2: 業務管理課プルダウンの選択値
+        const step2Select = document.querySelector('select[name="reviewer_step2"]')
+        const step2Name = step2Select?.options[step2Select.selectedIndex]?.text || ''
+        reviewers.push({
+          step: 2, label: '業務管理課',
+          name: (step2Select?.value && step2Name !== '選択してください') ? step2Name : '未選択',
+          unset: !step2Select?.value
+        })
 
-          previewEl.classList.remove('hidden')
-        } catch (e) {
-          previewEl.classList.add('hidden')
-        }
+        // Step3: 最終承認者プルダウンの選択値
+        const step3Role = document.querySelector('input[name="reviewer_step3_role"]:checked')?.value
+        const step3Select = document.getElementById('step3UserSelect')
+        const step3Name = step3Select?.options[step3Select.selectedIndex]?.text || ''
+        const step3Label = step3Role === 'honsha' ? '本社経理' : 'マンション会計課'
+        reviewers.push({
+          step: 3, label: step3Label,
+          name: (step3Select?.value && step3Name !== '先に役割を選択してください' && step3Name !== '担当者を選択してください') ? step3Name : '未選択',
+          unset: !step3Select?.value
+        })
+
+        const stepColors = ['bg-[#D5E5F2] text-[#2E5580]', 'bg-orange-100 text-orange-700', 'bg-green-100 text-green-700']
+        listEl.innerHTML = reviewers.map((r, i) => {
+          return '<div class="flex items-center gap-3">' +
+            '<span class="text-xs font-bold text-indigo-400 w-5 text-center">Step ' + r.step + '</span>' +
+            '<svg class="w-3 h-3 text-indigo-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
+            '<span class="text-xs px-2 py-0.5 rounded-full font-medium ' + stepColors[i] + '">' + r.label + '</span>' +
+            '<span class="text-sm font-medium ' + (r.unset ? 'text-red-400 italic' : 'text-gray-800') + '">' + r.name + '</span>' +
+          '</div>'
+        }).join('')
       }
     </script>
   `
@@ -705,7 +800,7 @@ applications.post('/', async (c) => {
   const sessionId = getSessionIdFromCookie(cookie)
   const user = await getSessionUser(c.env.DB, sessionId)
   if (!user) return c.redirect('/login')
-  if (!ALLOWED_NEW_APP_ROLES.includes(user.role)) {
+  if (!user.is_admin && !ALLOWED_NEW_APP_ROLES.includes(user.role)) {
     return c.html(`<p style="padding:2rem;font-family:sans-serif;color:#dc2626">⛔ この画面へのアクセス権限がありません。</p>`, 403)
   }
 
@@ -765,9 +860,9 @@ applications.post('/', async (c) => {
     body.payment_target,
     body.account_item || null,
     body.td_type || null,
-    body.kumiai_amount ? parseInt(body.kumiai_amount) : null,
-    parseInt(body.budget_amount) || 0,
-    null,
+    body.kumiai_amount ? parseInt(String(body.kumiai_amount).replace(/,/g, '')) : null,
+    parseInt(String(body.budget_amount || '0').replace(/,/g, '')) || 0,
+    body.commission_rate !== '' && body.commission_rate != null ? parseFloat(body.commission_rate) : null,
     body.remarks || null
   ).run()
 
@@ -792,22 +887,15 @@ applications.post('/', async (c) => {
   ).bind(appId).first() as any
 
   if (firstStep) {
-    const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
-    if (smtp) {
-      const appUrl = `${new URL(c.req.url).origin}/applications/${appId}`
-      const subject = buildMailSubject('review_request', appNumber)
-      const mailOk = await sendMail(smtp, {
-        to: firstStep.email,
-        subject,
-        html: buildMailBody('review_request', { appNumber, title: body.title, applicantName: user.name, appUrl })
-      })
-      await db.prepare(
-        'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status, error_message) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email, subject,
-        mailOk ? 'sent' : 'failed',
-        mailOk ? null : 'sendMail returned false'
-      ).run()
-    }
+    const appUrl = `${new URL(c.req.url).origin}/applications/${appId}`
+    await sendNotification(db, 'review_request', firstStep.reviewer_id, {
+      appNumber, title: body.title, applicantName: user.name, appUrl
+    })
+    await db.prepare(
+      'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
+      buildMailSubject('review_request', appNumber), 'sent'
+    ).run()
   }
 
   // inbox引き継ぎの場合、invoice_inboxのstatusをappliedに更新
@@ -921,27 +1009,23 @@ applications.get('/:id', async (c) => {
   )
 
   const stepLabels: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終承認者' }
-  const stepStatusIcon: Record<string, string> = {
-    pending: '⏳',
-    approved: '✅',
-    rejected: '❌',
-    on_hold: '⏸',
-  }
 
   // タイムライン用ヘルパー
   const timelineItemClass = (status: string, isCurrent: boolean) => {
     if (status === 'approved') return { dot: 'bg-green-500 border-green-500', card: 'bg-green-50 border-green-200', text: 'text-green-700' }
     if (status === 'rejected') return { dot: 'bg-red-500 border-red-500', card: 'bg-red-50 border-red-200', text: 'text-red-700' }
+    if (status === 'returned') return { dot: 'bg-orange-500 border-orange-500', card: 'bg-orange-50 border-orange-200', text: 'text-orange-700' }
     if (status === 'on_hold') return { dot: 'bg-yellow-400 border-yellow-400', card: 'bg-yellow-50 border-yellow-200', text: 'text-yellow-700' }
-    if (isCurrent) return { dot: 'bg-orange-400 border-orange-400', card: 'bg-orange-50 border-orange-200', text: 'text-orange-700' }
+    if (isCurrent) return { dot: 'bg-[#396999] border-[#396999]', card: 'bg-[#EEF4FA] border-[#AECBE5]', text: 'text-[#2E5580]' }
     return { dot: 'bg-gray-300 border-gray-300', card: 'bg-gray-50 border-gray-200', text: 'text-gray-400' }
   }
   const statusLabel: Record<string, string> = {
-    approved: '承認済', rejected: '否決', on_hold: '保留中', pending: '待機中'
+    approved: '承認済', rejected: '否決', returned: '差し戻し', on_hold: '保留中', pending: '待機中'
   }
 
   const isApplicant = app.applicant_id === user.uid
   const isRejected = app.status === 'rejected'
+  const isReturned = app.status === 'returned'
 
   const content = `
     <div class="space-y-6 max-w-3xl">
@@ -949,9 +1033,9 @@ applications.get('/:id', async (c) => {
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div class="flex items-start justify-between mb-4">
           <div>
-            <div class="flex items-center gap-2 mb-1">
+            <div class="flex items-center gap-2 mb-1 flex-wrap">
               <span class="text-xs text-gray-400">${app.application_number}</span>
-              ${app.resubmit_count > 0 ? `<span class="bg-purple-100 text-purple-600 text-xs font-semibold px-2 py-0.5 rounded-full">再提出 ${app.resubmit_count}回目</span>` : ''}
+              ${app.resubmit_count > 0 && app.returned_reason ? `<span class="bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5 rounded-full">↩ 差し戻し再申請 ${app.resubmit_count}回目</span>` : app.resubmit_count > 0 ? `<span class="bg-purple-100 text-purple-600 text-xs font-semibold px-2 py-0.5 rounded-full">再提出 ${app.resubmit_count}回目</span>` : ''}
             </div>
             <h2 class="text-xl font-bold text-gray-800">${app.mansion_name || app.title}</h2>
           </div>
@@ -979,7 +1063,7 @@ applications.get('/:id', async (c) => {
             const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', other1: '添付資料①', other2: '添付資料②' }
             return `<div class="flex items-center gap-2">
               <span class="text-xs text-gray-400">${labels[att.file_type] || att.file_type}</span>
-              <a href="/files/${att.id}" target="_blank" class="text-sm text-blue-600 hover:underline flex items-center gap-1">
+              <a href="/files/${att.id}" target="_blank" class="text-sm text-[#396999] hover:underline flex items-center gap-1">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
                 ${att.file_name}
               </a>
@@ -988,6 +1072,21 @@ applications.get('/:id', async (c) => {
         </div>
       </div>
       ` : ''}
+
+      <!-- 差し戻し情報（差し戻し中または差し戻し再申請の場合） -->
+      ${(app.status === 'returned' || app.returned_reason) ? `
+      <div class="bg-orange-50 border border-orange-300 rounded-xl p-5 space-y-3">
+        <h3 class="font-semibold text-orange-800 flex items-center gap-2">↩ 差し戻し情報</h3>
+        <div>
+          <p class="text-xs font-medium text-orange-600 mb-1">差し戻し理由</p>
+          <p class="text-sm text-orange-900 bg-white rounded-lg p-3 border border-orange-200">${app.returned_reason || '-'}</p>
+        </div>
+        ${app.reapply_reason ? `
+        <div>
+          <p class="text-xs font-medium text-purple-600 mb-1">再申請理由・修正内容</p>
+          <p class="text-sm text-purple-900 bg-white rounded-lg p-3 border border-purple-200">${app.reapply_reason}</p>
+        </div>` : ''}
+      </div>` : ''}
 
       <!-- 回覧フロー タイムライン -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -999,14 +1098,14 @@ applications.get('/:id', async (c) => {
           <div class="space-y-0">
             <!-- 申請者（回覧開始日） -->
             <div class="relative flex gap-4 pb-6">
-              <div class="w-8 h-8 rounded-full bg-blue-500 border-2 border-blue-500 text-white flex items-center justify-center text-xs font-bold z-10 shrink-0">申</div>
-              <div class="flex-1 border border-blue-200 bg-blue-50 rounded-lg p-3 ml-1">
+              <div class="w-8 h-8 rounded-full bg-[#396999] border-2 border-[#396999] text-white flex items-center justify-center text-xs font-bold z-10 shrink-0">申</div>
+              <div class="flex-1 border border-[#AECBE5] bg-[#EEF4FA] rounded-lg p-3 ml-1">
                 <div class="flex items-center justify-between flex-wrap gap-2">
                   <div>
                     <span class="text-sm font-semibold text-gray-800">${app.applicant_name}</span>
                     <span class="ml-2 text-xs text-gray-400">申請者</span>
                   </div>
-                  <span class="text-xs font-medium bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">申請</span>
+                  <span class="text-xs font-medium bg-[#D5E5F2] text-[#2E5580] px-2 py-0.5 rounded-full">申請</span>
                 </div>
                 <div class="flex items-center gap-4 mt-1.5 flex-wrap">
                   <span class="text-xs text-gray-500">📅 申請日：${app.created_at?.substring(0,16)}</span>
@@ -1019,8 +1118,11 @@ applications.get('/:id', async (c) => {
             ${(steps.results as any[]).map((step: any) => {
               const isCurrent = app.current_step === step.step_number && step.status === 'pending'
               const c2 = timelineItemClass(step.status, isCurrent)
-              const iconMap: Record<string, string> = { approved: '✅', rejected: '❌', on_hold: '⏸', pending: isCurrent ? '▶' : '○' }
-              const icon = iconMap[step.status] || '○'
+              const actionDateLabel =
+                step.status === 'approved' ? '承認日時' :
+                step.status === 'rejected' ? '否決日時' :
+                step.status === 'returned' ? '差し戻し日時' :
+                step.status === 'on_hold'  ? '保留日時' : '対応日時'
               return `
             <div class="relative flex gap-4 pb-6">
               <div class="w-8 h-8 rounded-full ${c2.dot} border-2 text-white flex items-center justify-center text-xs font-bold z-10 shrink-0">${step.step_number}</div>
@@ -1029,21 +1131,25 @@ applications.get('/:id', async (c) => {
                   <div>
                     <span class="text-sm font-semibold text-gray-800">${step.reviewer_name}</span>
                     <span class="ml-2 text-xs text-gray-400">${stepLabels[step.step_number] || 'レビュー'}</span>
-                    ${isCurrent ? '<span class="ml-1 text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-medium">承認待ち</span>' : ''}
+                    ${isCurrent ? '<span class="ml-1 text-xs bg-[#EEF4FA] text-[#396999] px-1.5 py-0.5 rounded-full font-medium">承認待ち</span>' : ''}
                   </div>
                   <span class="text-xs font-medium px-2 py-0.5 rounded-full ${
                     step.status === 'approved' ? 'bg-green-100 text-green-700' :
                     step.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                    step.status === 'returned' ? 'bg-orange-100 text-orange-700' :
                     step.status === 'on_hold'  ? 'bg-yellow-100 text-yellow-700' :
-                    isCurrent ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'
+                    isCurrent ? 'bg-[#EEF4FA] text-[#396999]' : 'bg-gray-100 text-gray-400'
                   }">${statusLabel[step.status] || '待機中'}</span>
                 </div>
                 ${step.acted_at ? `
                 <div class="mt-1.5">
-                  <span class="text-xs text-gray-500">🕐 ${step.status === 'approved' ? '承認日時' : step.status === 'rejected' ? '否決日時' : '対応日時'}：<span class="font-medium text-gray-700">${step.acted_at.substring(0,16)}</span></span>
+                  <span class="text-xs text-gray-500">🕐 ${actionDateLabel}：<span class="font-medium text-gray-700">${step.acted_at.substring(0,16)}</span></span>
                 </div>` : ''}
-                ${step.action_comment ? `<p class="text-xs text-gray-600 mt-2 bg-white rounded p-2 border border-gray-200">${step.status === 'on_hold' ? '❓ ' : '💬 '}${step.action_comment}</p>` : ''}
-                ${step.hold_answer ? `<p class="text-xs text-blue-600 mt-1.5 bg-blue-50 rounded p-2 border border-blue-100">📝 回答：${step.hold_answer}</p>` : ''}
+                ${step.action_comment ? `<p class="text-xs text-gray-600 mt-2 bg-white rounded p-2 border border-gray-200">${
+                  step.status === 'on_hold' ? '❓ ' :
+                  step.status === 'returned' ? '↩ 差し戻し理由：' : '💬 '
+                }${step.action_comment}</p>` : ''}
+                ${step.hold_answer ? `<p class="text-xs text-[#396999] mt-1.5 bg-[#EEF4FA] rounded p-2 border border-[#D5E5F2]">📝 回答：${step.hold_answer}</p>` : ''}
               </div>
             </div>`
             }).join('')}
@@ -1066,11 +1172,32 @@ applications.get('/:id', async (c) => {
       </div>
       ` : ''}
 
-      <!-- 差し戻し後の再提出 -->
+      <!-- 差し戻し後の再申請（returned ステータス） -->
+      ${isApplicant && isReturned ? `
+      <div class="bg-orange-50 border border-orange-300 rounded-xl p-6">
+        <h3 class="font-semibold text-orange-800 mb-2">↩ 差し戻し – 再申請が必要です</h3>
+        <p class="text-sm text-orange-700 mb-4">内容を確認の上、再申請理由・修正内容を入力して再申請してください。</p>
+        <form method="POST" action="/applications/${id}/resubmit">
+          <div class="mb-4">
+            <label class="block text-sm font-semibold text-gray-700 mb-1.5">再申請理由・修正内容 <span class="text-red-500">*</span></label>
+            <textarea name="reapply_reason" required rows="4"
+              class="w-full px-3 py-2.5 border border-orange-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none resize-none"
+              placeholder="差し戻し理由に対してどのように修正・対応したかを記入してください"></textarea>
+          </div>
+          <button type="submit"
+            class="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-8 py-2.5 rounded-lg transition text-sm"
+            onclick="return confirm('再申請します。よろしいですか？')">
+            ↩ 再申請する
+          </button>
+        </form>
+      </div>
+      ` : ''}
+
+      <!-- 否決後の再提出（rejected ステータス） -->
       ${isApplicant && isRejected ? `
       <div class="bg-red-50 border border-red-200 rounded-xl p-6">
-        <h3 class="font-semibold text-red-800 mb-2">❌ 差し戻し</h3>
-        <p class="text-sm text-red-600 mb-4">この申請は差し戻されました。同じ内容で再提出できます。</p>
+        <h3 class="font-semibold text-red-800 mb-2">❌ 否決</h3>
+        <p class="text-sm text-red-600 mb-4">この申請は否決されました。同じ内容で再提出できます。</p>
         <form method="POST" action="/applications/${id}/resubmit">
           <button type="submit" class="bg-red-500 hover:bg-red-600 text-white font-semibold px-6 py-2 rounded-lg transition text-sm"
             onclick="return confirm('同じ内容で再提出しますか？')">
@@ -1114,6 +1241,11 @@ applications.get('/:id/review/:stepId', async (c) => {
     LEFT JOIN users u ON a.applicant_id = u.id WHERE a.id = ?
   `).bind(id).first() as any
 
+  // 自分の番でない場合（current_step が自分の step_number と一致しない）はリダイレクト
+  if (!app || app.current_step !== step.step_number) {
+    return c.redirect(`/applications/${id}`)
+  }
+
   const attachments = await db.prepare('SELECT * FROM attachments WHERE application_id = ?').bind(id).all()
 
   const content = `
@@ -1141,34 +1273,44 @@ applications.get('/:id/review/:stepId', async (c) => {
             <div class="flex flex-wrap gap-2">
               ${(attachments.results as any[]).map(att => {
                 const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', other1: '添付①', other2: '添付②' }
-                return `<a href="/files/${att.id}" target="_blank" class="text-xs text-blue-600 hover:underline bg-blue-50 px-2 py-1 rounded">${labels[att.file_type]}: ${att.file_name}</a>`
+                return `<a href="/files/${att.id}" target="_blank" class="text-xs text-[#396999] hover:underline bg-[#EEF4FA] px-2 py-1 rounded">${labels[att.file_type]}: ${att.file_name}</a>`
               }).join('')}
             </div>
           </div>
         ` : ''}
       </div>
 
+      <!-- 差し戻し理由・再申請理由（再申請の場合のみ表示） -->
+      ${app.returned_reason ? `
+      <div class="bg-red-50 border border-red-200 rounded-xl p-4 space-y-2">
+        <p class="text-xs font-semibold text-red-700">⚠️ この申請は差し戻し後の再申請です</p>
+        <div>
+          <p class="text-xs text-red-500 font-medium">差し戻し理由</p>
+          <p class="text-sm text-red-800 bg-white rounded p-2 border border-red-200 mt-1">${app.returned_reason}</p>
+        </div>
+        ${app.reapply_reason ? `
+        <div>
+          <p class="text-xs text-purple-500 font-medium">再申請理由・修正内容</p>
+          <p class="text-sm text-purple-800 bg-white rounded p-2 border border-purple-200 mt-1">${app.reapply_reason}</p>
+        </div>` : ''}
+      </div>` : ''}
+
       <!-- アクションフォーム -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 class="font-semibold text-gray-800 mb-4">承認アクション</h3>
         <form method="POST" action="/applications/${id}/review/${stepId}" id="reviewForm">
           <input type="hidden" name="action" id="actionInput">
-          <div class="mb-4">
-            <label class="block text-sm font-semibold text-gray-700 mb-1.5">コメント（差し戻し・保留の場合は必須）</label>
-            <textarea name="comment" id="commentArea" rows="4"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-              placeholder="差し戻し理由または質問を入力してください"></textarea>
-          </div>
+          <input type="hidden" name="comment" id="commentHidden">
           <div class="flex gap-3">
             <button type="button" onclick="submitAction('approve')"
               class="flex-1 bg-green-500 hover:bg-green-600 text-white font-semibold py-3 rounded-lg transition text-sm flex items-center justify-center gap-2">
               ✅ 承認
             </button>
-            <button type="button" onclick="submitAction('reject')"
-              class="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg transition text-sm flex items-center justify-center gap-2">
-              ❌ 差し戻し
+            <button type="button" onclick="openModal('return')"
+              class="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 rounded-lg transition text-sm flex items-center justify-center gap-2">
+              ↩ 差し戻し
             </button>
-            <button type="button" onclick="submitAction('hold')"
+            <button type="button" onclick="openModal('hold')"
               class="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-3 rounded-lg transition text-sm flex items-center justify-center gap-2">
               ⏸ 保留
             </button>
@@ -1179,17 +1321,78 @@ applications.get('/:id/review/:stepId', async (c) => {
       <a href="/applications/${id}" class="text-sm text-gray-500 hover:text-gray-700">← 詳細に戻る</a>
     </div>
 
+    <!-- 差し戻し・保留 モーダル -->
+    <div id="actionModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+        <h3 id="modalTitle" class="font-bold text-gray-800 text-lg mb-3"></h3>
+        <p id="modalDesc" class="text-sm text-gray-500 mb-3"></p>
+        <textarea id="modalComment" rows="4" required
+          class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none resize-none mb-4"
+          placeholder="理由を入力してください（必須）"></textarea>
+        <div class="flex gap-3">
+          <button type="button" onclick="closeModal()"
+            class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-lg transition text-sm">
+            キャンセル
+          </button>
+          <button type="button" id="modalSubmitBtn" onclick="submitModal()"
+            class="flex-1 text-white font-semibold py-2.5 rounded-lg transition text-sm">
+            送信する
+          </button>
+        </div>
+      </div>
+    </div>
+
     <script>
+      let currentAction = ''
+
       function submitAction(action) {
-        const comment = document.getElementById('commentArea').value.trim()
-        if ((action === 'reject' || action === 'hold') && !comment) {
-          alert(action === 'reject' ? '差し戻し理由を入力してください' : '質問内容を入力してください')
-          return
-        }
         if (action === 'approve' && !confirm('この申請を承認しますか？')) return
         document.getElementById('actionInput').value = action
+        document.getElementById('commentHidden').value = ''
         document.getElementById('reviewForm').submit()
       }
+
+      function openModal(action) {
+        currentAction = action
+        const modal = document.getElementById('actionModal')
+        const title = document.getElementById('modalTitle')
+        const desc = document.getElementById('modalDesc')
+        const btn = document.getElementById('modalSubmitBtn')
+        if (action === 'return') {
+          title.textContent = '↩ 差し戻し'
+          desc.textContent = '差し戻し理由を入力してください。申請者にメールで通知されます。'
+          btn.className = btn.className.replace(/bg-\\S+/, '') 
+          btn.style.background = '#f97316'
+        } else {
+          title.textContent = '⏸ 保留（質問）'
+          desc.textContent = '質問内容を入力してください。申請者にメールで通知されます。'
+          btn.style.background = '#eab308'
+        }
+        document.getElementById('modalComment').value = ''
+        modal.classList.remove('hidden')
+        setTimeout(() => document.getElementById('modalComment').focus(), 100)
+      }
+
+      function closeModal() {
+        document.getElementById('actionModal').classList.add('hidden')
+      }
+
+      function submitModal() {
+        const comment = document.getElementById('modalComment').value.trim()
+        if (!comment) {
+          alert('理由を入力してください')
+          document.getElementById('modalComment').focus()
+          return
+        }
+        document.getElementById('actionInput').value = currentAction
+        document.getElementById('commentHidden').value = comment
+        document.getElementById('reviewForm').submit()
+      }
+
+      // モーダル外クリックで閉じる
+      document.getElementById('actionModal').addEventListener('click', function(e) {
+        if (e.target === this) closeModal()
+      })
     </script>
   `
   return c.html(layout('承認・差し戻し', content, user))
@@ -1216,8 +1419,8 @@ applications.post('/:id/review/:stepId', async (c) => {
     SELECT a.*, u.email as applicant_email, u.name as applicant_name
     FROM applications a JOIN users u ON a.applicant_id = u.id WHERE a.id = ?
   `).bind(id).first() as any
+  if (!app) return c.redirect(`/applications/${id}`)
 
-  const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
   const appUrl = `${new URL(c.req.url).origin}/applications/${id}`
 
   if (action === 'approve') {
@@ -1233,15 +1436,15 @@ applications.post('/:id/review/:stepId', async (c) => {
 
     if (nextStep) {
       await db.prepare('UPDATE applications SET current_step = ?, updated_at = datetime("now") WHERE id = ?').bind(step.step_number + 1, id).run()
-      if (smtp) {
-        await sendMail(smtp, { to: nextStep.email, subject: buildMailSubject('review_request', app.application_number), html: buildMailBody('review_request', { appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl }) })
-      }
+      await sendNotification(db, 'review_request', nextStep.reviewer_id, {
+        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl
+      })
     } else {
       // 全ステップ完了
       await db.prepare('UPDATE applications SET status = "completed", updated_at = datetime("now") WHERE id = ?').bind(id).run()
-      if (smtp) {
-        await sendMail(smtp, { to: app.applicant_email, subject: buildMailSubject('completed', app.application_number), html: buildMailBody('completed', { appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl }) })
-      }
+      await sendNotification(db, 'completed', app.applicant_id, {
+        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl
+      })
     }
 
   } else if (action === 'reject') {
@@ -1249,18 +1452,44 @@ applications.post('/:id/review/:stepId', async (c) => {
       'UPDATE circulation_steps SET status = "rejected", action_comment = ?, acted_at = datetime("now") WHERE id = ?'
     ).bind(comment, stepId).run()
     await db.prepare('UPDATE applications SET status = "rejected", updated_at = datetime("now") WHERE id = ?').bind(id).run()
-    if (smtp) {
-      await sendMail(smtp, { to: app.applicant_email, subject: buildMailSubject('rejected', app.application_number), html: buildMailBody('rejected', { appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl }) })
-    }
+    await sendNotification(db, 'rejected', app.applicant_id, {
+      appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl
+    })
 
   } else if (action === 'hold') {
     await db.prepare(
       'UPDATE circulation_steps SET status = "on_hold", action_comment = ?, acted_at = datetime("now") WHERE id = ?'
     ).bind(comment, stepId).run()
     await db.prepare('UPDATE applications SET status = "on_hold", updated_at = datetime("now") WHERE id = ?').bind(id).run()
-    if (smtp) {
-      await sendMail(smtp, { to: app.applicant_email, subject: buildMailSubject('on_hold', app.application_number), html: buildMailBody('on_hold', { appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl }) })
-    }
+    await sendNotification(db, 'on_hold', app.applicant_id, {
+      appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl
+    })
+
+  } else if (action === 'return') {
+    // 差し戻し：申請者に戻す
+    await db.prepare(
+      'UPDATE circulation_steps SET status = "returned", action_comment = ?, acted_at = datetime("now") WHERE id = ?'
+    ).bind(comment, stepId).run()
+    await db.prepare(`
+      UPDATE applications SET
+        status = "returned",
+        returned_reason = ?,
+        returned_from_step = ?,
+        returned_by_id = ?,
+        updated_at = datetime("now")
+      WHERE id = ?
+    `).bind(comment, step.step_number, user.uid, id).run()
+
+    // 申請者へ統合通知（メール + LINE WORKS）
+    await sendNotification(db, 'returned', app.applicant_id, {
+      appNumber: app.application_number,
+      title: app.title,
+      applicantName: app.applicant_name,
+      returnedReason: comment,
+      returnedFromStep: step.step_number,
+      returnedByName: user.name,
+      appUrl
+    })
   }
 
   return c.redirect(`/applications/${id}`)
@@ -1286,11 +1515,16 @@ applications.post('/:id/answer/:stepId', async (c) => {
     'SELECT cs.*, u.email FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.id = ?'
   ).bind(stepId).first() as any
   const app = await db.prepare('SELECT * FROM applications WHERE id = ?').bind(id).first() as any
-  const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
 
-  if (step && app && smtp) {
+  if (step && app) {
     const appUrl = `${new URL(c.req.url).origin}/applications/${id}`
-    await sendMail(smtp, { to: (step as any).email, subject: buildMailSubject('answered', (app as any).application_number), html: buildMailBody('answered', { appNumber: (app as any).application_number, title: (app as any).title, applicantName: user.name, comment: body.answer, appUrl }) })
+    await sendNotification(db, 'answered', (step as any).reviewer_id, {
+      appNumber: (app as any).application_number,
+      title: (app as any).title,
+      applicantName: user.name,
+      comment: body.answer,
+      appUrl
+    })
   }
 
   return c.redirect(`/applications/${id}`)
@@ -1306,20 +1540,32 @@ applications.post('/:id/resubmit', async (c) => {
   const db = c.env.DB
   const id = c.req.param('id')
 
-  const orig = await db.prepare('SELECT * FROM applications WHERE id = ? AND applicant_id = ? AND status = "rejected"').bind(id, user.uid).first() as any
+  // rejected（否決）または returned（差し戻し）のどちらからも再申請可能
+  const orig = await db.prepare(
+    'SELECT * FROM applications WHERE id = ? AND applicant_id = ? AND (status = "rejected" OR status = "returned")'
+  ).bind(id, user.uid).first() as any
   if (!orig) return c.redirect(`/applications/${id}`)
+
+  const body = await c.req.parseBody() as any
+  const reapplyReason = body.reapply_reason || null
+  const isReturned = orig.status === 'returned'
 
   const newNumber = generateApplicationNumber()
   const result = await db.prepare(`
     INSERT INTO applications (
       application_number, title, mansion_id, applicant_id, circulation_start_date,
       payment_target, account_item, td_type, kumiai_amount, budget_amount,
-      commission_rate, remarks, status, current_step, resubmit_count, original_application_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, ?, ?)
+      commission_rate, remarks, status, current_step, resubmit_count, original_application_id,
+      returned_reason, reapply_reason, returned_from_step, returned_by_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, ?, ?, ?, ?, ?, ?)
   `).bind(
     newNumber, orig.title, orig.mansion_id, orig.applicant_id, orig.circulation_start_date,
     orig.payment_target, orig.account_item, orig.td_type, orig.kumiai_amount, orig.budget_amount,
-    null, orig.remarks, (orig.resubmit_count || 0) + 1, orig.id
+    null, orig.remarks, (orig.resubmit_count || 0) + 1, orig.id,
+    isReturned ? orig.returned_reason : null,
+    reapplyReason,
+    isReturned ? orig.returned_from_step : null,
+    isReturned ? orig.returned_by_id : null
   ).run()
 
   const newId = result.meta.last_row_id
@@ -1331,6 +1577,24 @@ applications.post('/:id/resubmit', async (c) => {
   }
 
   await createCirculationSteps(db, newId as number, user.uid, orig.payment_target, orig.mansion_id)
+
+  // 差し戻し再申請の場合、全承認者に統合通知（メール + LINE WORKS）
+  if (isReturned) {
+    const steps = await db.prepare(
+      'SELECT cs.reviewer_id FROM circulation_steps cs WHERE cs.application_id = ?'
+    ).bind(newId).all()
+    const appUrl = `${new URL(c.req.url).origin}/applications/${newId}`
+    for (const step of steps.results as any[]) {
+      await sendNotification(db, 'reapplied', step.reviewer_id, {
+        appNumber: newNumber,
+        title: orig.title,
+        applicantName: user.name,
+        returnedReason: orig.returned_reason,
+        reapplyReason,
+        appUrl
+      })
+    }
+  }
 
   return c.redirect(`/applications/${newId}`)
 })

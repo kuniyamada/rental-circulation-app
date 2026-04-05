@@ -60,7 +60,7 @@ inbox.get('/', async (c) => {
       <!-- ヘッダー -->
       <div class="flex items-center justify-between">
         <h2 class="text-xl font-bold text-gray-800">📥 請求書受付管理</h2>
-        <a href="/inbox/new" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
+        <a href="/inbox/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
           <span>＋</span><span>請求書を登録</span>
         </a>
       </div>
@@ -69,7 +69,7 @@ inbox.get('/', async (c) => {
       <div class="flex gap-2 border-b border-gray-200 pb-0">
         ${[['all','すべて'],['pending','未申請'],['applied','申請済'],['cancelled','キャンセル']].map(([v,l]) => `
           <a href="/inbox?status=${v}" class="px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition
-            ${statusFilter === v ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-700'}">
+            ${statusFilter === v ? 'border-[#396999] text-[#396999] bg-[#EEF4FA]' : 'border-transparent text-gray-500 hover:text-gray-700'}">
             ${l}
           </a>
         `).join('')}
@@ -107,7 +107,7 @@ inbox.get('/', async (c) => {
                     </td>
                     <td class="px-4 py-3">
                       ${item.attachment_key
-                        ? `<a href="/inbox/${item.id}/download" class="text-blue-600 hover:underline text-xs flex items-center gap-1">📎 ${item.attachment_name || 'ファイル'}</a>`
+                        ? `<a href="/inbox/${item.id}/download" class="text-[#396999] hover:underline text-xs flex items-center gap-1">📎 ${item.attachment_name || 'ファイル'}</a>`
                         : '<span class="text-gray-300 text-xs">なし</span>'}
                     </td>
                     <td class="px-4 py-3 text-xs text-gray-500">
@@ -172,7 +172,7 @@ inbox.get('/new', async (c) => {
             <div class="flex gap-2 items-start">
               <div class="w-28">
                 <input type="number" id="mansionNumberInput" placeholder="番号" min="1"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none text-center"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none text-center"
                   oninput="searchMansion(this.value)">
                 <p class="text-xs text-gray-400 mt-1 text-center">番号を入力</p>
               </div>
@@ -192,7 +192,7 @@ inbox.get('/new', async (c) => {
               担当フロント <span class="text-red-500">*</span>
             </label>
             <select name="front_user_id" id="frontSelect" required
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#396999]">
               <option value="">-- 選択してください --</option>
               ${(fronts.results as any[]).map(f =>
                 `<option value="${f.id}">${f.name}（${f.email}）</option>`
@@ -206,13 +206,13 @@ inbox.get('/new', async (c) => {
             <label class="block text-sm font-semibold text-gray-700 mb-1">
               請求書PDF <span class="text-red-500">*</span>
             </label>
-            <div class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 transition cursor-pointer" onclick="document.getElementById('pdfFile').click()">
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-[#5B8AB5] transition cursor-pointer" onclick="document.getElementById('pdfFile').click()">
               <div class="text-3xl mb-1">📄</div>
               <p class="text-sm text-gray-500">クリックしてPDFを選択</p>
               <p class="text-xs text-gray-400 mt-1">PDF形式（最大10MB）</p>
               <input type="file" id="pdfFile" name="pdf_file" accept=".pdf,application/pdf"
                 class="hidden" onchange="showFileName(this)">
-              <p id="fileName" class="text-xs text-blue-600 mt-2 font-medium"></p>
+              <p id="fileName" class="text-xs text-[#396999] mt-2 font-medium"></p>
             </div>
           </div>
 
@@ -220,7 +220,7 @@ inbox.get('/new', async (c) => {
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1">備考</label>
             <textarea name="note" rows="3" placeholder="業者名、請求内容など補足があれば入力"
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#396999] resize-none"></textarea>
           </div>
 
           <!-- 送信ボタン -->
@@ -229,7 +229,7 @@ inbox.get('/new', async (c) => {
               キャンセル
             </a>
             <button type="submit"
-              class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition flex items-center justify-center gap-2">
+              class="flex-1 bg-[#396999] hover:bg-[#2E5580] text-white font-semibold px-4 py-2 rounded-lg text-sm transition flex items-center justify-center gap-2">
               📤 登録してフロントに送信
             </button>
           </div>
@@ -265,8 +265,8 @@ inbox.get('/new', async (c) => {
 
         const found = MANSIONS.find(m => m.number === num);
         if (found) {
-          resultEl.innerHTML = '<span class="text-blue-700 font-bold mr-2">' + found.number + '</span><span class="font-semibold text-gray-800">' + found.name + '</span>';
-          resultEl.className = 'px-3 py-2 border-2 border-blue-400 rounded-lg text-sm bg-blue-50 min-h-[38px] flex items-center gap-1';
+          resultEl.innerHTML = '<span class="text-[#2E5580] font-bold mr-2">' + found.number + '</span><span class="font-semibold text-gray-800">' + found.name + '</span>';
+          resultEl.className = 'px-3 py-2 border-2 border-[#5B8AB5] rounded-lg text-sm bg-[#EEF4FA] min-h-[38px] flex items-center gap-1';
           notFoundEl.classList.add('hidden');
           idInput.value = found.id;
           // 担当フロント自動セット

@@ -9,6 +9,9 @@ export function layout(title: string, content: string, user: any): string {
     admin: '管理者',
   }
 
+  const showNewApp = ['admin','front','front_supervisor'].includes(user.role)
+  const showInbox  = user.role === 'operations' || user.is_admin
+
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -17,8 +20,13 @@ export function layout(title: string, content: string, user: any): string {
   <title>${title} - 請求書回覧システム</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    .sidebar-item { @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition cursor-pointer; }
-    .sidebar-item.active { @apply bg-blue-50 text-blue-600 font-semibold; }
+    .sidebar-item { @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition cursor-pointer; }
+    .sidebar-item.active { @apply bg-[#EEF4FA] text-[#396999] font-semibold; }
+    /* スマホ用ボトムナビ */
+    .bottom-nav-item { @apply flex flex-col items-center justify-center gap-0.5 text-gray-500 py-2 px-3 rounded-lg transition; }
+    .bottom-nav-item.active { @apply text-[#396999]; }
+    .bottom-nav-item svg { @apply w-5 h-5; }
+    .bottom-nav-item span { @apply text-[10px] font-medium leading-none; }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -30,10 +38,10 @@ export function layout(title: string, content: string, user: any): string {
           <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
         <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+          <div class="w-8 h-8 bg-[#396999] rounded-lg flex items-center justify-center">
             <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
           </div>
-          <span class="font-bold text-gray-800 text-sm">請求書回覧システム</span>
+          <span class="font-bold text-gray-800 text-sm">請求書回覧</span>
         </div>
       </div>
       <div class="flex items-center gap-3">
@@ -51,14 +59,14 @@ export function layout(title: string, content: string, user: any): string {
   </header>
 
   <div class="flex pt-14">
-    <!-- サイドバー -->
-    <aside id="sidebar" class="w-60 bg-white border-r border-gray-200 fixed left-0 top-14 bottom-0 overflow-y-auto z-40 transform -translate-x-full lg:translate-x-0 transition-transform duration-200">
+    <!-- サイドバー（PC: 常時表示 / スマホ: ドロワー） -->
+    <aside id="sidebar" class="w-64 bg-white border-r border-gray-200 fixed left-0 top-14 bottom-0 overflow-y-auto z-40 transform -translate-x-full lg:translate-x-0 transition-transform duration-200">
       <nav class="p-3 space-y-1">
         <a href="/" class="sidebar-item ${title === 'ダッシュボード' ? 'active' : ''}">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
           ダッシュボード
         </a>
-        ${(['admin','front','front_supervisor'].includes(user.role)) ? `
+        ${showNewApp ? `
         <a href="/applications/new" class="sidebar-item ${title === '新規申請' ? 'active' : ''}">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           新規申請
@@ -72,7 +80,7 @@ export function layout(title: string, content: string, user: any): string {
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
           パスワード変更
         </a>
-        ${(user.role === 'operations' || user.is_admin) ? `
+        ${showInbox ? `
         <div class="pt-3 pb-1">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">業務管理課</p>
         </div>
@@ -105,21 +113,63 @@ export function layout(title: string, content: string, user: any): string {
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
           メール設定
         </a>
+        <a href="/admin/reminder" class="sidebar-item ${title.includes('リマインダー') ? 'active' : ''}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+          リマインダー設定
+        </a>
+        <a href="/admin/lineworks" class="sidebar-item ${title.includes('LINE WORKS') ? 'active' : ''}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+          LINE WORKS設定
+        </a>
+        <a href="/admin/backup" class="sidebar-item ${title.includes('バックアップ') ? 'active' : ''}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          データバックアップ
+        </a>
         ` : ''}
       </nav>
     </aside>
 
     <!-- オーバーレイ（モバイル） -->
-    <div id="overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black bg-opacity-30 z-30 hidden lg:hidden"></div>
+    <div id="overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black bg-opacity-40 z-30 hidden lg:hidden"></div>
 
     <!-- メインコンテンツ -->
-    <main class="flex-1 lg:ml-60 p-6">
+    <main class="flex-1 lg:ml-64 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6">
       <div class="max-w-6xl mx-auto">
-        <h1 class="text-xl font-bold text-gray-800 mb-6">${title}</h1>
+        <h1 class="text-lg sm:text-xl font-bold text-gray-800 mb-4 sm:mb-6">${title}</h1>
         ${content}
       </div>
     </main>
   </div>
+
+  <!-- ボトムナビゲーション（スマホのみ） -->
+  <nav class="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 safe-area-bottom">
+    <div class="flex items-center justify-around px-2 py-1">
+      <a href="/" class="bottom-nav-item ${title === 'ダッシュボード' ? 'active' : ''}">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+        <span>ホーム</span>
+      </a>
+      ${showNewApp ? `
+      <a href="/applications/new" class="bottom-nav-item ${title === '新規申請' ? 'active' : ''}">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        <span>新規申請</span>
+      </a>
+      ` : ''}
+      <a href="/applications" class="bottom-nav-item ${title === '申請一覧' ? 'active' : ''}">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        <span>申請一覧</span>
+      </a>
+      ${showInbox ? `
+      <a href="/inbox" class="bottom-nav-item ${title.includes('請求書受付') ? 'active' : ''}">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+        <span>受付</span>
+      </a>
+      ` : ''}
+      <button onclick="toggleSidebar()" class="bottom-nav-item">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+        <span>メニュー</span>
+      </button>
+    </div>
+  </nav>
 
   <script>
     function toggleSidebar() {
@@ -135,12 +185,13 @@ export function layout(title: string, content: string, user: any): string {
 
 export function statusBadge(status: string): string {
   const map: Record<string, { label: string; cls: string }> = {
-    draft:       { label: '下書き',   cls: 'bg-gray-100 text-gray-600' },
-    circulating: { label: '回覧中',   cls: 'bg-blue-100 text-blue-600' },
-    approved:    { label: '承認済',   cls: 'bg-green-100 text-green-700' },
-    rejected:    { label: '差し戻し', cls: 'bg-red-100 text-red-600' },
-    on_hold:     { label: '保留中',   cls: 'bg-yellow-100 text-yellow-700' },
-    completed:   { label: '完了',     cls: 'bg-purple-100 text-purple-700' },
+    draft:       { label: '下書き',       cls: 'bg-gray-100 text-gray-600' },
+    circulating: { label: '回覧中',       cls: 'bg-[#D5E5F2] text-[#396999]' },
+    approved:    { label: '承認済',       cls: 'bg-green-100 text-green-700' },
+    rejected:    { label: '否決',         cls: 'bg-red-100 text-red-600' },
+    returned:    { label: '差し戻し',     cls: 'bg-orange-100 text-orange-700' },
+    on_hold:     { label: '保留中',       cls: 'bg-yellow-100 text-yellow-700' },
+    completed:   { label: '完了',         cls: 'bg-purple-100 text-purple-700' },
   }
   const s = map[status] || { label: status, cls: 'bg-gray-100 text-gray-600' }
   return `<span class="text-xs font-semibold px-2 py-0.5 rounded-full ${s.cls}">${s.label}</span>`
