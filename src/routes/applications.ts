@@ -372,6 +372,27 @@ applications.get('/new', async (c) => {
             </div>
           </div>
 
+          <!-- 添付ファイル（請求書）① ※必須 -->
+          <div class="border border-gray-200 rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-700 mb-3">添付ファイル（請求書）</h3>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）① <span class="text-red-500">*</span></label>
+              ${inboxData?.attachment_key ? `
+              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg">
+                <span class="text-[#396999] text-xs">📎 引き継ぎ：${inboxData.attachment_name || 'invoice.pdf'}</span>
+                <input type="hidden" name="inbox_attachment_key" value="${inboxData.attachment_key}">
+                <input type="hidden" name="inbox_attachment_name" value="${inboxData.attachment_name || ''}">
+                <span class="text-xs text-gray-400">（別ファイルを選択すると上書きされます）</span>
+              </div>
+              <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png"
+                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+              ` : `
+              <input type="file" name="invoice1" required accept=".pdf,.jpg,.jpeg,.png"
+                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+              `}
+            </div>
+          </div>
+
           <!-- 回覧・承認先 -->
           <div class="border border-purple-200 bg-purple-50 rounded-lg p-4 space-y-4">
             <div class="flex items-center gap-2 mb-1">
@@ -531,25 +552,9 @@ applications.get('/new', async (c) => {
             <p id="feeValidationMsg" class="hidden text-xs text-red-500 mt-1.5">⚠ 手数料（円）または手数料（％）のいずれかを入力してください</p>
           </div>
 
-          <!-- 添付ファイル（請求書） -->
-          <div class="border border-gray-200 rounded-lg p-4 space-y-3">
-            <h3 class="text-sm font-semibold text-gray-700">添付ファイル（請求書）</h3>
-            <div>
-              <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）① <span class="text-red-500">*</span></label>
-              ${inboxData?.attachment_key ? `
-              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg">
-                <span class="text-[#396999] text-xs">📎 引き継ぎ：${inboxData.attachment_name || 'invoice.pdf'}</span>
-                <input type="hidden" name="inbox_attachment_key" value="${inboxData.attachment_key}">
-                <input type="hidden" name="inbox_attachment_name" value="${inboxData.attachment_name || ''}">
-                <span class="text-xs text-gray-400">（別ファイルを選択すると上書きされます）</span>
-              </div>
-              <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
-              ` : `
-              <input type="file" name="invoice1" required accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
-              `}
-            </div>
+          <!-- 添付ファイル（請求書）② -->
+          <div class="border border-gray-200 rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-700 mb-3">添付ファイル（請求書）②</h3>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）②</label>
               <input type="file" name="invoice2" accept=".pdf,.jpg,.jpeg,.png"
