@@ -384,11 +384,25 @@ applications.get('/new', async (c) => {
                 <input type="hidden" name="inbox_attachment_name" value="${inboxData.attachment_name || ''}">
                 <span class="text-xs text-gray-400">（別ファイルを選択すると上書きされます）</span>
               </div>
-              <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+              <div class="flex items-center gap-2">
+                <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
+                  onchange="handleFilePreview(this, 'invoice1Preview')"
+                  class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                <button type="button" id="invoice1Preview" onclick="openFilePreview('invoice1Input')"
+                  class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                  👁 確認
+                </button>
+              </div>
               ` : `
-              <input type="file" name="invoice1" required accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+              <div class="flex items-center gap-2">
+                <input type="file" name="invoice1" required accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
+                  onchange="handleFilePreview(this, 'invoice1Preview')"
+                  class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                <button type="button" id="invoice1Preview" onclick="openFilePreview('invoice1Input')"
+                  class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                  👁 確認
+                </button>
+              </div>
               `}
             </div>
           </div>
@@ -557,8 +571,15 @@ applications.get('/new', async (c) => {
             <h3 class="text-sm font-semibold text-gray-700 mb-3">添付ファイル（請求書）②</h3>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）②</label>
-              <input type="file" name="invoice2" accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+              <div class="flex items-center gap-2">
+                <input type="file" name="invoice2" accept=".pdf,.jpg,.jpeg,.png" id="invoice2Input"
+                  onchange="handleFilePreview(this, 'invoice2Preview')"
+                  class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                <button type="button" id="invoice2Preview" onclick="openFilePreview('invoice2Input')"
+                  class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                  👁 確認
+                </button>
+              </div>
             </div>
           </div>
 
@@ -586,13 +607,27 @@ applications.get('/new', async (c) => {
             <h3 class="text-sm font-semibold text-gray-700">添付資料</h3>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料①</label>
-              <input type="file" name="other1" accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+              <div class="flex items-center gap-2">
+                <input type="file" name="other1" accept=".pdf,.jpg,.jpeg,.png" id="other1Input"
+                  onchange="handleFilePreview(this, 'other1Preview')"
+                  class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                <button type="button" id="other1Preview" onclick="openFilePreview('other1Input')"
+                  class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                  👁 確認
+                </button>
+              </div>
             </div>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料②</label>
-              <input type="file" name="other2" accept=".pdf,.jpg,.jpeg,.png"
-                class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+              <div class="flex items-center gap-2">
+                <input type="file" name="other2" accept=".pdf,.jpg,.jpeg,.png" id="other2Input"
+                  onchange="handleFilePreview(this, 'other2Preview')"
+                  class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                <button type="button" id="other2Preview" onclick="openFilePreview('other2Input')"
+                  class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                  👁 確認
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -608,7 +643,67 @@ applications.get('/new', async (c) => {
       </form>
     </div>
 
+    <!-- PDFプレビューモーダル（送信前） -->
+    <div id="filePreviewModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60">
+      <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-4" style="height:85vh;">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+          <span id="filePreviewTitle" class="text-sm font-semibold text-gray-700">ファイルプレビュー</span>
+          <button onclick="closeFilePreviewModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+        <div class="w-full" style="height:calc(100% - 52px);">
+          <iframe id="filePreviewFrame" src="" class="w-full h-full rounded-b-xl border-0"></iframe>
+        </div>
+      </div>
+    </div>
+
     <script>
+      // ---- PDFプレビュー（送信前）----
+      const _previewObjectUrls = {}
+
+      function handleFilePreview(input, btnId) {
+        const btn = document.getElementById(btnId)
+        if (!btn) return
+        if (input.files && input.files[0]) {
+          // 既存のObjectURLを解放
+          if (_previewObjectUrls[btnId]) {
+            URL.revokeObjectURL(_previewObjectUrls[btnId])
+          }
+          _previewObjectUrls[btnId] = URL.createObjectURL(input.files[0])
+          btn.classList.remove('hidden')
+          btn.classList.add('inline-flex')
+        } else {
+          btn.classList.add('hidden')
+          btn.classList.remove('inline-flex')
+        }
+      }
+
+      function openFilePreview(inputId) {
+        const input = document.getElementById(inputId)
+        if (!input || !input.files || !input.files[0]) return
+        const file = input.files[0]
+        // ボタンIDを入力IDから逆引き
+        const btnId = inputId.replace('Input', 'Preview')
+        const url = _previewObjectUrls[btnId] || URL.createObjectURL(file)
+        _previewObjectUrls[btnId] = url
+        document.getElementById('filePreviewTitle').textContent = file.name
+        document.getElementById('filePreviewFrame').src = url
+        const modal = document.getElementById('filePreviewModal')
+        modal.classList.remove('hidden')
+        modal.classList.add('flex')
+      }
+
+      function closeFilePreviewModal() {
+        const modal = document.getElementById('filePreviewModal')
+        modal.classList.add('hidden')
+        modal.classList.remove('flex')
+        document.getElementById('filePreviewFrame').src = ''
+      }
+
+      // 背景クリックで閉じる
+      document.getElementById('filePreviewModal').addEventListener('click', function(e) {
+        if (e.target === this) closeFilePreviewModal()
+      })
+
       // カンマ区切りフォーマット関数
       function formatComma(el, hiddenId) {
         const raw = el.value.replace(/[^0-9]/g, '')
@@ -1095,10 +1190,15 @@ applications.get('/:id', async (c) => {
           ${(attachments.results as any[]).map(att => {
             const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', other1: '添付資料①', other2: '添付資料②' }
             return `<div class="flex items-center gap-2">
-              <span class="text-xs text-gray-400">${labels[att.file_type] || att.file_type}</span>
-              <a href="/files/${att.id}" target="_blank" class="text-sm text-[#396999] hover:underline flex items-center gap-1">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
-                ${att.file_name}
+              <span class="text-xs text-gray-400 w-16 shrink-0">${labels[att.file_type] || att.file_type}</span>
+              <span class="text-sm text-gray-700 flex-1 truncate">${att.file_name}</span>
+              <button type="button" onclick="openSavedFilePreview('/files/${att.id}', '${att.file_name.replace(/'/g, "\\'")}')"
+                class="inline-flex items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580] shrink-0">
+                👁 確認
+              </button>
+              <a href="/files/${att.id}" target="_blank"
+                class="inline-flex items-center gap-1 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs rounded-md hover:bg-gray-50 shrink-0">
+                ⬇ DL
               </a>
             </div>`
           }).join('')}
@@ -1306,7 +1406,10 @@ applications.get('/:id/review/:stepId', async (c) => {
             <div class="flex flex-wrap gap-2">
               ${(attachments.results as any[]).map(att => {
                 const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', other1: '添付①', other2: '添付②' }
-                return `<a href="/files/${att.id}" target="_blank" class="text-xs text-[#396999] hover:underline bg-[#EEF4FA] px-2 py-1 rounded">${labels[att.file_type]}: ${att.file_name}</a>`
+                return `<button type="button" onclick="openSavedFilePreview('/files/${att.id}', '${att.file_name.replace(/'/g, "\\'")}')"
+                  class="inline-flex items-center gap-1 text-xs text-[#396999] bg-[#EEF4FA] hover:bg-[#D5E5F2] px-2 py-1 rounded">
+                  👁 ${labels[att.file_type]}: ${att.file_name}
+                </button>`
               }).join('')}
             </div>
           </div>

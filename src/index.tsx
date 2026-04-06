@@ -412,6 +412,37 @@ app.get('/', async (c) => {
       </div>
     </main>
   </div>
+
+  <!-- PDFプレビューモーダル（送信後・サーバーファイル用） -->
+  <div id="savedFilePreviewModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60">
+    <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-4" style="height:85vh;">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+        <span id="savedFilePreviewTitle" class="text-sm font-semibold text-gray-700">ファイルプレビュー</span>
+        <button onclick="closeSavedFilePreviewModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="w-full" style="height:calc(100% - 52px);">
+        <iframe id="savedFilePreviewFrame" src="" class="w-full h-full rounded-b-xl border-0"></iframe>
+      </div>
+    </div>
+  </div>
+  <script>
+    function openSavedFilePreview(url, name) {
+      document.getElementById('savedFilePreviewTitle').textContent = name || 'ファイルプレビュー'
+      document.getElementById('savedFilePreviewFrame').src = url
+      const modal = document.getElementById('savedFilePreviewModal')
+      modal.classList.remove('hidden')
+      modal.classList.add('flex')
+    }
+    function closeSavedFilePreviewModal() {
+      const modal = document.getElementById('savedFilePreviewModal')
+      modal.classList.add('hidden')
+      modal.classList.remove('flex')
+      document.getElementById('savedFilePreviewFrame').src = ''
+    }
+    document.getElementById('savedFilePreviewModal').addEventListener('click', function(e) {
+      if (e.target === this) closeSavedFilePreviewModal()
+    })
+  </script>
 </body>
 </html>`
 
