@@ -526,16 +526,42 @@ applications.get('/new', async (c) => {
                 </label>
               </div>
             </div>
-            <!-- 元請の場合：管理組合への請求金額 -->
-            <div id="motoukeFields" class="hidden">
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">管理組合への請求金額（円）</label>
-              <div class="relative">
-                <input type="text" id="kumiaiAmountDisplay" inputmode="numeric"
-                  class="w-full px-3 py-2.5 pr-8 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
-                  placeholder="0" oninput="formatComma(this, 'kumiai_amount')">
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
+            <!-- 元請の場合：管理組合への請求金額 + 業者への支払金額 -->
+            <div id="motoukeFields" class="hidden space-y-3">
+              <!-- 金額入力（横並び） -->
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-sm font-semibold text-gray-700 mb-1.5">管理組合への請求金額（円）</label>
+                  <div class="relative">
+                    <input type="text" id="kumiaiAmountDisplay" inputmode="numeric"
+                      class="w-full px-3 py-2.5 pr-8 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
+                      placeholder="0" oninput="formatComma(this, 'kumiai_amount'); calcProfit()">
+                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
+                  </div>
+                  <input type="hidden" name="kumiai_amount" id="kumiaiAmountHidden">
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-gray-700 mb-1.5">業者への支払金額（円）</label>
+                  <div class="relative">
+                    <input type="text" id="gyoshaAmountDisplay" inputmode="numeric"
+                      class="w-full px-3 py-2.5 pr-8 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
+                      placeholder="0" oninput="formatComma(this, 'gyosha_amount'); calcProfit()">
+                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
+                  </div>
+                  <input type="hidden" name="gyosha_amount" id="gyoshaAmountHidden">
+                </div>
               </div>
-              <input type="hidden" name="kumiai_amount" id="kumiaiAmountHidden">
+              <!-- 利益額・利益率（自動計算） -->
+              <div id="profitDisplay" class="hidden grid grid-cols-2 gap-3">
+                <div class="bg-white border border-gray-200 rounded-lg px-3 py-2.5">
+                  <p class="text-xs text-gray-400 mb-0.5">利益額</p>
+                  <p id="profitAmount" class="text-sm font-semibold text-gray-800">－</p>
+                </div>
+                <div class="bg-white border border-gray-200 rounded-lg px-3 py-2.5">
+                  <p class="text-xs text-gray-400 mb-0.5">利益率</p>
+                  <p id="profitRate" class="text-sm font-semibold text-gray-800">－</p>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -825,6 +851,35 @@ applications.get('/new', async (c) => {
       function toggleMotouke() {
         const val = document.querySelector('input[name="td_type"]:checked')?.value
         document.getElementById('motoukeFields').classList.toggle('hidden', val !== 'motouke')
+        calcProfit()
+      }
+
+      function calcProfit() {
+        const kumiaiRaw = document.getElementById('kumiaiAmountHidden')?.value
+        const gyoshaRaw = document.getElementById('gyoshaAmountHidden')?.value
+        const profitDisplay = document.getElementById('profitDisplay')
+        const profitAmountEl = document.getElementById('profitAmount')
+        const profitRateEl = document.getElementById('profitRate')
+
+        const kumiai = parseInt(kumiaiRaw || '0', 10)
+        const gyosha = parseInt(gyoshaRaw || '0', 10)
+
+        // 両方入力済みの場合のみ表示
+        if (kumiai > 0 || gyosha > 0) {
+          profitDisplay.classList.remove('hidden')
+          profitDisplay.classList.add('grid')
+          const profit = kumiai - gyosha
+          const rate = kumiai > 0 ? (profit / kumiai * 100) : 0
+          // 利益額（マイナスは赤表示）
+          profitAmountEl.textContent = (profit >= 0 ? '' : '-') + Math.abs(profit).toLocaleString() + '円'
+          profitAmountEl.className = 'text-sm font-semibold ' + (profit >= 0 ? 'text-gray-800' : 'text-red-600')
+          // 利益率（小数点第1位）
+          profitRateEl.textContent = rate.toFixed(1) + '％'
+          profitRateEl.className = 'text-sm font-semibold ' + (rate >= 0 ? 'text-gray-800' : 'text-red-600')
+        } else {
+          profitDisplay.classList.add('hidden')
+          profitDisplay.classList.remove('grid')
+        }
       }
 
       function validateFeeFields() {
@@ -976,9 +1031,9 @@ applications.post('/', async (c) => {
   const result = await db.prepare(`
     INSERT INTO applications (
       application_number, title, mansion_id, applicant_id, circulation_start_date,
-      payment_target, account_item, td_type, kumiai_amount, budget_amount,
+      payment_target, account_item, td_type, kumiai_amount, gyosha_amount, budget_amount,
       commission_rate, remarks, status, current_step, resubmit_count
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, 0)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, 0)
   `).bind(
     appNumber,
     body.title || '',
@@ -989,6 +1044,7 @@ applications.post('/', async (c) => {
     body.account_item || null,
     body.td_type || null,
     body.kumiai_amount ? parseInt(String(body.kumiai_amount).replace(/,/g, '')) : null,
+    body.gyosha_amount ? parseInt(String(body.gyosha_amount).replace(/,/g, '')) : null,
     parseInt(String(body.budget_amount || '0').replace(/,/g, '')) || 0,
     body.commission_rate !== '' && body.commission_rate != null ? parseFloat(body.commission_rate) : null,
     body.remarks || null
@@ -1178,6 +1234,14 @@ applications.get('/:id', async (c) => {
           ${app.commission_rate != null ? `<div><span class="text-gray-400">手数料（％）</span><p class="font-medium mt-0.5">${app.commission_rate}%</p></div>` : ''}
 
           ${app.kumiai_amount ? `<div><span class="text-gray-400">組合請求金額</span><p class="font-medium mt-0.5">${Number(app.kumiai_amount).toLocaleString()}円</p></div>` : ''}
+          ${app.gyosha_amount != null ? `<div><span class="text-gray-400">業者支払金額</span><p class="font-medium mt-0.5">${Number(app.gyosha_amount).toLocaleString()}円</p></div>` : ''}
+          ${(app.kumiai_amount && app.gyosha_amount != null) ? (() => {
+            const profit = Number(app.kumiai_amount) - Number(app.gyosha_amount)
+            const rate = Number(app.kumiai_amount) > 0 ? (profit / Number(app.kumiai_amount) * 100).toFixed(1) : '0.0'
+            const color = profit >= 0 ? 'text-gray-800' : 'text-red-600'
+            return `<div><span class="text-gray-400">利益額</span><p class="font-medium mt-0.5 ${color}">${profit >= 0 ? '' : '-'}${Math.abs(profit).toLocaleString()}円</p></div>
+                    <div><span class="text-gray-400">利益率</span><p class="font-medium mt-0.5 ${color}">${rate}％</p></div>`
+          })() : ''}
           ${app.remarks ? `<div class="col-span-2"><span class="text-gray-400">備考</span><p class="font-medium mt-0.5">${app.remarks}</p></div>` : ''}
         </div>
       </div>
@@ -1398,6 +1462,14 @@ applications.get('/:id/review/:stepId', async (c) => {
           ${app.commission_rate != null ? `<div><span class="text-gray-400">手数料（％）</span><p class="font-medium">${app.commission_rate}%</p></div>` : ''}
 
           ${app.kumiai_amount ? `<div><span class="text-gray-400">組合請求金額</span><p class="font-medium">${Number(app.kumiai_amount).toLocaleString()}円</p></div>` : ''}
+          ${app.gyosha_amount != null ? `<div><span class="text-gray-400">業者支払金額</span><p class="font-medium">${Number(app.gyosha_amount).toLocaleString()}円</p></div>` : ''}
+          ${(app.kumiai_amount && app.gyosha_amount != null) ? (() => {
+            const profit = Number(app.kumiai_amount) - Number(app.gyosha_amount)
+            const rate = Number(app.kumiai_amount) > 0 ? (profit / Number(app.kumiai_amount) * 100).toFixed(1) : '0.0'
+            const color = profit >= 0 ? 'text-gray-800' : 'text-red-600'
+            return `<div><span class="text-gray-400">利益額</span><p class="font-medium ${color}">${profit >= 0 ? '' : '-'}${Math.abs(profit).toLocaleString()}円</p></div>
+                    <div><span class="text-gray-400">利益率</span><p class="font-medium ${color}">${rate}％</p></div>`
+          })() : ''}
           ${app.remarks ? `<div class="col-span-2"><span class="text-gray-400">備考</span><p class="font-medium">${app.remarks}</p></div>` : ''}
         </div>
         ${(attachments.results as any[]).length > 0 ? `
@@ -1690,13 +1762,13 @@ applications.post('/:id/resubmit', async (c) => {
   const result = await db.prepare(`
     INSERT INTO applications (
       application_number, title, mansion_id, applicant_id, circulation_start_date,
-      payment_target, account_item, td_type, kumiai_amount, budget_amount,
+      payment_target, account_item, td_type, kumiai_amount, gyosha_amount, budget_amount,
       commission_rate, remarks, status, current_step, resubmit_count, original_application_id,
       returned_reason, reapply_reason, returned_from_step, returned_by_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, ?, ?, ?, ?, ?, ?)
   `).bind(
     newNumber, orig.title, orig.mansion_id, orig.applicant_id, orig.circulation_start_date,
-    orig.payment_target, orig.account_item, orig.td_type, orig.kumiai_amount, orig.budget_amount,
+    orig.payment_target, orig.account_item, orig.td_type, orig.kumiai_amount, orig.gyosha_amount, orig.budget_amount,
     null, orig.remarks, (orig.resubmit_count || 0) + 1, orig.id,
     isReturned ? orig.returned_reason : null,
     reapplyReason,
