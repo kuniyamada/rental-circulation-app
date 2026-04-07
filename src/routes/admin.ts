@@ -438,7 +438,7 @@ admin.post('/users/:id/lw-test', async (c) => {
 
     const msg = {
       type: 'text' as const,
-      text: `【テスト通知】\n宛先: ${target.name} さん\nこのメッセージはユーザー管理画面から送信されたテストです。\nLINE WORKS通知は正常に動作しています。`,
+      text: `【テスト通知】\n宛先: ${target.name} さん\nこのメッセージはユーザー管理画面から送信されたテストです。\nLINE WORKS通知は正常に動作しています。\n－－－\nhttps://webapp-production-exu.pages.dev/login`,
     }
     const result = await sendLineWorksMessage(config, target.lineworks_user_id, msg)
     if (result === true) {
