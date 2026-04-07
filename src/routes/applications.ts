@@ -535,7 +535,7 @@ applications.get('/new', async (c) => {
                   <div class="relative">
                     <input type="text" id="kumiaiAmountDisplay" inputmode="numeric"
                       class="w-full px-3 py-2.5 pr-8 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
-                      placeholder="0" oninput="formatComma(this, 'kumiai_amount'); calcProfit()">
+                      placeholder="0" oninput="formatComma(this, 'kumiaiAmount'); calcProfit()">
                     <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
                   </div>
                   <input type="hidden" name="kumiai_amount" id="kumiaiAmountHidden">
@@ -545,7 +545,7 @@ applications.get('/new', async (c) => {
                   <div class="relative">
                     <input type="text" id="gyoshaAmountDisplay" inputmode="numeric"
                       class="w-full px-3 py-2.5 pr-8 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
-                      placeholder="0" oninput="formatComma(this, 'gyosha_amount'); calcProfit()">
+                      placeholder="0" oninput="formatComma(this, 'gyoshaAmount'); calcProfit()">
                     <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
                   </div>
                   <input type="hidden" name="gyosha_amount" id="gyoshaAmountHidden">
@@ -855,16 +855,18 @@ applications.get('/new', async (c) => {
       }
 
       function calcProfit() {
-        const kumiaiRaw = document.getElementById('kumiaiAmountHidden')?.value
-        const gyoshaRaw = document.getElementById('gyoshaAmountHidden')?.value
         const profitDisplay = document.getElementById('profitDisplay')
         const profitAmountEl = document.getElementById('profitAmount')
         const profitRateEl = document.getElementById('profitRate')
 
+        // display欄からカンマ除去して直接取得（hiddenフィールドのタイミング問題を回避）
+        const kumiaiRaw = (document.getElementById('kumiaiAmountDisplay')?.value || '').replace(/[^0-9]/g, '')
+        const gyoshaRaw = (document.getElementById('gyoshaAmountDisplay')?.value || '').replace(/[^0-9]/g, '')
+
         const kumiai = parseInt(kumiaiRaw || '0', 10)
         const gyosha = parseInt(gyoshaRaw || '0', 10)
 
-        // 両方入力済みの場合のみ表示
+        // どちらか一方でも入力があれば表示
         if (kumiai > 0 || gyosha > 0) {
           profitDisplay.classList.remove('hidden')
           profitDisplay.classList.add('grid')
