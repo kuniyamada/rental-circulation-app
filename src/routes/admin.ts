@@ -1,6 +1,18 @@
 import { Hono } from 'hono'
 import { getSessionUser, getSessionIdFromCookie, hashPassword } from '../lib/auth'
 import { layout } from './layout'
+import {
+  generateBackupSql,
+  buildBackupFilename,
+  saveBackup,
+  listBackups,
+  getBackup,
+  deleteBackup,
+  pruneOldBackups,
+  restoreFromSql,
+  formatBytes,
+  formatJstDateTime,
+} from '../lib/backup'
 
 type Bindings = { DB: D1Database; R2: R2Bucket }
 const admin = new Hono<{ Bindings: Bindings }>()
@@ -1541,26 +1553,328 @@ admin.post('/roles/:id/delete', async (c) => {
 })
 
 // ============================================================
-// データバックアップ
+// データバックアップ（R2 + SQL ベースの本番運用バックアップ）
 // ============================================================
 admin.get('/backup', async (c) => {
+  const user = (c as any).get('user')
+  const params = new URL(c.req.url).searchParams
+  const flash = params.get('flash') || ''
+  const detail = params.get('detail') || ''
+
+  // R2からバックアップ一覧を取得
+  let backups: any[] = []
+  let listError = ''
+  try {
+    backups = await listBackups(c.env.R2)
+  } catch (e: any) {
+    listError = e?.message || String(e)
+  }
+
+  // フラッシュメッセージ
+  let alertHtml = ''
+  if (flash === 'backup_ok') {
+    alertHtml = `<div class="px-4 py-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm flex items-center gap-2">
+      <span>✅</span><span>バックアップを作成しました${detail ? `（${detail}）` : ''}</span>
+    </div>`
+  } else if (flash === 'backup_fail') {
+    alertHtml = `<div class="px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+      ❌ バックアップに失敗しました${detail ? `: ${detail}` : ''}
+    </div>`
+  } else if (flash === 'restore_ok') {
+    alertHtml = `<div class="px-4 py-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm">
+      ✅ データを復元しました${detail ? `（${detail}）` : ''}。ページを再読込してください。
+    </div>`
+  } else if (flash === 'restore_fail') {
+    alertHtml = `<div class="px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+      ❌ 復元に失敗しました${detail ? `: ${detail}` : ''}
+    </div>`
+  } else if (flash === 'delete_ok') {
+    alertHtml = `<div class="px-4 py-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm">
+      ✅ バックアップを削除しました
+    </div>`
+  } else if (flash === 'delete_fail') {
+    alertHtml = `<div class="px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+      ❌ 削除に失敗しました${detail ? `: ${detail}` : ''}
+    </div>`
+  }
+
+  const sourceBadge = (s: string) => {
+    if (s === 'auto') return '<span class="inline-block text-xs font-semibold px-2 py-0.5 rounded bg-[#D5E5F2] text-[#396999]">自動</span>'
+    if (s === 'pre_restore') return '<span class="inline-block text-xs font-semibold px-2 py-0.5 rounded bg-orange-100 text-orange-700">復元前</span>'
+    return '<span class="inline-block text-xs font-semibold px-2 py-0.5 rounded bg-green-100 text-green-700">手動</span>'
+  }
+
+  const rows = backups.map((b: any) => `
+    <tr class="border-b border-gray-100 hover:bg-gray-50">
+      <td class="px-4 py-3 text-xs text-gray-700 font-mono">${b.filename}</td>
+      <td class="px-4 py-3 text-xs text-gray-600 whitespace-nowrap text-right">${formatBytes(b.size)}</td>
+      <td class="px-4 py-3 text-xs text-gray-600 whitespace-nowrap text-right">${b.rowCount != null ? b.rowCount.toLocaleString() : '-'}</td>
+      <td class="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">${formatJstDateTime(b.uploaded)}</td>
+      <td class="px-4 py-3 whitespace-nowrap">${sourceBadge(b.source)}</td>
+      <td class="px-4 py-3 whitespace-nowrap">
+        <div class="flex items-center gap-1.5">
+          <a href="/admin/backup/download/${encodeURIComponent(b.key)}"
+            class="inline-flex items-center gap-1 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold px-2.5 py-1.5 rounded transition">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            DL
+          </a>
+          <button type="button"
+            onclick="confirmRestore('${b.key}', '${b.filename}')"
+            class="inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-2.5 py-1.5 rounded transition">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            復元
+          </button>
+          <button type="button"
+            onclick="confirmDelete('${b.key}', '${b.filename}')"
+            class="inline-flex items-center gap-1 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold px-2.5 py-1.5 rounded transition">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/></svg>
+          </button>
+        </div>
+      </td>
+    </tr>
+  `).join('')
+
+  const content = `
+    <div class="space-y-4">
+      ${alertHtml}
+
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <h2 class="text-base font-bold text-gray-800 flex items-center gap-2">
+          <svg class="w-5 h-5 text-[#396999]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+          データベースバックアップ
+        </h2>
+        <div class="flex items-center gap-2">
+          <a href="/admin/backup/csv"
+            class="inline-flex items-center gap-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 text-xs font-semibold px-3 py-2 rounded-lg transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            CSV/JSONエクスポート
+          </a>
+          <form method="POST" action="/admin/backup/now" id="nowForm">
+            <button type="submit"
+              class="inline-flex items-center gap-1.5 bg-[#396999] hover:bg-[#2E5580] text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              今すぐバックアップ
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800 flex items-center gap-2">
+        <svg class="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
+        <span><strong>自動バックアップ：</strong>毎日 AM 2:00 (JST) に自動実行されます。最新 30 件を保存し、古いものは自動削除されます。</span>
+      </div>
+
+      <div class="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-sm text-yellow-800 flex items-center gap-2">
+        <svg class="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+        <span><strong>復元について：</strong>復元を実行すると現在のデータがすべて上書きされます。復元前に自動で現在データのバックアップが作成されます。</span>
+      </div>
+
+      ${listError ? `<div class="px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">R2バケット読み出しエラー: ${listError}</div>` : ''}
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">ファイル名</th>
+                <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600">サイズ</th>
+                <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600">行数</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">作成日時</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">種別</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${backups.length > 0 ? rows : `
+                <tr><td colspan="6" class="px-4 py-12 text-center text-sm text-gray-400">
+                  バックアップはまだありません。「今すぐバックアップ」をクリックして最初のバックアップを作成してください。
+                </td></tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="text-xs text-gray-400">合計 ${backups.length} 件 (自動: ${backups.filter((b:any)=>b.source==='auto').length} / 手動: ${backups.filter((b:any)=>b.source==='manual').length} / 復元前: ${backups.filter((b:any)=>b.source==='pre_restore').length})</p>
+    </div>
+
+    <!-- 復元確認モーダル -->
+    <div id="restoreModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center px-4">
+      <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+        <h3 class="text-lg font-bold text-gray-800 mb-2">⚠️ 復元の確認</h3>
+        <p class="text-sm text-gray-600 mb-4">以下のバックアップで復元します。<strong class="text-red-600">現在のデータはすべて上書きされます。</strong></p>
+        <p class="text-xs font-mono bg-gray-50 border border-gray-200 rounded p-2 mb-4" id="restoreFilename"></p>
+        <p class="text-xs text-gray-500 mb-4">復元前に現在データの自動バックアップ（pre_restore）が作成されます。</p>
+        <p class="text-sm text-gray-700 mb-2">確認のため、下に <strong class="text-red-600">RESTORE</strong> と入力してください：</p>
+        <input type="text" id="restoreConfirm" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4" placeholder="RESTORE">
+        <form method="POST" id="restoreForm">
+          <input type="hidden" name="key" id="restoreKey">
+          <input type="hidden" name="confirm" value="RESTORE">
+          <div class="flex justify-end gap-2">
+            <button type="button" onclick="closeRestoreModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">キャンセル</button>
+            <button type="submit" id="restoreSubmit" disabled class="px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg">復元を実行</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 削除確認モーダル -->
+    <div id="deleteModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center px-4">
+      <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+        <h3 class="text-lg font-bold text-gray-800 mb-2">🗑️ 削除の確認</h3>
+        <p class="text-sm text-gray-600 mb-4">以下のバックアップを削除します。この操作は元に戻せません。</p>
+        <p class="text-xs font-mono bg-gray-50 border border-gray-200 rounded p-2 mb-4" id="deleteFilename"></p>
+        <form method="POST" id="deleteForm">
+          <input type="hidden" name="key" id="deleteKey">
+          <div class="flex justify-end gap-2">
+            <button type="button" onclick="closeDeleteModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">キャンセル</button>
+            <button type="submit" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg">削除する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      function confirmRestore(key, filename) {
+        document.getElementById('restoreFilename').textContent = filename;
+        document.getElementById('restoreKey').value = key;
+        document.getElementById('restoreForm').action = '/admin/backup/restore';
+        document.getElementById('restoreConfirm').value = '';
+        document.getElementById('restoreSubmit').disabled = true;
+        document.getElementById('restoreModal').classList.remove('hidden');
+        document.getElementById('restoreModal').classList.add('flex');
+      }
+      function closeRestoreModal() {
+        document.getElementById('restoreModal').classList.add('hidden');
+        document.getElementById('restoreModal').classList.remove('flex');
+      }
+      document.getElementById('restoreConfirm').addEventListener('input', function(e) {
+        document.getElementById('restoreSubmit').disabled = (e.target.value !== 'RESTORE');
+      });
+      function confirmDelete(key, filename) {
+        document.getElementById('deleteFilename').textContent = filename;
+        document.getElementById('deleteKey').value = key;
+        document.getElementById('deleteForm').action = '/admin/backup/delete';
+        document.getElementById('deleteModal').classList.remove('hidden');
+        document.getElementById('deleteModal').classList.add('flex');
+      }
+      function closeDeleteModal() {
+        document.getElementById('deleteModal').classList.add('hidden');
+        document.getElementById('deleteModal').classList.remove('flex');
+      }
+      // 「今すぐバックアップ」ボタンの押下中フィードバック
+      document.getElementById('nowForm').addEventListener('submit', function(e) {
+        const btn = e.target.querySelector('button[type=submit]');
+        btn.disabled = true;
+        btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"></circle><path fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" class="opacity-75"></path></svg>処理中...';
+      });
+    </script>
+  `
+  return c.html(layout('データバックアップ', content, user))
+})
+
+// 今すぐバックアップ（手動）
+admin.post('/backup/now', async (c) => {
+  try {
+    const { sql, rowCount } = await generateBackupSql(c.env.DB)
+    const filename = buildBackupFilename('manual')
+    await saveBackup(c.env.R2, filename, sql, 'manual', rowCount)
+    return c.redirect(`/admin/backup?flash=backup_ok&detail=${encodeURIComponent(filename)}`)
+  } catch (e: any) {
+    return c.redirect(`/admin/backup?flash=backup_fail&detail=${encodeURIComponent(e?.message || 'unknown')}`)
+  }
+})
+
+// バックアップダウンロード（R2から）
+admin.get('/backup/download/:key{.+}', async (c) => {
+  const key = decodeURIComponent(c.req.param('key'))
+  const obj = await getBackup(c.env.R2, key)
+  if (!obj) return c.notFound()
+  const filename = key.split('/').pop() || 'backup.sql'
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': 'application/sql; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    }
+  })
+})
+
+// バックアップ削除
+admin.post('/backup/delete', async (c) => {
+  try {
+    const form = await c.req.formData()
+    const key = form.get('key') as string
+    if (!key) return c.redirect('/admin/backup?flash=delete_fail&detail=no_key')
+    await deleteBackup(c.env.R2, key)
+    return c.redirect('/admin/backup?flash=delete_ok')
+  } catch (e: any) {
+    return c.redirect(`/admin/backup?flash=delete_fail&detail=${encodeURIComponent(e?.message || 'unknown')}`)
+  }
+})
+
+// 復元
+admin.post('/backup/restore', async (c) => {
+  try {
+    const form = await c.req.formData()
+    const key = form.get('key') as string
+    const confirm = form.get('confirm') as string
+    if (!key) return c.redirect('/admin/backup?flash=restore_fail&detail=no_key')
+    if (confirm !== 'RESTORE') return c.redirect('/admin/backup?flash=restore_fail&detail=not_confirmed')
+
+    // 1) 復元前に現在データのバックアップを作成（pre_restore）
+    try {
+      const { sql: currentSql, rowCount: currentRows } = await generateBackupSql(c.env.DB)
+      const preName = buildBackupFilename('pre_restore')
+      await saveBackup(c.env.R2, preName, currentSql, 'pre_restore', currentRows)
+    } catch (e: any) {
+      // 復元前バックアップに失敗したら復元自体を中止
+      return c.redirect(`/admin/backup?flash=restore_fail&detail=${encodeURIComponent('pre_backup_failed: ' + (e?.message || ''))}`)
+    }
+
+    // 2) 対象バックアップを読み出し
+    const obj = await getBackup(c.env.R2, key)
+    if (!obj) return c.redirect('/admin/backup?flash=restore_fail&detail=not_found')
+    const sql = await obj.text()
+
+    // 3) D1に復元実行
+    const result = await restoreFromSql(c.env.DB, sql)
+
+    if (result.errors.length > 0) {
+      const errSummary = result.errors.slice(0, 2).join(' | ').slice(0, 200)
+      return c.redirect(`/admin/backup?flash=restore_fail&detail=${encodeURIComponent(`${result.executed}件実行/${result.errors.length}件エラー: ${errSummary}`)}`)
+    }
+
+    return c.redirect(`/admin/backup?flash=restore_ok&detail=${encodeURIComponent(`${result.executed}件のSQLを実行`)}`)
+  } catch (e: any) {
+    return c.redirect(`/admin/backup?flash=restore_fail&detail=${encodeURIComponent(e?.message || 'unknown')}`)
+  }
+})
+
+// ============================================================
+// CSV / JSONエクスポート（旧バックアップ画面）
+// ============================================================
+admin.get('/backup/csv', async (c) => {
   const user = (c as any).get('user')
   const saved = c.req.query('done')
 
   const content = `
     <div class="space-y-6 max-w-2xl">
 
-      ${saved ? '<div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg">✅ バックアップのダウンロードを開始しました</div>' : ''}
+      <div class="flex items-center gap-3">
+        <a href="/admin/backup" class="text-sm text-[#396999] hover:underline">← データバックアップに戻る</a>
+      </div>
+
+      ${saved ? '<div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg">✅ ダウンロードを開始しました</div>' : ''}
 
       <!-- JSON バックアップ -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 class="text-base font-bold text-gray-800 mb-1">📦 フルバックアップ（JSON）</h3>
         <p class="text-sm text-gray-500 mb-4">
-          すべてのテーブル（申請・ユーザー・マンション・回覧ステップ等）を<br>
-          JSON形式でダウンロードします。復元・移行用途に利用できます。
+          すべてのテーブルをJSON形式でダウンロードします。<br>
+          <span class="text-xs text-gray-400">※ SQL形式の正式バックアップは「データバックアップ」画面をご利用ください</span>
         </p>
         <div class="flex flex-wrap gap-3">
-          <a href="/admin/backup/download?format=json"
+          <a href="/admin/backup/download-legacy?format=json"
             class="inline-flex items-center gap-2 bg-[#396999] hover:bg-[#2E5580] text-white font-semibold px-5 py-2.5 rounded-lg transition text-sm">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             JSONでダウンロード
@@ -1573,21 +1887,20 @@ admin.get('/backup', async (c) => {
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 class="text-base font-bold text-gray-800 mb-1">📊 申請データ エクスポート（CSV）</h3>
         <p class="text-sm text-gray-500 mb-4">
-          申請一覧をCSV形式でダウンロードします。<br>
-          Excel等の表計算ソフトで開くことができます。
+          Excel等の表計算ソフトで開けるCSV形式でダウンロードします。
         </p>
         <div class="flex flex-wrap gap-3">
-          <a href="/admin/backup/download?format=csv&table=applications"
+          <a href="/admin/backup/download-legacy?format=csv&table=applications"
             class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-5 py-2.5 rounded-lg transition text-sm">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             申請一覧CSV
           </a>
-          <a href="/admin/backup/download?format=csv&table=users"
+          <a href="/admin/backup/download-legacy?format=csv&table=users"
             class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-5 py-2.5 rounded-lg transition text-sm">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             ユーザー一覧CSV
           </a>
-          <a href="/admin/backup/download?format=csv&table=mansions"
+          <a href="/admin/backup/download-legacy?format=csv&table=mansions"
             class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-5 py-2.5 rounded-lg transition text-sm">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             マンション一覧CSV
@@ -1595,23 +1908,21 @@ admin.get('/backup', async (c) => {
         </div>
       </div>
 
-      <!-- 注意事項 -->
       <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
         <p class="font-semibold mb-2">⚠️ バックアップの取り扱いについて</p>
         <ul class="list-disc list-inside space-y-1 text-xs">
           <li>バックアップファイルには個人情報が含まれます。厳重に管理してください</li>
-          <li>JSONバックアップはシステム管理者のみが使用できます</li>
           <li>ダウンロード後は安全な場所に保管し、不要になったら削除してください</li>
         </ul>
       </div>
 
     </div>
   `
-  return c.html(layout('データバックアップ', content, user))
+  return c.html(layout('CSV/JSONエクスポート', content, user))
 })
 
-// バックアップダウンロード
-admin.get('/backup/download', async (c) => {
+// CSV/JSONエクスポートダウンロード（旧形式・継続提供）
+admin.get('/backup/download-legacy', async (c) => {
   const db = c.env.DB
   const format = c.req.query('format') || 'json'
   const table = c.req.query('table') || ''
@@ -1738,7 +2049,7 @@ admin.get('/backup/download', async (c) => {
     }
 
     const def = allowed[table]
-    if (!def) return c.redirect('/admin/backup')
+    if (!def) return c.redirect('/admin/backup/csv')
 
     const rows = await db.prepare(def.query).all()
     const results = rows.results as any[]
@@ -1777,7 +2088,7 @@ admin.get('/backup/download', async (c) => {
     })
   }
 
-  return c.redirect('/admin/backup')
+  return c.redirect('/admin/backup/csv')
 })
 
 // ============================================================

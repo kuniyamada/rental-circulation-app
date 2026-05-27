@@ -662,4 +662,31 @@ app.post('/api/review-remind/:stepId', async (c) => {
   return c.json({ ok, sent: ok, reviewer: step.reviewer_name, count: newCount })
 })
 
+// ============================================================
+// 手動テスト用: 自動バックアップと同じ処理をPages側からも実行可能に
+// （管理者専用 / 本体は別Workerのcronが自動実行）
+// ============================================================
+import {
+  generateBackupSql as _genBackup,
+  buildBackupFilename as _buildName,
+  saveBackup as _saveBackup,
+  pruneOldBackups as _prune,
+} from './lib/backup'
+
+app.get('/api/cron/backup-now', async (c) => {
+  const cookie = c.req.header('Cookie')
+  const sessionId = getSessionIdFromCookie(cookie)
+  const user = await getSessionUser(c.env.DB, sessionId)
+  if (!user || !user.is_admin) return c.json({ error: 'unauthorized' }, 401)
+  try {
+    const { sql, rowCount } = await _genBackup(c.env.DB)
+    const filename = _buildName('auto')
+    await _saveBackup(c.env.R2, filename, sql, 'auto', rowCount)
+    const pruneResult = await _prune(c.env.R2, 30)
+    return c.json({ ok: true, filename, rowCount, pruned: pruneResult.deletedKeys.length })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message || String(e) }, 500)
+  }
+})
+
 export default app

@@ -12,6 +12,8 @@
 
 - **本番環境**: https://webapp-production-exu.pages.dev
 - **管理画面（ユーザー管理例）**: https://webapp-production-exu.pages.dev/admin/users
+- **バックアップ管理画面**: https://webapp-production-exu.pages.dev/admin/backup
+- **自動バックアップWorker**: https://webapp-backup-worker.kunihiro72.workers.dev
 - **GitHub**: https://github.com/kuniyamada/rental-circulation-app
 - **Cloudflare Dashboard**: https://dash.cloudflare.com/c6906c5ad653b9d7add12b9906a5d713/pages/view/webapp-production
 
@@ -34,22 +36,51 @@ npx wrangler pages deploy dist --project-name webapp-production
 
 ---
 
-## 🗄️ バックアップ & 復元手順
+## 🗄️ バックアップ & 復元
 
-本番運用にあたり、以下の2種類のバックアップを **定期的に** 取得してください。
+### 自動バックアップ（運用中）
 
-### 推奨頻度
+| 項目 | 設定 |
+|---|---|
+| **実行スケジュール** | 毎日 AM 2:00 (JST) |
+| **実行担当** | `webapp-backup-worker` (Cloudflare Worker, Cron Trigger) |
+| **保存先** | R2バケット `webapp-attachments/backups/` |
+| **保持件数** | 最新 **30件**（古い自動バックアップは自動削除） |
+| **ファイル名** | `backup_YYYY-MM-DD_HH-MM_cron_auto.sql` |
+| **管理UI** | https://webapp-production-exu.pages.dev/admin/backup |
+
+### バックアップ画面でできること
+
+管理者ユーザーで `/admin/backup` にアクセスすると、以下が可能です：
+
+- 📥 **今すぐバックアップ**: 手動でバックアップを作成（種別: 手動）
+- 💾 **DL**: バックアップSQLファイルをローカルにダウンロード
+- 🔄 **復元**: 選択したバックアップでDBを上書き復元（復元前に自動で `pre_restore` バックアップ作成）
+- 🗑️ **削除**: 不要なバックアップを削除
+
+### 補足: 旧バックアップ手順（CSV/JSON/AI Drive）
+
+下記は補助的なバックアップ手段です。日常運用は上記の自動バックアップで完結します。
 
 | バックアップ対象 | 頻度 | 保存先 |
 |---|---|---|
-| **D1データベース（SQL）** | 毎日 or 重要変更前後 | AI Drive + ローカル |
-| **プロジェクト全体（コード）** | 週1回 or 大規模変更前 | AI Drive（GitHubにも自動保存）|
+| **D1データベース（SQL）** | 自動（毎日 AM 2:00 JST） | R2 (`webapp-attachments/backups/`) |
+| **CSV/JSONエクスポート** | 随時 | `/admin/backup/csv` からDL |
+| **プロジェクト全体（コード）** | 週1回 or 大規模変更前 | GitHub（自動push） + AI Drive |
 
 ---
 
 ### 1. D1データベースのバックアップ
 
-#### 取得手順
+#### 通常運用（推奨）
+
+Web UIから操作してください：
+
+1. https://webapp-production-exu.pages.dev/admin/backup にアクセス
+2. 管理者ログイン
+3. 「今すぐバックアップ」または自動生成された一覧から「DL」をクリック
+
+#### CLIで取得する場合（バックアップが必要なとき）
 
 ```bash
 cd /home/user/webapp
@@ -144,8 +175,27 @@ cd webapp && npm install && npm run build
 ### 4. 緊急時の連絡先・復旧手順
 
 1. **コードが消えた** → GitHub から `git clone` で完全復旧可能
-2. **データが消えた** → 直近のSQLバックアップを `--remote` で適用
-3. **Cloudflareプロジェクトごと消えた** → `wrangler pages project create` で再作成 → `wrangler pages deploy dist` → D1再作成 → SQL復元
+2. **データが消えた** → `/admin/backup` 画面から最新の自動バックアップを「復元」ボタンで適用
+3. **Cloudflareプロジェクトごと消えた** → `wrangler pages project create` で再作成 → `wrangler pages deploy dist` → D1再作成 → R2の `backups/` からSQLを取得して `wrangler d1 execute ... --file=` で復元 → backup-worker も再デプロイ
+
+### 5. backup-worker の運用
+
+別Worker として `webapp-backup-worker/` ディレクトリに配置されています。
+
+```bash
+# 再デプロイ
+cd /home/user/webapp/backup-worker
+npx wrangler deploy
+
+# ログ確認
+npx wrangler tail
+
+# 手動実行（CRON_TOKEN設定済の場合）
+curl "https://webapp-backup-worker.kunihiro72.workers.dev/?token=YOUR_TOKEN"
+
+# Cron設定変更（毎日2:00JST = 17:00 UTC）
+# wrangler.jsonc の triggers.crons を編集して再デプロイ
+```
 
 ---
 

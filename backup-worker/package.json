@@ -1,0 +1,17 @@
+{
+  "name": "webapp-backup-worker",
+  "version": "1.0.0",
+  "description": "請求書回覧システム 自動バックアップ専用Cron Worker（毎日2:00 JST実行）",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250705.0",
+    "typescript": "^5.0.0",
+    "wrangler": "^3.78.0"
+  }
+}

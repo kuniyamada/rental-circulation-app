@@ -1,9 +1,16 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "webapp",
+  "name": "webapp-backup-worker",
+  "main": "src/index.ts",
   "compatibility_date": "2025-03-01",
-  "pages_build_output_dir": "./dist",
   "compatibility_flags": ["nodejs_compat"],
+
+  // 毎日 17:00 UTC = 翌日 02:00 JST
+  "triggers": {
+    "crons": ["0 17 * * *"]
+  },
+
+  // 本体アプリと同じD1データベースに接続
   "d1_databases": [
     {
       "binding": "DB",
@@ -11,13 +18,17 @@
       "database_id": "721e8a4d-a790-4a5d-aeb0-dfc8dd09fec8"
     }
   ],
+
+  // 本体アプリと同じR2バケットに保存
   "r2_buckets": [
     {
       "binding": "R2",
       "bucket_name": "webapp-attachments"
     }
-  ]
-  // 注: Cloudflare Pages では wrangler.jsonc の triggers.crons は無視されます。
-  // 自動バックアップ用に別途 backup-worker/ を Cron Worker としてデプロイしています。
-  // backup-worker/wrangler.jsonc の triggers.crons をご確認ください。
+  ],
+
+  // ログ収集
+  "observability": {
+    "enabled": true
+  }
 }
