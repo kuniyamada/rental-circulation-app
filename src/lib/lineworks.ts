@@ -281,6 +281,7 @@ export function buildLineWorksMessage(
     resubmitted:    '🔄 再提出',
     returned:       '↩ 差し戻し',
     reapplied:      '🔄 差し戻し再申請',
+    motouke_next:   '🔗 元請セット申請',
   }
 
   const label = typeLabels[type] || '📄 通知'
@@ -318,6 +319,8 @@ export function buildLineWorksMessage(
     lines.push('', '内容をご確認の上、承認をお願いします。')
   } else if (type === 'completed') {
     lines.push('', '請求書回覧が完了しました。')
+  } else if (type === 'motouke_next') {
+    lines.push('', '業者請求書の業務管理課承認が完了しました。', '続けて管理組合宛請求書の後続申請Bを作成してください。')
   }
 
   const fullText = lines.join('\n')
@@ -332,7 +335,7 @@ export function buildLineWorksMessage(
       actions: [
         {
           type: 'uri',
-          label: '詳細を確認する',
+          label: type === 'motouke_next' ? '後続申請Bを作成' : '詳細を確認する',
           uri: data.appUrl,
         }
       ]

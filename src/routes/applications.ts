@@ -154,9 +154,13 @@ applications.get('/', async (c) => {
           </thead>
           <tbody class="divide-y divide-gray-50">
             ${apps.results.length === 0 ? `<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">該当する申請はありません</td></tr>` :
-              (apps.results as any[]).map(app => `
+              (apps.results as any[]).map(app => {
+                const motoukeAbadge = (app.payment_target === 'td' && app.td_type === 'motouke') ? '<span class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 rounded" title="元請セット申請A">🔗A</span>' : ''
+                const motoukeBbadge = app.original_application_id ? '<span class="ml-1 bg-emerald-100 text-emerald-700 text-xs px-1.5 rounded" title="元請セット申請B（後続）">🔗B</span>' : ''
+                const resubmitBadge = app.resubmit_count > 0 ? `<span class="ml-1 bg-purple-100 text-purple-600 text-xs px-1.5 rounded">再提出</span>` : ''
+                return `
                 <tr class="hover:bg-gray-50">
-                  <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${app.resubmit_count > 0 ? `<span class="ml-1 bg-purple-100 text-purple-600 text-xs px-1.5 rounded">再提出</span>` : ''}</td>
+                  <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${resubmitBadge}${motoukeAbadge}${motoukeBbadge}</td>
                   <td class="px-4 py-3 font-medium text-gray-800">${app.mansion_name || app.title}</td>
                   <td class="px-4 py-3 text-gray-600">${app.applicant_name}</td>
                   <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
@@ -165,7 +169,8 @@ applications.get('/', async (c) => {
                   <td class="px-4 py-3 text-gray-400 text-xs">${app.created_at?.substring(0,10)}</td>
                   <td class="px-4 py-3"><a href="/applications/${app.id}" class="text-[#396999] hover:underline text-xs">詳細</a></td>
                 </tr>
-              `).join('')
+                `
+              }).join('')
             }
           </tbody>
         </table>
@@ -263,6 +268,39 @@ applications.get('/new', async (c) => {
     `).bind(inboxId).first()
   }
 
+  // === 元請セット申請Bの引き継ぎ ===
+  const fromMotoukeId = c.req.query('from_motouke') ? parseInt(c.req.query('from_motouke')!) : null
+  let motoukeSource: any = null
+  let motoukeKumiaiAtt: any = null
+  if (fromMotoukeId) {
+    motoukeSource = await db.prepare(`
+      SELECT a.*, m.name as mansion_name, m.mansion_number
+      FROM applications a
+      LEFT JOIN mansions m ON a.mansion_id = m.id
+      WHERE a.id = ? AND a.payment_target = 'td' AND a.td_type = 'motouke'
+    `).bind(fromMotoukeId).first() as any
+    if (motoukeSource) {
+      // 申請作成者本人か管理者のみアクセス可
+      if (motoukeSource.applicant_id !== user.uid && !user.is_admin) {
+        return c.html(`<p style="padding:2rem;font-family:sans-serif;color:#dc2626">⛔ この元請セット申請の作成権限がありません（元申請の申請者本人のみ作成できます）。</p>`, 403)
+      }
+      // 既に申請Bが作成されていたらそちらへリダイレクト
+      const existingB = await db.prepare(
+        'SELECT id FROM applications WHERE original_application_id = ? LIMIT 1'
+      ).bind(fromMotoukeId).first() as any
+      if (existingB) {
+        return c.redirect(`/applications/${existingB.id}?motouke_dup=1`)
+      }
+      // 管理組合宛請求書PDFを取得
+      motoukeKumiaiAtt = await db.prepare(
+        'SELECT * FROM attachments WHERE application_id = ? AND file_type = ? ORDER BY id DESC LIMIT 1'
+      ).bind(fromMotoukeId, 'kumiai_invoice').first() as any
+      if (!motoukeKumiaiAtt) {
+        return c.html(`<p style="padding:2rem;font-family:sans-serif;color:#dc2626">⛔ 元申請にまだ管理組合宛請求書PDFがアップロードされていません。本橋さんのアップロード完了をお待ちください。</p>`, 400)
+      }
+    }
+  }
+
   // 回覧先候補取得
   // 上長候補：担当者/上司（front_supervisor）ロールのアクティブユーザー
   const supervisorCandidates = await db.prepare(
@@ -331,6 +369,30 @@ applications.get('/new', async (c) => {
             </div>
           </div>
         </div>
+        ` : ''}
+        ${motoukeSource ? `
+        <!-- 元請セット申請Bの引き継ぎバナー -->
+        <div class="mb-5 bg-amber-50 border-2 border-amber-300 rounded-lg p-4 flex items-start gap-3">
+          <span class="text-2xl">🔗</span>
+          <div class="flex-1">
+            <p class="text-sm font-bold text-amber-900">元請セット申請B（管理組合宛請求書の回覧）</p>
+            <p class="text-xs text-amber-800 mt-1">
+              元申請 <a href="/applications/${motoukeSource.id}" class="underline font-mono">${motoukeSource.application_number}</a>
+              （業者請求書 / ${motoukeSource.mansion_name}）に紐づく後続申請です。
+            </p>
+            <div class="flex flex-wrap gap-3 mt-2 text-xs text-amber-900">
+              <span>🏢 ${motoukeSource.mansion_name}</span>
+              <span>💴 管理組合請求金額: ${motoukeSource.kumiai_amount ? Number(motoukeSource.kumiai_amount).toLocaleString() : '-'}円</span>
+              <span>📎 ${motoukeKumiaiAtt.file_name}</span>
+            </div>
+            <p class="text-xs text-amber-700 mt-2">
+              ✓ マンション・支払先（管理組合）・金額・PDFは元申請から自動引き継ぎ済です<br>
+              ✓ 回覧経路は「上長 → 本橋（業務管理課） → マンション会計」の短縮フローになります
+            </p>
+          </div>
+        </div>
+        <input type="hidden" name="from_motouke" value="${motoukeSource.id}">
+        <input type="hidden" name="motouke_kumiai_att_id" value="${motoukeKumiaiAtt.id}">
         ` : ''}
         <input type="hidden" name="inbox_id" value="${inboxId || ''}">
         <div class="space-y-5">
@@ -769,6 +831,37 @@ applications.get('/new', async (c) => {
       })
       ` : ''}
 
+      // 元請セット申請B: 自動セット
+      ${motoukeSource ? `
+      window.addEventListener('DOMContentLoaded', function() {
+        // 1) マンション自動セット
+        const numInput = document.getElementById('mansionNumberInput')
+        if (numInput) {
+          numInput.value = '${motoukeSource.mansion_number}'
+          searchMansion('${motoukeSource.mansion_number}')
+        }
+        // 2) 支払先 = 管理組合を選択・ロック
+        setTimeout(function() {
+          const kumiaiRadio = document.querySelector('input[name="payment_target"][value="kumiai"]')
+          if (kumiaiRadio) {
+            kumiaiRadio.checked = true
+            kumiaiRadio.dispatchEvent(new Event('change'))
+          }
+          // 支払先ラジオを無効化（変更不可）
+          document.querySelectorAll('input[name="payment_target"]').forEach(el => el.disabled = true)
+
+          // 3) 金額を管理組合請求金額で自動セット
+          const budgetInput = document.getElementById('budgetAmountInput')
+          const budgetHidden = document.getElementById('budgetAmountHidden')
+          const amount = '${motoukeSource.kumiai_amount || 0}'
+          if (budgetInput) {
+            budgetInput.value = Number(amount).toLocaleString()
+          }
+          if (budgetHidden) budgetHidden.value = amount
+        }, 200)
+      })
+      ` : ''}
+
       // 会計課・本社経理ユーザーをJSに埋め込み
       const ACCOUNTING_USERS = ${JSON.stringify(
         (accountingUsers.results as any[]).map((u: any) => ({ id: u.id, name: u.name }))
@@ -995,8 +1088,33 @@ applications.post('/', async (c) => {
   const appNumber = generateApplicationNumber()
   const mansionId = body.mansion_id ? parseInt(body.mansion_id) : null
 
-  // 手数料バリデーション（管理組合の場合、円か％どちらか必須）
-  if (body.payment_target !== 'td') {
+  // === 元請セット申請Bの場合の情報取得 ===
+  const fromMotoukeId = body.from_motouke ? parseInt(body.from_motouke) : null
+  let motoukeSource: any = null
+  let motoukeKumiaiAtt: any = null
+  if (fromMotoukeId) {
+    motoukeSource = await db.prepare(
+      'SELECT * FROM applications WHERE id = ? AND payment_target = ? AND td_type = ?'
+    ).bind(fromMotoukeId, 'td', 'motouke').first() as any
+    if (!motoukeSource || (motoukeSource.applicant_id !== user.uid && !user.is_admin)) {
+      return c.html(`<p style="padding:2rem;color:#dc2626">⛔ 元請セット申請の作成権限がありません</p>`, 403)
+    }
+    // 二重作成防止
+    const existingB = await db.prepare(
+      'SELECT id FROM applications WHERE original_application_id = ? LIMIT 1'
+    ).bind(fromMotoukeId).first() as any
+    if (existingB) {
+      return c.redirect(`/applications/${existingB.id}?motouke_dup=1`)
+    }
+    if (body.motouke_kumiai_att_id) {
+      motoukeKumiaiAtt = await db.prepare(
+        'SELECT * FROM attachments WHERE id = ? AND application_id = ? AND file_type = ?'
+      ).bind(body.motouke_kumiai_att_id, fromMotoukeId, 'kumiai_invoice').first() as any
+    }
+  }
+
+  // 手数料バリデーション（管理組合の場合、円か％どちらか必須。ただし元請セット申請Bは金額自動設定のためスキップ）
+  if (body.payment_target !== 'td' && !fromMotoukeId) {
     const hasBudget = body.budget_amount !== '' && body.budget_amount != null
     const hasCommission = body.commission_rate !== '' && body.commission_rate != null
     if (!hasBudget && !hasCommission) {
@@ -1026,30 +1144,42 @@ applications.post('/', async (c) => {
       // inbox引き継ぎファイルをinvoice1として使用
       fileKeys['invoice1'] = inboxAttachmentKey
       fileNames['invoice1'] = inboxAttachmentName || 'invoice.pdf'
+    } else if (fileKey === 'invoice1' && motoukeKumiaiAtt && !fileKeys['invoice1']) {
+      // 元請セット申請B: 管理組合宛請求書PDFをinvoice1として引き継ぐ
+      fileKeys['invoice1'] = motoukeKumiaiAtt.file_key
+      fileNames['invoice1'] = motoukeKumiaiAtt.file_name
     }
   }
+
+  // 元請セット申請Bの場合: 支払先・金額を元申請の情報で上書き
+  const effectivePaymentTarget = fromMotoukeId ? 'kumiai' : body.payment_target
+  const effectiveBudgetAmount = fromMotoukeId
+    ? (motoukeSource?.kumiai_amount || 0)
+    : (parseInt(String(body.budget_amount || '0').replace(/,/g, '')) || 0)
+  const effectiveTdType = fromMotoukeId ? null : (body.td_type || null)
 
   // 申請を保存
   const result = await db.prepare(`
     INSERT INTO applications (
       application_number, title, mansion_id, applicant_id, circulation_start_date,
       payment_target, account_item, td_type, kumiai_amount, gyosha_amount, budget_amount,
-      commission_rate, remarks, status, current_step, resubmit_count
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, 0)
+      commission_rate, remarks, status, current_step, resubmit_count, original_application_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, 0, ?)
   `).bind(
     appNumber,
     body.title || '',
     mansionId,
     user.uid,
     body.circulation_start_date,
-    body.payment_target,
+    effectivePaymentTarget,
     body.account_item || null,
-    body.td_type || null,
+    effectiveTdType,
     body.kumiai_amount ? parseInt(String(body.kumiai_amount).replace(/,/g, '')) : null,
     body.gyosha_amount ? parseInt(String(body.gyosha_amount).replace(/,/g, '')) : null,
-    parseInt(String(body.budget_amount || '0').replace(/,/g, '')) || 0,
+    effectiveBudgetAmount,
     body.commission_rate !== '' && body.commission_rate != null ? parseFloat(body.commission_rate) : null,
-    body.remarks || null
+    body.remarks || null,
+    fromMotoukeId
   ).run()
 
   const appId = result.meta.last_row_id
@@ -1062,10 +1192,11 @@ applications.post('/', async (c) => {
   }
 
   // 回覧ステップ作成（フォームの選択値を優先）
+  // 元請セット申請Bの場合、支払先=kumiai + マンション会計の短縮フロー
   const reviewerStep1 = body.reviewer_step1 ? parseInt(body.reviewer_step1) : null
   const reviewerStep2 = body.reviewer_step2 ? parseInt(body.reviewer_step2) : null
   const reviewerStep3 = body.reviewer_step3 ? parseInt(body.reviewer_step3) : null
-  await createCirculationSteps(db, appId as number, user.uid, body.payment_target, mansionId, reviewerStep1, reviewerStep2, reviewerStep3)
+  await createCirculationSteps(db, appId as number, user.uid, effectivePaymentTarget, mansionId, reviewerStep1, reviewerStep2, reviewerStep3)
 
   // 最初の承認者にメール通知
   const firstStep = await db.prepare(
@@ -1121,13 +1252,21 @@ async function createCirculationSteps(
     ).bind(appId, s1).run()
   }
 
-  // Step2: フォーム指定 → なければ業務管理課primary
+  // Step2: フォーム指定 → なければ業務管理課primary（=本橋 employee_number 030）
   let s2 = step2UserId
   if (!s2) {
-    const opStaff = await db.prepare(
-      'SELECT user_id FROM operations_staff WHERE is_primary = 1 LIMIT 1'
+    // 本橋（employee_number=030）を優先的に選択
+    const motohashi = await db.prepare(
+      "SELECT id FROM users WHERE employee_number = '030' AND is_active = 1 LIMIT 1"
     ).first() as any
-    s2 = opStaff?.user_id || null
+    if (motohashi) {
+      s2 = motohashi.id
+    } else {
+      const opStaff = await db.prepare(
+        'SELECT user_id FROM operations_staff WHERE is_primary = 1 LIMIT 1'
+      ).first() as any
+      s2 = opStaff?.user_id || null
+    }
   }
   if (s2) {
     await db.prepare(
@@ -1213,8 +1352,44 @@ applications.get('/:id', async (c) => {
   const isRejected = app.status === 'rejected'
   const isReturned = app.status === 'returned'
 
+  // === 元請セット申請の相互リンク情報 ===
+  // 申請A の場合: 後続申請Bの情報を取得
+  let motoukeSuccessorB: any = null
+  let motoukeKumiaiUploaded = false
+  if (app.payment_target === 'td' && app.td_type === 'motouke') {
+    motoukeSuccessorB = await db.prepare(`
+      SELECT id, application_number, status FROM applications
+      WHERE original_application_id = ? ORDER BY id DESC LIMIT 1
+    `).bind(id).first() as any
+    const kumiaiAtt = await db.prepare(
+      'SELECT id FROM attachments WHERE application_id = ? AND file_type = ? LIMIT 1'
+    ).bind(id, 'kumiai_invoice').first() as any
+    motoukeKumiaiUploaded = !!kumiaiAtt
+  }
+  // 申請B の場合: 元申請Aの情報を取得
+  let motoukeSourceA: any = null
+  if (app.original_application_id) {
+    motoukeSourceA = await db.prepare(`
+      SELECT id, application_number, status FROM applications WHERE id = ?
+    `).bind(app.original_application_id).first() as any
+  }
+
+  // クエリパラメータからのフラッシュメッセージ
+  const flashMotouke = c.req.query('motouke_remind') || c.req.query('motouke_dup')
+  let motoukeFlash = ''
+  if (c.req.query('motouke_remind') === 'ok') {
+    motoukeFlash = `<div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg">✅ 申請者にリマインド通知を送信しました</div>`
+  } else if (c.req.query('motouke_remind') === 'already') {
+    motoukeFlash = `<div class="bg-yellow-50 border border-yellow-200 text-yellow-700 text-sm px-4 py-3 rounded-lg">⚠️ 既に後続申請Bが作成されています</div>`
+  } else if (c.req.query('motouke_remind') === 'no_pdf') {
+    motoukeFlash = `<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">❌ 管理組合宛請求書PDFが未アップロードのためリマインドを送信できません</div>`
+  } else if (c.req.query('motouke_dup') === '1') {
+    motoukeFlash = `<div class="bg-blue-50 border border-blue-200 text-blue-700 text-sm px-4 py-3 rounded-lg">ℹ️ この元請の後続申請Bは既に作成済みです。既存の申請ページを表示しています。</div>`
+  }
+
   const content = `
     <div class="space-y-6 max-w-3xl">
+      ${motoukeFlash}
       <!-- ヘッダー -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div class="flex items-start justify-between mb-4">
@@ -1222,11 +1397,61 @@ applications.get('/:id', async (c) => {
             <div class="flex items-center gap-2 mb-1 flex-wrap">
               <span class="text-xs text-gray-400">${app.application_number}</span>
               ${app.resubmit_count > 0 && app.returned_reason ? `<span class="bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5 rounded-full">↩ 差し戻し再申請 ${app.resubmit_count}回目</span>` : app.resubmit_count > 0 ? `<span class="bg-purple-100 text-purple-600 text-xs font-semibold px-2 py-0.5 rounded-full">再提出 ${app.resubmit_count}回目</span>` : ''}
+              ${(app.payment_target === 'td' && app.td_type === 'motouke') ? '<span class="bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5 rounded-full">🔗 元請セット申請A</span>' : ''}
+              ${app.original_application_id ? '<span class="bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-0.5 rounded-full">🔗 元請セット申請B（後続）</span>' : ''}
             </div>
             <h2 class="text-xl font-bold text-gray-800">${app.mansion_name || app.title}</h2>
           </div>
           ${statusBadge(app.status)}
         </div>
+
+        ${motoukeSuccessorB ? `
+        <div class="mt-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center justify-between gap-3 text-sm">
+          <div>
+            <span class="text-emerald-700 font-semibold">🔗 後続申請B:</span>
+            <a href="/applications/${motoukeSuccessorB.id}" class="text-emerald-700 hover:underline font-mono ml-2">${motoukeSuccessorB.application_number}</a>
+            <span class="text-emerald-600 text-xs ml-2">(${motoukeSuccessorB.status})</span>
+          </div>
+        </div>
+        ` : ''}
+
+        ${(app.payment_target === 'td' && app.td_type === 'motouke' && !motoukeSuccessorB && isApplicant) ? `
+        <div class="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+          <p class="text-amber-800 font-semibold mb-2">🔗 元請セット申請B（後続）を作成する</p>
+          ${motoukeKumiaiUploaded ? `
+            <p class="text-amber-700 text-xs mb-2">管理組合宛請求書がアップロード済です。続けて後続申請Bを作成できます。</p>
+            <a href="/applications/new?from_motouke=${id}"
+              class="inline-flex items-center gap-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">
+              📝 後続申請Bを作成する →
+            </a>
+          ` : `
+            <p class="text-amber-700 text-xs">本橋（業務管理課）が管理組合宛請求書PDFをアップロードした後、後続申請Bを作成できます。</p>
+          `}
+        </div>
+        ` : ''}
+
+        ${(app.payment_target === 'td' && app.td_type === 'motouke' && !motoukeSuccessorB && motoukeKumiaiUploaded && (user.is_admin || user.role === 'operations')) ? `
+        <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm flex items-center justify-between gap-3">
+          <div>
+            <p class="text-blue-800 font-semibold">📢 後続申請Bのリマインド送信</p>
+            <p class="text-blue-700 text-xs mt-0.5">申請者が後続申請Bをまだ作成していません。リマインドを送信できます。</p>
+          </div>
+          <form method="POST" action="/applications/${id}/motouke-remind" onsubmit="return confirm('${app.applicant_name}さんに、後続申請Bのリマインド通知を送信しますか？')">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
+              リマインド送信
+            </button>
+          </form>
+        </div>
+        ` : ''}
+
+        ${motoukeSourceA ? `
+        <div class="mt-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm">
+          <span class="text-emerald-700 font-semibold">🔗 元申請A:</span>
+          <a href="/applications/${motoukeSourceA.id}" class="text-emerald-700 hover:underline font-mono ml-2">${motoukeSourceA.application_number}</a>
+          <span class="text-emerald-600 text-xs ml-2">(${motoukeSourceA.status})</span>
+          <span class="text-emerald-600 text-xs ml-1">- 業者請求書の回覧</span>
+        </div>
+        ` : ''}
         <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
           <div><span class="text-gray-400">申請者</span><p class="font-medium mt-0.5">${app.applicant_name}</p></div>
           <div><span class="text-gray-400">回覧開始日</span><p class="font-medium mt-0.5">${app.circulation_start_date}</p></div>
@@ -1254,7 +1479,7 @@ applications.get('/:id', async (c) => {
         <h3 class="font-semibold text-gray-800 mb-3">添付ファイル</h3>
         <div class="space-y-2">
           ${(attachments.results as any[]).map(att => {
-            const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', other1: '添付資料①', other2: '添付資料②' }
+            const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', other1: '添付資料①', other2: '添付資料②', kumiai_invoice: '管理組合宛請求書' }
             return `<div class="flex items-center gap-2">
               <span class="text-xs text-gray-400 w-16 shrink-0">${labels[att.file_type] || att.file_type}</span>
               <span class="text-sm text-gray-700 flex-1 truncate">${att.file_name}</span>
@@ -1447,6 +1672,15 @@ applications.get('/:id/review/:stepId', async (c) => {
 
   const attachments = await db.prepare('SELECT * FROM attachments WHERE application_id = ?').bind(id).all()
 
+  // 元請かつ本橋(業務管理課=step2)の承認時のみ、管理組合宛請求書PDFアップロード欄を表示
+  const isMotoukeStep2 = app.payment_target === 'td' && app.td_type === 'motouke' && step.step_number === 2
+  // 既にアップロード済みかチェック
+  const kumiaiInvoiceExists = (attachments.results as any[]).some((a: any) => a.file_type === 'kumiai_invoice')
+  // 既に後続申請Bが作成されているかチェック
+  const successorApp = await db.prepare(
+    'SELECT id, application_number, status FROM applications WHERE original_application_id = ? ORDER BY id DESC LIMIT 1'
+  ).bind(id).first() as any
+
   const content = `
     <div class="max-w-2xl space-y-6">
       <!-- 申請概要 -->
@@ -1454,6 +1688,7 @@ applications.get('/:id/review/:stepId', async (c) => {
         <div class="flex items-center gap-2 mb-4">
           <span class="text-xs text-gray-400">${app.application_number}</span>
           ${app.resubmit_count > 0 ? `<span class="bg-purple-100 text-purple-600 text-xs font-semibold px-2 py-0.5 rounded-full">再提出 ${app.resubmit_count}回目</span>` : ''}
+          ${(app.payment_target === 'td' && app.td_type === 'motouke') ? '<span class="bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5 rounded-full">元請</span>' : ''}
         </div>
         <h2 class="text-lg font-bold text-gray-800 mb-4">${app.mansion_name || app.title}</h2>
         <div class="grid grid-cols-2 gap-3 text-sm">
@@ -1474,11 +1709,11 @@ applications.get('/:id/review/:stepId', async (c) => {
           })() : ''}
           ${app.remarks ? `<div class="col-span-2"><span class="text-gray-400">備考</span><p class="font-medium">${app.remarks}</p></div>` : ''}
         </div>
-        ${(attachments.results as any[]).length > 0 ? `
+        ${(attachments.results as any[]).filter((a: any) => a.file_type !== 'kumiai_invoice').length > 0 ? `
           <div class="mt-4 pt-4 border-t border-gray-100">
             <p class="text-xs text-gray-400 mb-2">添付ファイル</p>
             <div class="flex flex-wrap gap-2">
-              ${(attachments.results as any[]).map(att => {
+              ${(attachments.results as any[]).filter((a: any) => a.file_type !== 'kumiai_invoice').map(att => {
                 const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', other1: '添付①', other2: '添付②' }
                 return `<button type="button" onclick="openSavedFilePreview('/files/${att.id}', '${att.file_name.replace(/'/g, "\\'")}')"
                   class="inline-flex items-center gap-1 text-xs text-[#396999] bg-[#EEF4FA] hover:bg-[#D5E5F2] px-2 py-1 rounded">
@@ -1504,6 +1739,62 @@ applications.get('/:id/review/:stepId', async (c) => {
           <p class="text-sm text-purple-800 bg-white rounded p-2 border border-purple-200 mt-1">${app.reapply_reason}</p>
         </div>` : ''}
       </div>` : ''}
+
+      ${isMotoukeStep2 ? `
+      <!-- 元請の場合: 管理組合宛請求書PDFアップロード -->
+      <div class="bg-amber-50 border-2 border-amber-300 rounded-xl p-6">
+        <div class="flex items-start gap-3 mb-4">
+          <div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+            <svg class="w-5 h-5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          </div>
+          <div class="flex-1">
+            <h3 class="font-bold text-amber-900 text-base mb-1">📎 管理組合宛請求書（元請セット申請）</h3>
+            <p class="text-xs text-amber-800 leading-relaxed">
+              元請の場合、業者請求書の回覧と<strong>同時に</strong>管理組合宛請求書の回覧が必要です。<br>
+              PDFをアップロードすると、承認時に申請者へ<strong>後続申請Bの作成依頼</strong>が通知されます。
+            </p>
+          </div>
+        </div>
+        ${kumiaiInvoiceExists ? `
+          <div class="bg-white border border-amber-200 rounded-lg px-4 py-3 mb-3">
+            <div class="flex items-center gap-2 text-sm text-green-700 mb-2">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+              <span class="font-semibold">アップロード済み</span>
+            </div>
+            ${(attachments.results as any[]).filter(a => a.file_type === 'kumiai_invoice').map(a => `
+              <div class="text-xs text-gray-600 flex items-center justify-between">
+                <button type="button" onclick="openSavedFilePreview('/files/${a.id}', '${a.file_name.replace(/'/g, "\\'")}')"
+                  class="text-[#396999] hover:underline flex items-center gap-1">
+                  👁 ${a.file_name}
+                </button>
+                <form method="POST" action="/applications/${id}/kumiai-invoice/delete" class="inline" onsubmit="return confirm('削除しますか？')">
+                  <input type="hidden" name="att_id" value="${a.id}">
+                  <button type="submit" class="text-xs text-red-500 hover:underline">削除</button>
+                </form>
+              </div>
+            `).join('')}
+            <p class="text-xs text-gray-400 mt-2">承認時に申請者へ「後続申請Bの作成依頼」通知が送信されます</p>
+          </div>
+        ` : ''}
+        ${successorApp ? `
+          <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-3 text-xs text-blue-800">
+            <p class="font-semibold mb-1">🔗 後続申請Bが既に作成されています</p>
+            <a href="/applications/${successorApp.id}" class="text-blue-700 hover:underline font-mono">${successorApp.application_number}</a>
+            <span class="ml-2">(状態: ${successorApp.status})</span>
+          </div>
+        ` : ''}
+        <form method="POST" action="/applications/${id}/kumiai-invoice/upload" enctype="multipart/form-data" class="space-y-3">
+          <input type="file" name="kumiai_invoice" accept="application/pdf,image/*" required
+            class="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-amber-100 file:text-amber-800 file:font-semibold hover:file:bg-amber-200">
+          <button type="submit"
+            class="bg-amber-600 hover:bg-amber-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition inline-flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M12 12V4m0 0L8 8m4-4l4 4"/></svg>
+            管理組合宛請求書を${kumiaiInvoiceExists ? '追加' : 'アップロード'}
+          </button>
+          <p class="text-xs text-gray-500">※ 承認前にアップロードしなくても承認は可能です（後で追加もできます）</p>
+        </form>
+      </div>
+      ` : ''}
 
       <!-- アクションフォーム -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -1608,6 +1899,130 @@ applications.get('/:id/review/:stepId', async (c) => {
   return c.html(layout('承認・差し戻し', content, user))
 })
 
+// ============================================================
+// 管理組合宛請求書PDFのアップロード（元請セット申請用）
+// ============================================================
+applications.post('/:id/kumiai-invoice/upload', async (c) => {
+  const cookie = c.req.header('Cookie')
+  const sessionId = getSessionIdFromCookie(cookie)
+  const user = await getSessionUser(c.env.DB, sessionId)
+  if (!user) return c.redirect('/login')
+
+  const db = c.env.DB
+  const id = c.req.param('id')
+
+  const app = await db.prepare('SELECT * FROM applications WHERE id = ?').bind(id).first() as any
+  if (!app) return c.notFound()
+
+  // 元請でない場合は拒否
+  if (app.payment_target !== 'td' || app.td_type !== 'motouke') {
+    return c.redirect(`/applications/${id}?err=not_motouke`)
+  }
+
+  const body = await c.req.parseBody()
+  const file = body.kumiai_invoice as File | undefined
+  if (!file || file.size === 0) {
+    return c.redirect(`/applications/${id}?err=no_file`)
+  }
+
+  // R2に保存
+  const ext = (file.name.split('.').pop() || 'pdf').toLowerCase()
+  const fileKey = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  const key = `attachments/${app.application_number}/kumiai_${fileKey}.${ext}`
+  await c.env.R2.put(key, await file.arrayBuffer(), {
+    httpMetadata: { contentType: file.type || 'application/pdf' }
+  })
+
+  // attachments に登録
+  await db.prepare(
+    'INSERT INTO attachments (application_id, file_type, file_name, file_key) VALUES (?, ?, ?, ?)'
+  ).bind(id, 'kumiai_invoice', file.name, key).run()
+
+  // 直前のURL（承認画面）に戻す
+  const referer = c.req.header('Referer')
+  return c.redirect(referer && referer.includes('/review/') ? referer : `/applications/${id}`)
+})
+
+// 管理組合宛請求書PDFの削除
+applications.post('/:id/kumiai-invoice/delete', async (c) => {
+  const cookie = c.req.header('Cookie')
+  const sessionId = getSessionIdFromCookie(cookie)
+  const user = await getSessionUser(c.env.DB, sessionId)
+  if (!user) return c.redirect('/login')
+
+  const db = c.env.DB
+  const id = c.req.param('id')
+  const body = await c.req.parseBody() as any
+  const attId = body.att_id
+
+  const att = await db.prepare(
+    'SELECT * FROM attachments WHERE id = ? AND application_id = ? AND file_type = ?'
+  ).bind(attId, id, 'kumiai_invoice').first() as any
+
+  if (att) {
+    try { await c.env.R2.delete(att.file_key) } catch {}
+    await db.prepare('DELETE FROM attachments WHERE id = ?').bind(attId).run()
+  }
+
+  const referer = c.req.header('Referer')
+  return c.redirect(referer && referer.includes('/review/') ? referer : `/applications/${id}`)
+})
+
+// 手動リマインド送信（申請B作成が滞っている申請者向け）
+applications.post('/:id/motouke-remind', async (c) => {
+  const cookie = c.req.header('Cookie')
+  const sessionId = getSessionIdFromCookie(cookie)
+  const user = await getSessionUser(c.env.DB, sessionId)
+  if (!user) return c.redirect('/login')
+
+  const db = c.env.DB
+  const id = c.req.param('id')
+
+  const app = await db.prepare(`
+    SELECT a.*, u.name as applicant_name
+    FROM applications a JOIN users u ON a.applicant_id = u.id
+    WHERE a.id = ?
+  `).bind(id).first() as any
+  if (!app) return c.notFound()
+
+  // 元請以外は拒否
+  if (app.payment_target !== 'td' || app.td_type !== 'motouke') {
+    return c.redirect(`/applications/${id}`)
+  }
+
+  // 既に後続Bがある場合はスキップ
+  const existingB = await db.prepare(
+    'SELECT id FROM applications WHERE original_application_id = ? LIMIT 1'
+  ).bind(id).first() as any
+  if (existingB) {
+    return c.redirect(`/applications/${id}?motouke_remind=already`)
+  }
+
+  // 管理組合宛請求書がアップロードされているか確認
+  const kumiaiAtt = await db.prepare(
+    'SELECT id FROM attachments WHERE application_id = ? AND file_type = ? LIMIT 1'
+  ).bind(id, 'kumiai_invoice').first() as any
+  if (!kumiaiAtt) {
+    return c.redirect(`/applications/${id}?motouke_remind=no_pdf`)
+  }
+
+  const origin = new URL(c.req.url).origin
+  const newAppUrl = `${origin}/applications/new?from_motouke=${id}`
+
+  await sendNotification(db, 'motouke_next', app.applicant_id, {
+    appNumber: app.application_number,
+    title: app.title,
+    applicantName: app.applicant_name,
+    appUrl: newAppUrl,
+  } as any)
+
+  await db.prepare(
+    'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(id, app.applicant_id, 'motouke_next_remind', '', `【元請セット申請リマインド】${app.application_number}`, 'sent').run()
+
+  return c.redirect(`/applications/${id}?motouke_remind=ok`)
+})
+
 // 承認アクション処理
 applications.post('/:id/review/:stepId', async (c) => {
   const cookie = c.req.header('Cookie')
@@ -1655,6 +2070,34 @@ applications.post('/:id/review/:stepId', async (c) => {
       await sendNotification(db, 'completed', app.applicant_id, {
         appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl
       })
+    }
+
+    // === 元請セット申請: 本橋(step2)承認時に、管理組合宛PDFがアップロードされていれば申請者に後続申請通知 ===
+    if (step.step_number === 2 && app.payment_target === 'td' && app.td_type === 'motouke') {
+      // 既に後続Bが作成されていないかチェック
+      const existingB = await db.prepare(
+        'SELECT id FROM applications WHERE original_application_id = ? LIMIT 1'
+      ).bind(id).first() as any
+
+      // 管理組合宛請求書がアップロードされているか確認
+      const kumiaiAtt = await db.prepare(
+        'SELECT id FROM attachments WHERE application_id = ? AND file_type = ? LIMIT 1'
+      ).bind(id, 'kumiai_invoice').first() as any
+
+      if (!existingB && kumiaiAtt) {
+        const origin = new URL(c.req.url).origin
+        const newAppUrl = `${origin}/applications/new?from_motouke=${id}`
+        await sendNotification(db, 'motouke_next', app.applicant_id, {
+          appNumber: app.application_number,
+          title: app.title,
+          applicantName: app.applicant_name,
+          appUrl: newAppUrl,
+        } as any)
+        await db.prepare(
+          'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind(id, app.applicant_id, 'motouke_next', app.applicant_email || '',
+          `【元請セット申請】${app.application_number} - 管理組合宛請求書の申請をお願いします`, 'sent').run()
+      }
     }
 
   } else if (action === 'reject') {
