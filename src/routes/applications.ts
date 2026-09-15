@@ -24,6 +24,7 @@ async function sendNotification(
     returnedByName?: string
     returnedFromStep?: number
     appUrl: string
+    isTest?: boolean
   }
 ): Promise<void> {
   // 受信者の通知設定とLINE WORKS IDを取得
@@ -35,14 +36,18 @@ async function sendNotification(
 
   const method = recipient.notify_method || 'email'
 
+  // テスト申請の場合は件名にプレフィックス
+  const mailPrefix = data.isTest ? '[TEST] ' : ''
+  const lwPrefix = data.isTest ? '🧪TEST ' : ''
+
   // メール送信
   if (method === 'email' || method === 'both') {
     const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
     if (smtp && recipient.email) {
       await sendMail(smtp, {
         to: recipient.email,
-        subject: buildMailSubject(type, data.appNumber),
-        html: buildMailBody(type, data),
+        subject: mailPrefix + buildMailSubject(type, data.appNumber),
+        html: (data.isTest ? '<div style="background:#fef3c7;border:2px solid #f59e0b;padding:10px 16px;margin:0 0 12px;border-radius:6px;color:#92400e;font-weight:bold;">🧪 テスト申請 - 本番運用ではありません</div>' : '') + buildMailBody(type, data),
       })
     }
   }
@@ -52,7 +57,11 @@ async function sendNotification(
     const lwConfig = await db.prepare('SELECT * FROM lineworks_config WHERE is_active = 1 LIMIT 1').first() as LineWorksConfigRow | null
     if (lwConfig && recipient.lineworks_user_id) {
       const config = rowToConfig(lwConfig)
-      const message = buildLineWorksMessage(type, data)
+      // テスト時は件名にプレフィックス付与するため、appNumberに🧪TESTを先頭付加
+      const dataForLW = data.isTest
+        ? { ...data, appNumber: lwPrefix + data.appNumber }
+        : data
+      const message = buildLineWorksMessage(type, dataForLW)
       const lwResult = await sendLineWorksMessage(config, recipient.lineworks_user_id, message,
         // Refresh Token でトークンが更新された場合に DB を更新するコールバック
         async (tokenData) => {
@@ -158,9 +167,11 @@ applications.get('/', async (c) => {
                 const motoukeAbadge = (app.payment_target === 'td' && app.td_type === 'motouke') ? '<span class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 rounded" title="元請セット申請A">🔗A</span>' : ''
                 const motoukeBbadge = app.original_application_id ? '<span class="ml-1 bg-emerald-100 text-emerald-700 text-xs px-1.5 rounded" title="元請セット申請B（後続）">🔗B</span>' : ''
                 const resubmitBadge = app.resubmit_count > 0 ? `<span class="ml-1 bg-purple-100 text-purple-600 text-xs px-1.5 rounded">再提出</span>` : ''
+                const testBadge = app.is_test ? '<span class="ml-1 bg-yellow-100 text-yellow-700 text-xs px-1.5 rounded font-semibold" title="テスト申請">🧪TEST</span>' : ''
+                const rowClass = app.is_test ? 'hover:bg-yellow-50 bg-yellow-50/40' : 'hover:bg-gray-50'
                 return `
-                <tr class="hover:bg-gray-50">
-                  <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${resubmitBadge}${motoukeAbadge}${motoukeBbadge}</td>
+                <tr class="${rowClass}">
+                  <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${testBadge}${resubmitBadge}${motoukeAbadge}${motoukeBbadge}</td>
                   <td class="px-4 py-3 font-medium text-gray-800">${app.mansion_name || app.title}</td>
                   <td class="px-4 py-3 text-gray-600">${app.applicant_name}</td>
                   <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
@@ -301,16 +312,18 @@ applications.get('/new', async (c) => {
     }
   }
 
-  // 回覧先候補取得
-  // 上長候補：担当者/上司（front_supervisor）ロールのアクティブユーザー
-  const supervisorCandidates = await db.prepare(
-    "SELECT id, name FROM users WHERE role = 'front_supervisor' AND is_active = 1 ORDER BY name"
-  ).all()
+  // === テストモード判定（管理者のみ・自分の申請にのみ適用） ===
+  const isTestMode = user.is_admin && user.test_mode === 1
 
-  // 業務管理課：operations ロールのアクティブユーザー（プルダウン）
-  const opStaffCandidates = await db.prepare(
-    "SELECT id, name FROM users WHERE role = 'operations' AND is_active = 1 ORDER BY name"
-  ).all()
+  // 回覧先候補取得
+  // テストモード時は全アクティブユーザーを候補に、通常時は役割で絞る
+  const supervisorCandidates = isTestMode
+    ? await db.prepare("SELECT id, name, role FROM users WHERE is_active = 1 ORDER BY name").all()
+    : await db.prepare("SELECT id, name FROM users WHERE role = 'front_supervisor' AND is_active = 1 ORDER BY name").all()
+
+  const opStaffCandidates = isTestMode
+    ? await db.prepare("SELECT id, name, role FROM users WHERE is_active = 1 ORDER BY name").all()
+    : await db.prepare("SELECT id, name FROM users WHERE role = 'operations' AND is_active = 1 ORDER BY name").all()
 
   // 業務管理課デフォルト：本橋 美由紀（employee_number=030）
   const defaultStep2User = await db.prepare(
@@ -318,14 +331,14 @@ applications.get('/new', async (c) => {
   ).first() as any
 
   // 会計課ユーザー
-  const accountingUsers = await db.prepare(
-    "SELECT id, name FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name"
-  ).all()
+  const accountingUsers = isTestMode
+    ? await db.prepare("SELECT id, name FROM users WHERE is_active = 1 ORDER BY name").all()
+    : await db.prepare("SELECT id, name FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name").all()
 
   // 本社経理ユーザー
-  const honshaUsers = await db.prepare(
-    "SELECT id, name FROM users WHERE role = 'honsha' AND is_active = 1 ORDER BY name"
-  ).all()
+  const honshaUsers = isTestMode
+    ? await db.prepare("SELECT id, name FROM users WHERE is_active = 1 ORDER BY name").all()
+    : await db.prepare("SELECT id, name FROM users WHERE role = 'honsha' AND is_active = 1 ORDER BY name").all()
 
   // 本社経理デフォルト：山崎 修（employee_number=049）
   const defaultHonshaUser = await db.prepare(
@@ -355,6 +368,24 @@ applications.get('/new', async (c) => {
       </div>
 
       <form method="POST" action="/applications" enctype="multipart/form-data" id="appForm" onsubmit="return checkFeeRequired()">
+        ${isTestMode ? `
+        <!-- テストモード稼働中バナー -->
+        <div class="mb-5 bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4">
+          <div class="flex items-start gap-3">
+            <span class="text-2xl">🧪</span>
+            <div class="flex-1">
+              <p class="text-sm font-bold text-yellow-900">テストモード稼働中</p>
+              <ul class="text-xs text-yellow-800 mt-1.5 space-y-0.5 list-disc list-inside">
+                <li>回覧・承認先を<strong>全ユーザーから自由に選択</strong>できます（役割制限なし）</li>
+                <li>この申請は <span class="inline-block bg-yellow-200 text-yellow-900 text-xs font-semibold px-1.5 py-0.5 rounded">🧪TEST</span> バッジ付きで作成されます</li>
+                <li>通知メール件名に <code class="bg-yellow-100 px-1 rounded">[TEST]</code>、LINE WORKSに <code class="bg-yellow-100 px-1 rounded">🧪TEST</code> が付きます</li>
+              </ul>
+              <a href="/admin/test-mode" class="text-xs text-yellow-700 hover:underline mt-1 inline-block">→ テストモードを OFF にする</a>
+            </div>
+          </div>
+        </div>
+        <input type="hidden" name="_test_mode" value="1">
+        ` : ''}
         ${inboxData ? `
         <!-- inboxからの引き継ぎバナー -->
         <div class="mb-5 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg p-4 flex items-start gap-3">
@@ -483,14 +514,16 @@ applications.get('/new', async (c) => {
               <label class="block text-sm font-medium text-gray-700 mb-1.5">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-[#D5E5F2] text-[#2E5580] rounded-full text-xs font-bold mr-1">1</span>
                 回覧・承認先（上長） <span class="text-red-500">*</span>
+                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
               </label>
               <select name="reviewer_step1" required
                 onchange="updateReviewerPreview()"
-                class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
                 <option value="">選択してください</option>
-                ${(supervisorCandidates.results as any[]).map((u: any) =>
-                  `<option value="${u.id}">${u.name}</option>`
-                ).join('')}
+                ${(supervisorCandidates.results as any[]).map((u: any) => {
+                  const roleTag = isTestMode && u.role ? ` [${u.role}]` : ''
+                  return `<option value="${u.id}">${u.name}${roleTag}</option>`
+                }).join('')}
               </select>
             </div>
 
@@ -499,14 +532,16 @@ applications.get('/new', async (c) => {
               <label class="block text-sm font-medium text-gray-700 mb-1.5">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold mr-1">2</span>
                 回覧・承認先（業務管理課） <span class="text-red-500">*</span>
+                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
               </label>
               <select name="reviewer_step2" required
                 onchange="updateReviewerPreview()"
-                class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
                 <option value="">選択してください</option>
-                ${(opStaffCandidates.results as any[]).map((u: any) =>
-                  `<option value="${u.id}"${defaultStep2User && u.id === defaultStep2User.id ? ' selected' : ''}>${u.name}</option>`
-                ).join('')}
+                ${(opStaffCandidates.results as any[]).map((u: any) => {
+                  const roleTag = isTestMode && u.role ? ` [${u.role}]` : ''
+                  return `<option value="${u.id}"${defaultStep2User && u.id === defaultStep2User.id ? ' selected' : ''}>${u.name}${roleTag}</option>`
+                }).join('')}
               </select>
             </div>
 
@@ -515,6 +550,7 @@ applications.get('/new', async (c) => {
               <label class="block text-sm font-medium text-gray-700">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-green-100 text-green-700 rounded-full text-xs font-bold mr-1">3</span>
                 回覧・承認先（最終） <span class="text-red-500">*</span>
+                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
               </label>
               <!-- 役割選択 -->
               <div class="flex gap-4">
@@ -534,7 +570,7 @@ applications.get('/new', async (c) => {
               <!-- 担当者プルダウン -->
               <select name="reviewer_step3" id="step3UserSelect" required
                 onchange="updateReviewerPreview()"
-                class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
                 <option value="">先に役割を選択してください</option>
               </select>
             </div>
@@ -1158,13 +1194,23 @@ applications.post('/', async (c) => {
     : (parseInt(String(body.budget_amount || '0').replace(/,/g, '')) || 0)
   const effectiveTdType = fromMotoukeId ? null : (body.td_type || null)
 
+  // === テスト申請フラグ判定 ===
+  // 元請セット申請Bの場合、元申請のis_testを引き継ぐ
+  // それ以外は、申請者本人のtest_mode（管理者のみ）で判定
+  let isTestFlag = 0
+  if (fromMotoukeId && motoukeSource) {
+    isTestFlag = motoukeSource.is_test ? 1 : 0
+  } else if (user.is_admin && user.test_mode === 1) {
+    isTestFlag = 1
+  }
+
   // 申請を保存
   const result = await db.prepare(`
     INSERT INTO applications (
       application_number, title, mansion_id, applicant_id, circulation_start_date,
       payment_target, account_item, td_type, kumiai_amount, gyosha_amount, budget_amount,
-      commission_rate, remarks, status, current_step, resubmit_count, original_application_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, 0, ?)
+      commission_rate, remarks, status, current_step, resubmit_count, original_application_id, is_test
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, 0, ?, ?)
   `).bind(
     appNumber,
     body.title || '',
@@ -1179,7 +1225,8 @@ applications.post('/', async (c) => {
     effectiveBudgetAmount,
     body.commission_rate !== '' && body.commission_rate != null ? parseFloat(body.commission_rate) : null,
     body.remarks || null,
-    fromMotoukeId
+    fromMotoukeId,
+    isTestFlag
   ).run()
 
   const appId = result.meta.last_row_id
@@ -1206,12 +1253,13 @@ applications.post('/', async (c) => {
   if (firstStep) {
     const appUrl = `${new URL(c.req.url).origin}/applications/${appId}`
     await sendNotification(db, 'review_request', firstStep.reviewer_id, {
-      appNumber, title: body.title, applicantName: user.name, appUrl
+      appNumber, title: body.title, applicantName: user.name, appUrl,
+      isTest: isTestFlag === 1
     })
     await db.prepare(
       'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
     ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
-      buildMailSubject('review_request', appNumber), 'sent'
+      (isTestFlag === 1 ? '[TEST] ' : '') + buildMailSubject('review_request', appNumber), 'sent'
     ).run()
   }
 
@@ -1396,6 +1444,7 @@ applications.get('/:id', async (c) => {
           <div>
             <div class="flex items-center gap-2 mb-1 flex-wrap">
               <span class="text-xs text-gray-400">${app.application_number}</span>
+              ${app.is_test ? '<span class="bg-yellow-100 text-yellow-800 text-xs font-bold px-2 py-0.5 rounded-full border border-yellow-300">🧪 テスト申請</span>' : ''}
               ${app.resubmit_count > 0 && app.returned_reason ? `<span class="bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5 rounded-full">↩ 差し戻し再申請 ${app.resubmit_count}回目</span>` : app.resubmit_count > 0 ? `<span class="bg-purple-100 text-purple-600 text-xs font-semibold px-2 py-0.5 rounded-full">再提出 ${app.resubmit_count}回目</span>` : ''}
               ${(app.payment_target === 'td' && app.td_type === 'motouke') ? '<span class="bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5 rounded-full">🔗 元請セット申請A</span>' : ''}
               ${app.original_application_id ? '<span class="bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-0.5 rounded-full">🔗 元請セット申請B（後続）</span>' : ''}
@@ -2008,17 +2057,19 @@ applications.post('/:id/motouke-remind', async (c) => {
 
   const origin = new URL(c.req.url).origin
   const newAppUrl = `${origin}/applications/new?from_motouke=${id}`
+  const isTestApp = app.is_test === 1
 
   await sendNotification(db, 'motouke_next', app.applicant_id, {
     appNumber: app.application_number,
     title: app.title,
     applicantName: app.applicant_name,
     appUrl: newAppUrl,
+    isTest: isTestApp,
   } as any)
 
   await db.prepare(
     'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
-  ).bind(id, app.applicant_id, 'motouke_next_remind', '', `【元請セット申請リマインド】${app.application_number}`, 'sent').run()
+  ).bind(id, app.applicant_id, 'motouke_next_remind', '', (isTestApp ? '[TEST] ' : '') + `【元請セット申請リマインド】${app.application_number}`, 'sent').run()
 
   return c.redirect(`/applications/${id}?motouke_remind=ok`)
 })
@@ -2047,6 +2098,7 @@ applications.post('/:id/review/:stepId', async (c) => {
   if (!app) return c.redirect(`/applications/${id}`)
 
   const appUrl = `${new URL(c.req.url).origin}/applications/${id}`
+  const isTestApp = app.is_test === 1
 
   if (action === 'approve') {
     // ステップを承認
@@ -2062,13 +2114,15 @@ applications.post('/:id/review/:stepId', async (c) => {
     if (nextStep) {
       await db.prepare('UPDATE applications SET current_step = ?, updated_at = datetime("now") WHERE id = ?').bind(step.step_number + 1, id).run()
       await sendNotification(db, 'review_request', nextStep.reviewer_id, {
-        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl
+        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl,
+        isTest: isTestApp
       })
     } else {
       // 全ステップ完了
       await db.prepare('UPDATE applications SET status = "completed", updated_at = datetime("now") WHERE id = ?').bind(id).run()
       await sendNotification(db, 'completed', app.applicant_id, {
-        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl
+        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl,
+        isTest: isTestApp
       })
     }
 
@@ -2092,11 +2146,12 @@ applications.post('/:id/review/:stepId', async (c) => {
           title: app.title,
           applicantName: app.applicant_name,
           appUrl: newAppUrl,
+          isTest: isTestApp,
         } as any)
         await db.prepare(
           'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
         ).bind(id, app.applicant_id, 'motouke_next', app.applicant_email || '',
-          `【元請セット申請】${app.application_number} - 管理組合宛請求書の申請をお願いします`, 'sent').run()
+          (isTestApp ? '[TEST] ' : '') + `【元請セット申請】${app.application_number} - 管理組合宛請求書の申請をお願いします`, 'sent').run()
       }
     }
 
@@ -2106,7 +2161,8 @@ applications.post('/:id/review/:stepId', async (c) => {
     ).bind(comment, stepId).run()
     await db.prepare('UPDATE applications SET status = "rejected", updated_at = datetime("now") WHERE id = ?').bind(id).run()
     await sendNotification(db, 'rejected', app.applicant_id, {
-      appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl
+      appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl,
+      isTest: isTestApp
     })
 
   } else if (action === 'hold') {
@@ -2115,7 +2171,8 @@ applications.post('/:id/review/:stepId', async (c) => {
     ).bind(comment, stepId).run()
     await db.prepare('UPDATE applications SET status = "on_hold", updated_at = datetime("now") WHERE id = ?').bind(id).run()
     await sendNotification(db, 'on_hold', app.applicant_id, {
-      appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl
+      appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl,
+      isTest: isTestApp
     })
 
   } else if (action === 'return') {
@@ -2141,7 +2198,8 @@ applications.post('/:id/review/:stepId', async (c) => {
       returnedReason: comment,
       returnedFromStep: step.step_number,
       returnedByName: user.name,
-      appUrl
+      appUrl,
+      isTest: isTestApp
     })
   }
 

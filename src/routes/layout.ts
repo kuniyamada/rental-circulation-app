@@ -45,6 +45,11 @@ export function layout(title: string, content: string, user: any): string {
         </div>
       </div>
       <div class="flex items-center gap-3">
+        ${user.test_mode ? `
+        <a href="/admin/test-mode" class="hidden sm:inline-flex items-center gap-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 text-xs font-semibold px-2.5 py-1 rounded-full border border-yellow-300 transition" title="テストモード稼働中（クリックで設定）">
+          🧪 テストモード ON
+        </a>
+        ` : ''}
         <div class="text-right hidden sm:block">
           <p class="text-sm font-semibold text-gray-800">${user.name}</p>
           <p class="text-xs text-gray-400">${roleLabel[user.role] || user.role} / ${user.employee_number}</p>
@@ -124,6 +129,10 @@ export function layout(title: string, content: string, user: any): string {
         <a href="/admin/backup" class="sidebar-item ${title.includes('バックアップ') ? 'active' : ''}">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
           データバックアップ
+        </a>
+        <a href="/admin/test-mode" class="sidebar-item ${title.includes('テストモード') ? 'active' : ''} ${user.test_mode ? 'text-yellow-600 font-semibold' : ''}">
+          <span class="text-base leading-none">🧪</span>
+          テストモード${user.test_mode ? ' (ON)' : ''}
         </a>
         ` : ''}
       </nav>

@@ -26,7 +26,7 @@ export function generateApplicationNumber(): string {
 export async function getSessionUser(db: D1Database, sessionId: string | undefined): Promise<any | null> {
   if (!sessionId) return null
   const session = await db.prepare(
-    'SELECT s.*, u.id as uid, u.name, u.email, u.role, u.is_admin, u.employee_number, u.must_change_password FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime("now")'
+    'SELECT s.*, u.id as uid, u.name, u.email, u.role, u.is_admin, u.employee_number, u.must_change_password, u.test_mode FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime("now")'
   ).bind(sessionId).first()
   return session || null
 }

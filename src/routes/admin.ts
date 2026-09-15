@@ -31,6 +31,87 @@ admin.use('*', async (c, next) => {
 // /admin トップ → /admin/users へリダイレクト
 admin.get('/', (c) => c.redirect('/admin/users'))
 
+// ============================================================
+// テストモード設定
+// ============================================================
+admin.get('/test-mode', async (c) => {
+  const user = (c as any).get('user')
+  const db = c.env.DB
+  // 最新のtest_mode取得
+  const u = await db.prepare('SELECT test_mode FROM users WHERE id = ?').bind(user.uid).first() as any
+  const isOn = u?.test_mode === 1
+  const flash = c.req.query('flash')
+  let flashHtml = ''
+  if (flash === 'on') flashHtml = `<div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg">✅ テストモードを ON にしました</div>`
+  if (flash === 'off') flashHtml = `<div class="bg-blue-50 border border-blue-200 text-blue-700 text-sm px-4 py-3 rounded-lg">ℹ️ テストモードを OFF にしました</div>`
+
+  const content = `
+    <div class="max-w-2xl space-y-5">
+      ${flashHtml}
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div class="flex items-start gap-3 mb-4">
+          <div class="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+            <span class="text-xl">🧪</span>
+          </div>
+          <div class="flex-1">
+            <h2 class="text-lg font-bold text-gray-800">テストモード設定</h2>
+            <p class="text-xs text-gray-500 mt-1">
+              管理者専用機能。<strong>あなたが作成する申請だけ</strong>がテストモードで動作します（他のユーザーには影響ありません）。
+            </p>
+          </div>
+        </div>
+
+        <div class="mb-5 p-4 rounded-lg ${isOn ? 'bg-yellow-50 border-2 border-yellow-300' : 'bg-gray-50 border border-gray-200'}">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-semibold ${isOn ? 'text-yellow-900' : 'text-gray-600'}">
+                現在のステータス: ${isOn ? '🧪 テストモード稼働中' : '⚪ 通常運用中'}
+              </p>
+              <p class="text-xs mt-1 ${isOn ? 'text-yellow-700' : 'text-gray-500'}">
+                ${isOn ? 'あなたの新規申請は「テスト申請」として作成されます' : '本番運用の設定です'}
+              </p>
+            </div>
+            <form method="POST" action="/admin/test-mode/toggle">
+              <button type="submit" class="${isOn ? 'bg-red-500 hover:bg-red-600' : 'bg-yellow-500 hover:bg-yellow-600'} text-white text-sm font-semibold px-4 py-2 rounded-lg transition">
+                ${isOn ? 'テストモード OFF にする' : 'テストモード ON にする'}
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div class="space-y-3 text-sm text-gray-700">
+          <h3 class="font-semibold text-gray-800">🧪 テストモード ON にすると</h3>
+          <ul class="list-disc list-inside space-y-1.5 text-xs text-gray-600 pl-2">
+            <li>あなたの<strong>新規申請フォームで、上長・業務管理課・最終承認者を全ユーザーから自由に選択</strong>できるようになります（役割制限を解除）</li>
+            <li>作成された申請には <span class="inline-block bg-yellow-100 text-yellow-700 text-xs font-semibold px-2 py-0.5 rounded">🧪TEST</span> バッジが表示されます</li>
+            <li>メール通知の件名に <code class="bg-gray-100 text-xs px-1.5 py-0.5 rounded">[TEST]</code> が付与されます</li>
+            <li>LINE WORKS 通知にも 🧪TEST プレフィックスが付きます</li>
+            <li>元請セット申請（申請A→B自動連携）などの動作確認も安全に行えます</li>
+          </ul>
+
+          <h3 class="font-semibold text-gray-800 pt-2">⚠️ 注意</h3>
+          <ul class="list-disc list-inside space-y-1.5 text-xs text-gray-600 pl-2">
+            <li>この設定は<strong>あなた自身の申請だけ</strong>に影響します。他ユーザーの申請は通常動作します</li>
+            <li>テスト用でも回覧先ユーザーに<strong>実際に通知メール/LINE WORKSが届きます</strong>。テスト先に選ぶユーザーに事前確認してください</li>
+            <li>テストが終わったら必ず OFF に戻してください</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  `
+  return c.html(layout('テストモード設定', content, user))
+})
+
+// テストモード切替
+admin.post('/test-mode/toggle', async (c) => {
+  const user = (c as any).get('user')
+  const db = c.env.DB
+  const u = await db.prepare('SELECT test_mode FROM users WHERE id = ?').bind(user.uid).first() as any
+  const newVal = u?.test_mode === 1 ? 0 : 1
+  await db.prepare('UPDATE users SET test_mode = ?, updated_at = datetime("now") WHERE id = ?').bind(newVal, user.uid).run()
+  return c.redirect(`/admin/test-mode?flash=${newVal === 1 ? 'on' : 'off'}`)
+})
+
 // /admin/settings → /admin/smtp へリダイレクト（後方互換）
 admin.get('/settings', (c) => c.redirect('/admin/smtp'))
 
