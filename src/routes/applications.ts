@@ -630,20 +630,28 @@ applications.get('/new', async (c) => {
             </div>
             <!-- 元請の場合：管理組合への請求金額 + 業者への支払金額 -->
             <div id="motoukeFields" class="hidden space-y-3">
+              <!-- 税込表示の注意書き（元請時のみ表示） -->
+              <div class="bg-red-50 border border-red-300 rounded-lg px-3 py-2 flex items-center gap-2">
+                <span class="text-lg">⚠️</span>
+                <p class="text-sm font-bold text-red-600">管理組合への請求金額は<span class="underline">税込</span>で入力してください</p>
+              </div>
               <!-- 金額入力（横並び） -->
               <div class="grid grid-cols-2 gap-3">
                 <div>
-                  <label class="block text-sm font-semibold text-gray-700 mb-1.5">管理組合への請求金額（円）</label>
+                  <label class="block text-sm font-semibold text-gray-700 mb-1.5">
+                    管理組合への請求金額
+                    <span class="text-xs font-bold text-red-600 ml-1">※税込</span>
+                  </label>
                   <div class="relative">
                     <input type="text" id="kumiaiAmountDisplay" inputmode="numeric"
-                      class="w-full px-3 py-2.5 pr-8 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
+                      class="w-full px-3 py-2.5 pr-8 border border-red-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-red-400 outline-none"
                       placeholder="0" oninput="formatComma(this, 'kumiaiAmount'); calcProfit()">
                     <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
                   </div>
                   <input type="hidden" name="kumiai_amount" id="kumiaiAmountHidden">
                 </div>
                 <div>
-                  <label class="block text-sm font-semibold text-gray-700 mb-1.5">業者への支払金額（円）</label>
+                  <label class="block text-sm font-semibold text-gray-700 mb-1.5">業者への支払金額</label>
                   <div class="relative">
                     <input type="text" id="gyoshaAmountDisplay" inputmode="numeric"
                       class="w-full px-3 py-2.5 pr-8 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
