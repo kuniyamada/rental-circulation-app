@@ -808,6 +808,8 @@ applications.get('/new', async (c) => {
                   return `<option value="${u.id}">${u.name}${roleTag}</option>`
                 }).join('')}
               </select>
+              <!-- マンション選択時、上長がマスタ未設定/候補外だと表示される警告 -->
+              <p id="step1MansionWarn" class="hidden mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5"></p>
             </div>
 
             <!-- Step2: 業務管理課 -->
@@ -839,13 +841,13 @@ applications.get('/new', async (c) => {
               <div class="flex gap-4">
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="reviewer_step3_role" value="accounting" required
-                    onchange="updateStep3Users(); setPaymentTarget('kumiai'); updateReviewerPreview()"
+                    onchange="updateStep3Users(); applyMansionDefaultsFromInput(); setPaymentTarget('kumiai'); updateReviewerPreview()"
                     class="w-4 h-4 text-purple-600">
                   <span class="text-sm">マンション会計課</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="reviewer_step3_role" value="honsha"
-                    onchange="updateStep3Users(); setPaymentTarget('td'); updateReviewerPreview()"
+                    onchange="updateStep3Users(); applyMansionDefaultsFromInput(); setPaymentTarget('td'); updateReviewerPreview()"
                     class="w-4 h-4 text-purple-600">
                   <span class="text-sm">本社経理</span>
                 </label>
@@ -856,6 +858,8 @@ applications.get('/new', async (c) => {
                 class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
                 <option value="">先に役割を選択してください</option>
               </select>
+              <!-- マンション選択時、会計担当がマスタ未設定/候補外だと表示される警告（マンション会計課選択時のみ） -->
+              <p id="step3MansionWarn" class="hidden mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5"></p>
             </div>
           </div>
 
@@ -1020,11 +1024,15 @@ applications.get('/new', async (c) => {
       })
 
       // マンションデータをJSに埋め込み
+      //   supervisor_user_id / accounting_user_id はマンション選択時に
+      //   Step1(上長) / Step3(会計課) のプルダウンを自動セットするために使用
       const MANSIONS = ${JSON.stringify(
         (mansions.results as any[]).map((m: any) => ({
           id: m.id,
           number: m.mansion_number,
-          name: m.name
+          name: m.name,
+          supervisor_user_id: m.supervisor_user_id || null,
+          accounting_user_id: m.accounting_user_id || null,
         }))
       )};
 
@@ -1225,6 +1233,8 @@ applications.get('/new', async (c) => {
           notFoundEl.classList.add('hidden');
           idInput.value = '';
           titleInput.value = '';
+          // マンションクリア時は担当者の自動セットも解除
+          applyMansionDefaults(null);
           return;
         }
 
@@ -1235,6 +1245,8 @@ applications.get('/new', async (c) => {
           notFoundEl.classList.add('hidden');
           idInput.value = found.id;
           titleInput.value = found.name;
+          // マンションマスタから 上長 / 会計担当 を自動セット
+          applyMansionDefaults(found);
           updateReviewerPreview();
         } else {
           resultEl.textContent = '番号を入力するとマンション名が表示されます';
@@ -1242,7 +1254,94 @@ applications.get('/new', async (c) => {
           notFoundEl.classList.remove('hidden');
           idInput.value = '';
           titleInput.value = '';
+          applyMansionDefaults(null);
           updateReviewerPreview();
+        }
+      }
+
+      // マンション選択時に Step1(上長) と Step3(会計課選択時) を自動セットする
+      //   - マンションマスタの supervisor_user_id / accounting_user_id を使用
+      //   - 未設定時はプルダウンを空に戻し、警告メッセージを表示
+      //   - Step3の役割が「本社経理」の場合は Step3 を触らない（山崎修が既定選択されている）
+      //   - マンション変更は常に上書き（前のマンションの担当者は残さない）
+      function applyMansionDefaults(mansion) {
+        // ---- Step1: 上長 ----
+        const step1Sel = document.querySelector('select[name="reviewer_step1"]');
+        const step1Warn = document.getElementById('step1MansionWarn');
+        if (step1Sel) {
+          if (!mansion) {
+            // マンションクリア時: プルダウンも初期化
+            step1Sel.value = '';
+            if (step1Warn) step1Warn.classList.add('hidden');
+          } else if (mansion.supervisor_user_id) {
+            // 上長を自動選択（候補に存在すれば）
+            const optExists = Array.from(step1Sel.options).some(o => o.value === String(mansion.supervisor_user_id));
+            if (optExists) {
+              step1Sel.value = String(mansion.supervisor_user_id);
+              if (step1Warn) step1Warn.classList.add('hidden');
+            } else {
+              // 候補外（テスト用の別ロール等）→ 空にしておく
+              step1Sel.value = '';
+              if (step1Warn) {
+                step1Warn.textContent = 'ℹ️ このマンションの上長はプルダウン候補外のため、手動で選択してください';
+                step1Warn.classList.remove('hidden');
+              }
+            }
+          } else {
+            // マンションに上長が未設定
+            step1Sel.value = '';
+            if (step1Warn) {
+              step1Warn.innerHTML = '⚠️ このマンションには上長が未設定です。<a href="/admin/mansions" target="_blank" class="underline font-semibold">マンション管理マスタ</a>で設定してください';
+              step1Warn.classList.remove('hidden');
+            }
+          }
+        }
+
+        // ---- Step3: 会計課選択時のみ ----
+        const step3RoleRadio = document.querySelector('input[name="reviewer_step3_role"]:checked');
+        const step3Sel = document.getElementById('step3UserSelect');
+        const step3Warn = document.getElementById('step3MansionWarn');
+        // 役割が「マンション会計課(accounting)」以外なら何もしない
+        if (step3RoleRadio && step3RoleRadio.value === 'accounting' && step3Sel) {
+          if (!mansion) {
+            // マンションクリア時: プルダウンも初期化
+            step3Sel.value = '';
+            if (step3Warn) step3Warn.classList.add('hidden');
+          } else if (mansion.accounting_user_id) {
+            const optExists = Array.from(step3Sel.options).some(o => o.value === String(mansion.accounting_user_id));
+            if (optExists) {
+              step3Sel.value = String(mansion.accounting_user_id);
+              if (step3Warn) step3Warn.classList.add('hidden');
+            } else {
+              step3Sel.value = '';
+              if (step3Warn) {
+                step3Warn.textContent = 'ℹ️ このマンションの会計担当はプルダウン候補外のため、手動で選択してください';
+                step3Warn.classList.remove('hidden');
+              }
+            }
+          } else {
+            // マンションに会計担当が未設定
+            step3Sel.value = '';
+            if (step3Warn) {
+              step3Warn.innerHTML = '⚠️ このマンションには会計担当が未設定です。<a href="/admin/mansions" target="_blank" class="underline font-semibold">マンション管理マスタ</a>で設定してください';
+              step3Warn.classList.remove('hidden');
+            }
+          }
+        } else if (step3Warn) {
+          // 本社経理選択時は警告を隠す
+          step3Warn.classList.add('hidden');
+        }
+      }
+
+      // ラジオ変更時などから呼ぶ「現在選択中のマンションで再適用」ヘルパー
+      function applyMansionDefaultsFromInput() {
+        const idInput = document.getElementById('mansionIdInput');
+        if (idInput && idInput.value) {
+          const mansionId = parseInt(idInput.value);
+          const mansion = MANSIONS.find(m => m.id === mansionId);
+          if (mansion) applyMansionDefaults(mansion);
+        } else {
+          applyMansionDefaults(null);
         }
       }
 
