@@ -1977,7 +1977,18 @@ applications.get('/:id', async (c) => {
         </div>
         ` : ''}
 
-        ${(app.payment_target === 'td' && app.td_type === 'motouke' && !motoukeSuccessorB && motoukeKumiaiUploaded && (user.is_admin || user.role === 'operations')) ? `
+        <!--
+          【非表示】業務管理課/管理者向け「お知らせを再送信」バナー（A案 UIのみ非表示）
+          非表示理由:
+            - 管理組合宛請求書アップロード時に、既に自動通知が申請者へ届いている
+            - 業務管理課→申請者への催促は口頭/LINEで済むため、UIとしては冗長
+            - 将来、別の要件（例: N日以上滞留申請の一括催促）で再検討予定
+          復活方法:
+            - 下の条件式 (false && ...) の "false && " を削除すれば元に戻る
+          対応する POST エンドポイント (/applications/:id/motouke-remind) は
+          将来の再利用のため残してあります。
+        -->
+        ${(false && app.payment_target === 'td' && app.td_type === 'motouke' && !motoukeSuccessorB && motoukeKumiaiUploaded && (user.is_admin || user.role === 'operations')) ? `
         <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
           <div class="flex-1 min-w-0">
             <p class="text-blue-800 font-semibold flex items-center gap-1">
@@ -2607,6 +2618,13 @@ applications.post('/:id/kumiai-invoice/delete', async (c) => {
 })
 
 // 手動リマインド送信（申請B作成が滞っている申請者向け）
+//
+// ⚠️ 【現在このエンドポイントを叩くUIは非表示化されています】(A案)
+//    - 申請詳細画面のバナーは src/routes/applications.ts の (false && ...) 条件で非表示
+//    - 管理組合宛請求書アップロード時の自動通知で十分カバーできるため
+//    - 将来「N日以上滞留申請の一括催促」など別要件で再利用する可能性があるため
+//      エンドポイント本体は削除せず残置しています
+//    - 復活させる場合はバナー側の `false && ` を削除するだけで動きます
 applications.post('/:id/motouke-remind', async (c) => {
   const cookie = c.req.header('Cookie')
   const sessionId = getSessionIdFromCookie(cookie)
