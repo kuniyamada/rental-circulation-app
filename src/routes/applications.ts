@@ -1780,6 +1780,11 @@ applications.get('/:id', async (c) => {
     s => s.reviewer_id === user.uid && s.status === 'on_hold'
   )
 
+  // 自分に承認依頼が来ている（現在の承認担当）ステップを確認
+  const myPendingStep = (steps.results as any[]).find(
+    s => s.reviewer_id === user.uid && s.status === 'pending' && s.step_number === app.current_step
+  )
+
   const stepLabels: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終承認者' }
 
   // タイムライン用ヘルパー
@@ -2048,6 +2053,34 @@ applications.get('/:id', async (c) => {
         ` : ''}
       </div>` : ''}
 
+      <!-- あなたに承認依頼が来ています -->
+      ${myPendingStep ? `
+      <div class="bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-300 rounded-xl p-5 shadow-sm">
+        <div class="flex items-start gap-4">
+          <div class="flex-shrink-0">
+            <div class="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center animate-pulse">
+              <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+              </svg>
+            </div>
+          </div>
+          <div class="flex-1">
+            <h3 class="text-base font-bold text-orange-900 mb-1">🔔 あなたに承認依頼が来ています</h3>
+            <p class="text-sm text-orange-800 mb-3">
+              ステップ ${myPendingStep.step_number}（${stepLabels[myPendingStep.step_number] || 'レビュー'}）として、この申請の承認をお願いします。
+            </p>
+            <a href="/applications/${id}/review/${myPendingStep.id}"
+              class="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-5 py-2.5 rounded-lg transition text-sm shadow">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              承認・差し戻し画面へ進む →
+            </a>
+          </div>
+        </div>
+      </div>
+      ` : ''}
+
       <!-- 回覧フロー タイムライン -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 class="font-semibold text-gray-800 mb-5">回覧フロー</h3>
@@ -2077,6 +2110,7 @@ applications.get('/:id', async (c) => {
             <!-- 各承認ステップ -->
             ${(steps.results as any[]).map((step: any) => {
               const isCurrent = app.current_step === step.step_number && step.status === 'pending'
+              const isMyTurn = isCurrent && step.reviewer_id === user.uid
               const c2 = timelineItemClass(step.status, isCurrent)
               const actionDateLabel =
                 step.status === 'approved' ? '承認日時' :
@@ -2092,6 +2126,7 @@ applications.get('/:id', async (c) => {
                     <span class="text-sm font-semibold text-gray-800">${step.reviewer_name}</span>
                     <span class="ml-2 text-xs text-gray-400">${stepLabels[step.step_number] || 'レビュー'}</span>
                     ${isCurrent ? '<span class="ml-1 text-xs bg-[#EEF4FA] text-[#396999] px-1.5 py-0.5 rounded-full font-medium">承認待ち</span>' : ''}
+                    ${isMyTurn ? '<span class="ml-1 text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-medium">← あなたの番</span>' : ''}
                   </div>
                   <span class="text-xs font-medium px-2 py-0.5 rounded-full ${
                     step.status === 'approved' ? 'bg-green-100 text-green-700' :
@@ -2110,6 +2145,13 @@ applications.get('/:id', async (c) => {
                   step.status === 'returned' ? '↩ 差し戻し理由：' : '💬 '
                 }${step.action_comment}</p>` : ''}
                 ${step.hold_answer ? `<p class="text-xs text-[#396999] mt-1.5 bg-[#EEF4FA] rounded p-2 border border-[#D5E5F2]">📝 回答：${step.hold_answer}</p>` : ''}
+                ${isMyTurn ? `
+                <div class="mt-2">
+                  <a href="/applications/${id}/review/${step.id}"
+                    class="inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">
+                    ✅ 承認・差し戻し画面へ →
+                  </a>
+                </div>` : ''}
               </div>
             </div>`
             }).join('')}
