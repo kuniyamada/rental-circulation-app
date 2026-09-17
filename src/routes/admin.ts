@@ -854,28 +854,97 @@ admin.get('/mansions', async (c) => {
     ORDER BY CAST(m.mansion_number AS INTEGER)
   `).all()
 
+  // 選択肢用ユーザーマスタ
+  const allUsers = await db.prepare("SELECT id, name, role FROM users WHERE is_active = 1 ORDER BY name").all()
+  const users = allUsers.results as any[]
+  const fronts = users.filter(u => ['front', 'front_supervisor', 'manager', 'operations', 'admin'].includes(u.role))
+  const accountings = users.filter(u => ['accounting', 'honsha', 'admin'].includes(u.role))
+
+  // 編集権限: admin または operations
+  const canEdit = user.is_admin || user.role === 'operations' || user.role === 'admin'
+
+  // 未設定件数（サマリー用）
+  const missingFront = (mansions.results as any[]).filter(m => !m.front_user_id).length
+  const missingAccounting = (mansions.results as any[]).filter(m => !m.accounting_user_id).length
+
+  const frontOptions = (selectedId: number | null) =>
+    `<option value="">（未設定）</option>` +
+    fronts.map(u => `<option value="${u.id}" ${selectedId === u.id ? 'selected' : ''}>${u.name}</option>`).join('')
+
+  const accountingOptions = (selectedId: number | null) =>
+    `<option value="">（未設定）</option>` +
+    accountings.map(u => `<option value="${u.id}" ${selectedId === u.id ? 'selected' : ''}>${u.name}</option>`).join('')
+
   const content = `
     <div class="bg-white rounded-xl shadow-sm border border-gray-100">
-      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-        <h2 class="font-semibold text-gray-800">マンション一覧 <span class="text-[#396999]">${mansions.results.length}件</span></h2>
-        <a href="/admin/mansions/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition">＋ マンション追加</a>
+      <div class="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="font-semibold text-gray-800">マンション一覧 <span class="text-[#396999]">${mansions.results.length}件</span></h2>
+          ${canEdit ? `
+            <p class="text-xs text-gray-500 mt-1">💡 担当フロント・会計担当はプルダウンから変更するとその場で保存されます</p>
+          ` : ''}
+        </div>
+        <div class="flex items-center gap-3">
+          ${missingAccounting > 0 ? `
+            <span class="text-xs bg-amber-50 border border-amber-300 text-amber-800 px-2.5 py-1 rounded-full">⚠️ 会計担当未設定: ${missingAccounting}件</span>
+          ` : ''}
+          ${missingFront > 0 ? `
+            <span class="text-xs bg-blue-50 border border-blue-300 text-blue-800 px-2.5 py-1 rounded-full">ℹ️ フロント未設定: ${missingFront}件</span>
+          ` : ''}
+          <a href="/admin/mansions/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition whitespace-nowrap">＋ マンション追加</a>
+        </div>
       </div>
+
+      <!-- 保存トースト -->
+      <div id="saveToast" class="hidden fixed top-20 right-4 z-50 bg-emerald-600 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-2 transition-opacity">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        <span id="saveToastMessage">保存しました</span>
+      </div>
+      <div id="errorToast" class="hidden fixed top-20 right-4 z-50 bg-red-600 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-2 transition-opacity">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span id="errorToastMessage">保存に失敗しました</span>
+      </div>
+
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-gray-50">
             <tr>
               <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 w-16">番号</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">マンション名</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
-              <th class="px-4 py-3"></th>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-56">担当フロント</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-56">管理組合 会計担当者</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-24">状態</th>
+              <th class="px-4 py-3 w-16"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-50">
-            ${(mansions.results as any[]).length === 0 ? '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400">マンションが登録されていません</td></tr>' :
+            ${(mansions.results as any[]).length === 0 ? '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">マンションが登録されていません</td></tr>' :
               (mansions.results as any[]).map(m => `
-                <tr class="hover:bg-gray-50">
+                <tr class="hover:bg-gray-50" data-mansion-id="${m.id}">
                   <td class="px-3 py-3 text-center font-mono text-xs text-gray-400 bg-gray-50">${m.mansion_number ?? '-'}</td>
                   <td class="px-4 py-3 font-medium">${m.name}</td>
+                  <td class="px-4 py-2">
+                    ${canEdit ? `
+                      <select
+                        onchange="saveMansionField(${m.id}, 'front_user_id', this.value, this)"
+                        class="w-full px-2 py-1.5 border rounded text-xs focus:ring-2 focus:ring-[#396999] outline-none ${!m.front_user_id ? 'border-blue-300 bg-blue-50 text-blue-900' : 'border-gray-200'}">
+                        ${frontOptions(m.front_user_id)}
+                      </select>
+                    ` : `
+                      <span class="text-xs ${!m.front_name ? 'text-blue-600 font-semibold' : 'text-gray-700'}">${m.front_name || '（未設定）'}</span>
+                    `}
+                  </td>
+                  <td class="px-4 py-2">
+                    ${canEdit ? `
+                      <select
+                        onchange="saveMansionField(${m.id}, 'accounting_user_id', this.value, this)"
+                        class="w-full px-2 py-1.5 border rounded text-xs focus:ring-2 focus:ring-[#396999] outline-none ${!m.accounting_user_id ? 'border-amber-400 bg-amber-50 text-amber-900 font-semibold' : 'border-gray-200'}">
+                        ${accountingOptions(m.accounting_user_id)}
+                      </select>
+                    ` : `
+                      <span class="text-xs ${!m.accounting_name ? 'text-amber-700 font-semibold' : 'text-gray-700'}">${m.accounting_name || '⚠️ 未設定'}</span>
+                    `}
+                  </td>
                   <td class="px-4 py-3">
                     <form method="POST" action="/admin/mansions/${m.id}/toggle" class="flex items-center gap-2">
                       <button type="submit" class="relative inline-flex items-center w-11 h-6 rounded-full transition-colors focus:outline-none ${m.is_active ? 'bg-green-500' : 'bg-gray-300'}">
@@ -884,7 +953,7 @@ admin.get('/mansions', async (c) => {
                       <span class="text-xs ${m.is_active ? 'text-green-600 font-medium' : 'text-gray-400'}">${m.is_active ? 'ON' : 'OFF'}</span>
                     </form>
                   </td>
-                  <td class="px-4 py-3"><a href="/admin/mansions/${m.id}/edit" class="text-[#396999] hover:underline text-xs">編集</a></td>
+                  <td class="px-4 py-3"><a href="/admin/mansions/${m.id}/edit" class="text-[#396999] hover:underline text-xs">詳細</a></td>
                 </tr>
               `).join('')
             }
@@ -892,6 +961,85 @@ admin.get('/mansions', async (c) => {
         </table>
       </div>
     </div>
+
+    ${canEdit ? `
+    <script>
+      let toastTimer = null
+      function showToast(kind, message) {
+        const okEl = document.getElementById('saveToast')
+        const ngEl = document.getElementById('errorToast')
+        const target = kind === 'ok' ? okEl : ngEl
+        const other = kind === 'ok' ? ngEl : okEl
+        if (message) {
+          (kind === 'ok' ? document.getElementById('saveToastMessage') : document.getElementById('errorToastMessage')).textContent = message
+        }
+        other.classList.add('hidden')
+        target.classList.remove('hidden')
+        target.style.opacity = '1'
+        if (toastTimer) clearTimeout(toastTimer)
+        toastTimer = setTimeout(() => {
+          target.style.opacity = '0'
+          setTimeout(() => target.classList.add('hidden'), 300)
+        }, 2000)
+      }
+
+      async function saveMansionField(mansionId, field, value, selectEl) {
+        // 変更前のスタイル退避
+        const originalBorder = selectEl.style.border
+        selectEl.disabled = true
+        selectEl.style.opacity = '0.6'
+        try {
+          const res = await fetch(\`/admin/mansions/\${mansionId}/inline-update\`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ field, value: value || null })
+          })
+          if (res.status === 401) {
+            const data = await res.json().catch(() => ({}))
+            showToast('ng', 'セッション切れです。再ログインしてください')
+            if (data.needsLogin) {
+              setTimeout(() => { location.href = '/login' }, 1500)
+            }
+            return
+          }
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}))
+            showToast('ng', data.error || \`保存失敗 (\${res.status})\`)
+            return
+          }
+          const data = await res.json()
+          showToast('ok', data.message || '保存しました')
+          // 未設定→設定済み or 逆 の際にセルの見た目を更新
+          if (field === 'front_user_id') {
+            if (value) {
+              selectEl.classList.remove('border-blue-300', 'bg-blue-50', 'text-blue-900')
+              selectEl.classList.add('border-gray-200')
+            } else {
+              selectEl.classList.add('border-blue-300', 'bg-blue-50', 'text-blue-900')
+              selectEl.classList.remove('border-gray-200')
+            }
+          } else if (field === 'accounting_user_id') {
+            if (value) {
+              selectEl.classList.remove('border-amber-400', 'bg-amber-50', 'text-amber-900', 'font-semibold')
+              selectEl.classList.add('border-gray-200')
+            } else {
+              selectEl.classList.add('border-amber-400', 'bg-amber-50', 'text-amber-900', 'font-semibold')
+              selectEl.classList.remove('border-gray-200')
+            }
+          }
+        } catch (e) {
+          showToast('ng', '通信エラー: ' + (e.message || e))
+        } finally {
+          selectEl.disabled = false
+          selectEl.style.opacity = '1'
+        }
+      }
+    </script>
+    ` : ''}
   `
   return c.html(layout('マンション管理', content, user))
 })
@@ -945,6 +1093,73 @@ admin.post('/mansions/:id', async (c) => {
     'UPDATE mansions SET name=?, mansion_number=?, front_user_id=?, accounting_user_id=?, is_active=?, updated_at=datetime("now") WHERE id=?'
   ).bind(body.name, mansionNumber, body.front_user_id || null, body.accounting_user_id || null, body.is_active ? 1 : 0, id).run()
   return c.redirect('/admin/mansions')
+})
+
+// マンション一覧からのインライン更新（担当フロント／会計担当のみ、JSON API）
+admin.post('/mansions/:id/inline-update', async (c) => {
+  const user = (c as any).get('user')
+  // 権限チェック（adminミドルウェアで認証済みだが、念のため）
+  const isAllowed = user.is_admin || user.role === 'operations' || user.role === 'admin'
+  if (!isAllowed) {
+    return c.json({ success: false, error: '権限がありません' }, 403)
+  }
+
+  const db = c.env.DB
+  const id = c.req.param('id')
+
+  let payload: any
+  try {
+    payload = await c.req.json()
+  } catch {
+    return c.json({ success: false, error: 'リクエスト形式が不正です' }, 400)
+  }
+  const field = payload?.field
+  const rawValue = payload?.value
+  const value = rawValue === '' || rawValue === undefined || rawValue === null ? null : parseInt(String(rawValue))
+
+  // 更新可能フィールドをホワイトリストで制限
+  const allowedFields: Record<string, { role: string[]; label: string }> = {
+    front_user_id:      { role: ['front', 'front_supervisor', 'manager', 'operations', 'admin'], label: '担当フロント' },
+    accounting_user_id: { role: ['accounting', 'honsha', 'admin'],                                label: '管理組合 会計担当者' },
+  }
+  const meta = allowedFields[field]
+  if (!meta) {
+    return c.json({ success: false, error: '更新できない項目です' }, 400)
+  }
+
+  // 対象マンション存在チェック
+  const mansion = await db.prepare('SELECT id, name FROM mansions WHERE id = ?').bind(id).first() as any
+  if (!mansion) {
+    return c.json({ success: false, error: 'マンションが見つかりません' }, 404)
+  }
+
+  // ユーザー存在＆ロール整合性チェック（未設定=nullは許可）
+  let userName = '（未設定）'
+  if (value !== null) {
+    const target = await db.prepare('SELECT id, name, role, is_active FROM users WHERE id = ?').bind(value).first() as any
+    if (!target) {
+      return c.json({ success: false, error: '選択されたユーザーが見つかりません' }, 400)
+    }
+    if (!target.is_active) {
+      return c.json({ success: false, error: '無効化されたユーザーは設定できません' }, 400)
+    }
+    if (!meta.role.includes(target.role)) {
+      return c.json({ success: false, error: `このユーザーは${meta.label}として設定できません（ロール: ${target.role}）` }, 400)
+    }
+    userName = target.name
+  }
+
+  // 更新実行
+  const sql = `UPDATE mansions SET ${field} = ?, updated_at = datetime('now') WHERE id = ?`
+  await db.prepare(sql).bind(value, id).run()
+
+  return c.json({
+    success: true,
+    message: `${mansion.name} の${meta.label}を「${userName}」に更新しました`,
+    field,
+    value,
+    userName,
+  })
 })
 
 function mansionForm(mansion: any, users: any[]): string {

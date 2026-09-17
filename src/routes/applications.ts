@@ -2784,18 +2784,23 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
   const step2 = (sourceSteps.results as any[]).find(s => s.step_number === 2)
 
   // Step3: マンションマスタから会計担当を取得
+  //  - マンションに会計担当が設定済み → その人で固定表示
+  //  - マンションに会計担当が未設定 → プルダウンで選択させる（accountingロールから）
+  //    ※ フォールバックで勝手に誰かを選ぶのはやめる（意図しない人に承認依頼が飛ぶのを防ぐ）
   let step3User: any = null
+  let step3IsFixed = false  // true: マンションマスタで確定, false: 未設定なのでユーザーが選ぶ
   if (sourceApp.accounting_user_id) {
     step3User = await db.prepare(
       "SELECT id, name, role FROM users WHERE id = ? AND is_active = 1"
     ).bind(sourceApp.accounting_user_id).first() as any
+    step3IsFixed = !!step3User
   }
-  // マンションに会計担当が未設定の場合は、accountingロールの最初のユーザーをデフォルト提示
-  if (!step3User) {
-    step3User = await db.prepare(
-      "SELECT id, name, role FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name LIMIT 1"
-    ).first() as any
-  }
+  // 未設定 or マスタ上のユーザーが無効化されていた場合の候補一覧
+  const step3Candidates = step3IsFixed
+    ? []
+    : ((await db.prepare(
+        "SELECT id, name FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name"
+      ).all()).results as any[])
 
   // エラー表示
   const err = c.req.query('err')
@@ -2918,10 +2923,27 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
             <span class="text-xs text-gray-500 w-16 shrink-0">業務管理課</span>
             <span class="text-sm font-medium text-gray-800 flex-1">${step2 ? step2.reviewer_name : '<span class="text-red-500">未設定</span>'}</span>
           </div>
-          <div class="flex items-center gap-3 border border-green-200 bg-green-50 rounded-lg p-3">
-            <span class="inline-flex items-center justify-center w-7 h-7 bg-green-100 text-green-700 rounded-full text-xs font-bold">3</span>
+          <div class="flex items-center gap-3 border ${step3IsFixed ? 'border-green-200 bg-green-50' : 'border-amber-300 bg-amber-50'} rounded-lg p-3">
+            <span class="inline-flex items-center justify-center w-7 h-7 ${step3IsFixed ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-800'} rounded-full text-xs font-bold">3</span>
             <span class="text-xs text-gray-500 w-16 shrink-0">マンション会計</span>
-            <span class="text-sm font-medium text-gray-800 flex-1">${step3User ? step3User.name : '<span class="text-red-500">未設定（マンション管理から設定してください）</span>'}</span>
+            ${step3IsFixed
+              ? `<span class="text-sm font-medium text-gray-800 flex-1">${step3User.name}</span>`
+              : step3Candidates.length > 0
+                ? `
+                  <div class="flex-1">
+                    <select name="step3_user_id" form="motoukeBForm" required
+                      class="w-full text-sm font-medium text-gray-800 px-3 py-1.5 border border-amber-400 bg-white rounded focus:ring-2 focus:ring-amber-500 outline-none">
+                      <option value="">▼ 会計担当者を選択してください</option>
+                      ${step3Candidates.map((u: any) => `<option value="${u.id}">${u.name}</option>`).join('')}
+                    </select>
+                    <p class="text-xs text-amber-800 mt-1 leading-relaxed">
+                      ⚠️ このマンションには会計担当が未設定のため、今回はこちらから選んでください。<br>
+                      恒久設定は <a href="/admin/mansions" target="_blank" class="text-amber-900 underline font-semibold">マンション管理</a> から行うのが本来です。
+                    </p>
+                  </div>
+                `
+                : `<span class="text-sm text-red-600 flex-1">❌ accountingロールのユーザーが1人も登録されていません。管理者にお問い合わせください</span>`
+            }
           </div>
         </div>
       </div>
@@ -3001,13 +3023,30 @@ applications.post('/:id/motouke-b/confirm', async (c) => {
   if (!step1) return c.redirect(`/applications/${id}/motouke-b/confirm?err=no_step1`)
   if (!step2) return c.redirect(`/applications/${id}/motouke-b/confirm?err=no_step2`)
 
-  // Step3: マンションの会計担当
+  // Step3: マンションの会計担当を決定
+  //   優先順位:
+  //     1) マンションマスタに accounting_user_id が設定済み → それを使用（プルダウン非表示）
+  //     2) マンションマスタ未設定 → 確認画面のプルダウンから選ばれた step3_user_id を使用
+  //   ※ フォールバックで勝手に誰かを選ぶのはやめる（意図しない承認依頼を防ぐ）
   let step3Id: number | null = sourceApp.accounting_user_id || null
   if (!step3Id) {
-    const fallback = await db.prepare(
-      "SELECT id FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name LIMIT 1"
-    ).first() as any
-    step3Id = fallback?.id || null
+    // フォーム送信値から取得
+    const body = await c.req.parseBody() as any
+    const submittedStep3 = body.step3_user_id ? parseInt(String(body.step3_user_id)) : null
+    if (!submittedStep3) {
+      return c.redirect(`/applications/${id}/motouke-b/confirm?err=${encodeURIComponent('マンション会計課の担当者を選択してください')}`)
+    }
+    // 存在＆ロール整合性チェック
+    const target = await db.prepare(
+      "SELECT id, role, is_active FROM users WHERE id = ?"
+    ).bind(submittedStep3).first() as any
+    if (!target || !target.is_active) {
+      return c.redirect(`/applications/${id}/motouke-b/confirm?err=${encodeURIComponent('選択されたユーザーが存在しないか無効化されています')}`)
+    }
+    if (target.role !== 'accounting') {
+      return c.redirect(`/applications/${id}/motouke-b/confirm?err=${encodeURIComponent('マンション会計課ロールのユーザーを選択してください')}`)
+    }
+    step3Id = target.id
   }
   if (!step3Id) return c.redirect(`/applications/${id}/motouke-b/confirm?err=no_step3`)
 
