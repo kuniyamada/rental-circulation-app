@@ -992,11 +992,17 @@ applications.get('/new', async (c) => {
       // - 管理組合(kumiai) → 最大3枠 (②③④)
       // - 会社(TD) 委託内(ittaku) → 最大5枠 (②〜⑥)
       // - それ以外（TD 元請 or 未選択）→ 追加不可（1枠のみ）
+      // 現在の支払先/区分に応じた請求書②以降の追加上限を返す
+      // - 管理組合(kumiai) → 最大3枠 (②③④)
+      // - 会社(TD) 委託内(ittaku) → 最大5枠 (②〜⑥)
+      // - 会社(TD) 元請(motouke) → 最大2枠 (②③)
+      // - それ以外（未選択）→ 追加不可（1枠のみ）
       function getMaxInvoiceSlots() {
         const pay = document.querySelector('input[name="payment_target"]:checked')?.value
         const td = document.querySelector('input[name="td_type"]:checked')?.value
         if (pay === 'kumiai') return 3
         if (pay === 'td' && td === 'ittaku') return 5
+        if (pay === 'td' && td === 'motouke') return 2
         return 1
       }
 
