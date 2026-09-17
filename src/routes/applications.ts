@@ -555,63 +555,110 @@ applications.get('/new', async (c) => {
             </div>
           </div>
 
-          <!-- 添付ファイル（請求書）① ※必須 -->
+          <!-- 添付ファイル（請求書）① ※必須（②以降は「＋請求書を追加」から動的に追加） -->
           <div class="border border-gray-200 rounded-lg p-4">
-            <h3 class="text-sm font-semibold text-gray-700 mb-3">添付ファイル（請求書）</h3>
-            <div>
-              <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）① <span class="text-red-500">*</span></label>
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-semibold text-gray-700">添付ファイル（請求書）</h3>
+              <span id="invoiceExtraHint" class="hidden text-xs text-gray-400"></span>
+            </div>
+            <!-- ①（必須）＋ ②〜（追加分）を1つのコンテナ内に統一表示 -->
+            <div id="invoiceExtraList" class="space-y-3">
+              <!-- 請求書① 必須 -->
+              <div data-invoice-slot="1">
+                <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）① <span class="text-red-500">*</span></label>
+                ${(() => {
+                  const resubmitInv1 = resubmitAttachments.find(a => a.file_type === 'invoice1')
+                  if (resubmitInv1) {
+                    return `
+                <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
+                  <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${resubmitInv1.file_name}</span>
+                  <a href="/applications/files/${resubmitInv1.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                  <span class="text-xs text-gray-400 ml-auto">（別ファイルを選択すると上書きされます）</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
+                    onchange="handleFilePreview(this, 'invoice1Preview')"
+                    class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                  <button type="button" id="invoice1Preview" onclick="openFilePreview('invoice1Input')"
+                    class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                    👁 確認
+                  </button>
+                </div>
+                    `
+                  }
+                  if (inboxData?.attachment_key) {
+                    return `
+                <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg">
+                  <span class="text-[#396999] text-xs">📎 引き継ぎ：${inboxData.attachment_name || 'invoice.pdf'}</span>
+                  <input type="hidden" name="inbox_attachment_key" value="${inboxData.attachment_key}">
+                  <input type="hidden" name="inbox_attachment_name" value="${inboxData.attachment_name || ''}">
+                  <span class="text-xs text-gray-400">（別ファイルを選択すると上書きされます）</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
+                    onchange="handleFilePreview(this, 'invoice1Preview')"
+                    class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                  <button type="button" id="invoice1Preview" onclick="openFilePreview('invoice1Input')"
+                    class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                    👁 確認
+                  </button>
+                </div>
+                    `
+                  }
+                  return `
+                <div class="flex items-center gap-2">
+                  <input type="file" name="invoice1" required accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
+                    onchange="handleFilePreview(this, 'invoice1Preview')"
+                    class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                  <button type="button" id="invoice1Preview" onclick="openFilePreview('invoice1Input')"
+                    class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                    👁 確認
+                  </button>
+                </div>
+                  `
+                })()}
+              </div>
               ${(() => {
-                const resubmitInv1 = resubmitAttachments.find(a => a.file_type === 'invoice1')
-                if (resubmitInv1) {
-                  return `
-              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
-                <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${resubmitInv1.file_name}</span>
-                <a href="/applications/files/${resubmitInv1.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
-                <span class="text-xs text-gray-400 ml-auto">（別ファイルを選択すると上書きされます）</span>
+                // 再申請の場合: 元申請の invoice2〜invoice6 を初期スロットとして展開（①と同じスタイル）
+                const marks = ['②', '③', '④', '⑤', '⑥']
+                const slots: string[] = []
+                for (let i = 2; i <= 6; i++) {
+                  const att = resubmitAttachments.find(a => a.file_type === `invoice${i}`)
+                  const mark = marks[i - 2]
+                  if (att) {
+                    slots.push(`
+              <div data-invoice-slot="${i}">
+                <div class="flex items-center justify-between mb-1">
+                  <label class="block text-xs text-gray-500">添付資料（請求書）${mark}</label>
+                  <button type="button" onclick="removeInvoiceSlot(this)"
+                    class="inline-flex items-center px-2 py-0.5 border border-red-300 text-red-500 text-xs rounded hover:bg-red-50" title="この欄を削除">× 削除</button>
+                </div>
+                <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
+                  <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${att.file_name}</span>
+                  <a href="/applications/files/${att.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                  <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input type="file" name="invoice${i}" accept=".pdf,.jpg,.jpeg,.png" id="invoice${i}Input"
+                    onchange="handleFilePreview(this, 'invoice${i}Preview')"
+                    class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                  <button type="button" id="invoice${i}Preview" onclick="openFilePreview('invoice${i}Input')"
+                    class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                    👁 確認
+                  </button>
+                </div>
               </div>
-              <div class="flex items-center gap-2">
-                <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
-                  onchange="handleFilePreview(this, 'invoice1Preview')"
-                  class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
-                <button type="button" id="invoice1Preview" onclick="openFilePreview('invoice1Input')"
-                  class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
-                  👁 確認
-                </button>
-              </div>
-                  `
+                    `)
+                  }
                 }
-                if (inboxData?.attachment_key) {
-                  return `
-              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg">
-                <span class="text-[#396999] text-xs">📎 引き継ぎ：${inboxData.attachment_name || 'invoice.pdf'}</span>
-                <input type="hidden" name="inbox_attachment_key" value="${inboxData.attachment_key}">
-                <input type="hidden" name="inbox_attachment_name" value="${inboxData.attachment_name || ''}">
-                <span class="text-xs text-gray-400">（別ファイルを選択すると上書きされます）</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
-                  onchange="handleFilePreview(this, 'invoice1Preview')"
-                  class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
-                <button type="button" id="invoice1Preview" onclick="openFilePreview('invoice1Input')"
-                  class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
-                  👁 確認
-                </button>
-              </div>
-                  `
-                }
-                return `
-              <div class="flex items-center gap-2">
-                <input type="file" name="invoice1" required accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
-                  onchange="handleFilePreview(this, 'invoice1Preview')"
-                  class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
-                <button type="button" id="invoice1Preview" onclick="openFilePreview('invoice1Input')"
-                  class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
-                  👁 確認
-                </button>
-              </div>
-                `
+                return slots.join('')
               })()}
             </div>
+            <!-- 追加ボタン（管理組合=最大4枚(①〜④) / 委託内=最大6枚(①〜⑥) / 元請=最大3枚(①〜③)） -->
+            <button type="button" id="addInvoiceBtn" onclick="addInvoiceSlot()"
+              class="hidden mt-3 inline-flex items-center gap-1 px-3 py-1.5 border border-dashed border-[#396999] text-[#396999] text-xs font-semibold rounded-md hover:bg-[#EEF4FA]">
+              ＋ 請求書を追加
+            </button>
           </div>
 
           <!-- 回覧・承認先 -->
@@ -812,66 +859,8 @@ applications.get('/new', async (c) => {
             <p id="feeValidationMsg" class="hidden text-xs text-red-500 mt-1.5">⚠ 手数料（円）または手数料（％）のいずれかを入力してください</p>
           </div>
 
-          <!-- 添付ファイル（請求書）②〜 -->
-          <!-- 「請求書②」欄は常時表示。管理組合=最大3枠(②③④) / 委託内=最大5枠(②〜⑥) の追加ボタンが表示される -->
-          <div class="border border-gray-200 rounded-lg p-4">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="text-sm font-semibold text-gray-700">添付ファイル（請求書）②〜</h3>
-              <span id="invoiceExtraHint" class="hidden text-xs text-gray-400"></span>
-            </div>
-            <div id="invoiceExtraList" class="space-y-2">
-              ${(() => {
-                // 再申請の場合: 元申請の invoice2〜invoice6 を初期スロットとして展開
-                const marks = ['②', '③', '④', '⑤', '⑥']
-                const slots: string[] = []
-                for (let i = 2; i <= 6; i++) {
-                  const att = resubmitAttachments.find(a => a.file_type === `invoice${i}`)
-                  const mark = marks[i - 2]
-                  if (att) {
-                    slots.push(`
-              <div class="space-y-1" data-invoice-slot="${i}">
-                <div class="flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
-                  <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${att.file_name}</span>
-                  <a href="/applications/files/${att.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
-                  <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <label class="text-xs text-gray-500 w-16 shrink-0">請求書${mark}</label>
-                  <input type="file" name="invoice${i}" accept=".pdf,.jpg,.jpeg,.png" id="invoice${i}Input"
-                    onchange="handleFilePreview(this, 'invoice${i}Preview')"
-                    class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
-                  <button type="button" id="invoice${i}Preview" onclick="openFilePreview('invoice${i}Input')"
-                    class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
-                    👁 確認
-                  </button>
-                </div>
-              </div>
-                    `)
-                  }
-                }
-                if (slots.length > 0) return slots.join('')
-                // 通常時 or 再申請でも②以降が無い場合: 空の請求書②枠だけ表示
-                return `
-              <div class="flex items-center gap-2" data-invoice-slot="2">
-                <label class="text-xs text-gray-500 w-16 shrink-0">請求書②</label>
-                <input type="file" name="invoice2" accept=".pdf,.jpg,.jpeg,.png" id="invoice2Input"
-                  onchange="handleFilePreview(this, 'invoice2Preview')"
-                  class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
-                <button type="button" id="invoice2Preview" onclick="openFilePreview('invoice2Input')"
-                  class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
-                  👁 確認
-                </button>
-              </div>
-                `
-              })()}
-              <!-- 請求書③〜⑥ はJSで動的に追加される -->
-            </div>
-            <!-- 追加ボタン（管理組合=3枠 / 委託内=5枠まで） -->
-            <button type="button" id="addInvoiceBtn" onclick="addInvoiceSlot()"
-              class="hidden mt-3 inline-flex items-center gap-1 px-3 py-1.5 border border-dashed border-[#396999] text-[#396999] text-xs font-semibold rounded-md hover:bg-[#EEF4FA]">
-              ＋ 請求書を追加
-            </button>
-          </div>
+          <!-- 「添付ファイル（請求書）②〜」セクションは
+               「添付ファイル（請求書）」セクションに統合したため削除 -->
 
           <!-- 送信先（承認者）プレビュー -->
           <div id="reviewerPreview" class="border border-indigo-200 bg-indigo-50 rounded-lg p-4">
@@ -1029,6 +1018,8 @@ applications.get('/new', async (c) => {
         if (commissionEl) commissionEl.required = false
         // 送信先プレビューを初期表示
         updateReviewerPreview()
+        // 請求書追加ボタン・ヒントの初期表示（支払先未選択なら追加ボタン非表示）
+        if (typeof updateInvoiceExtraUI === 'function') updateInvoiceExtraUI()
       })
 
       // マンションデータをJSに埋め込み
@@ -1258,48 +1249,47 @@ applications.get('/new', async (c) => {
         }
       }
 
-      // 現在の支払先/区分に応じた請求書②以降の追加上限を返す
-      // - 管理組合(kumiai) → 最大3枠 (②③④)
-      // - 会社(TD) 委託内(ittaku) → 最大5枠 (②〜⑥)
-      // - それ以外（TD 元請 or 未選択）→ 追加不可（1枠のみ）
-      // 現在の支払先/区分に応じた請求書②以降の追加上限を返す
-      // - 管理組合(kumiai) → 最大3枠 (②③④)
-      // - 会社(TD) 委託内(ittaku) → 最大5枠 (②〜⑥)
-      // - 会社(TD) 元請(motouke) → 最大2枠 (②③)
-      // - それ以外（未選択）→ 追加不可（1枠のみ）
+      // 現在の支払先/区分に応じた請求書の追加上限（①を含めた総数）を返す
+      // - 管理組合(kumiai) → 最大4枚 (①〜④)
+      // - 会社(TD) 委託内(ittaku) → 最大6枚 (①〜⑥)
+      // - 会社(TD) 元請(motouke) → 最大3枚 (①〜③)
+      // - それ以外（未選択）→ 1枚のみ（①のみ、②以降の追加不可）
       function getMaxInvoiceSlots() {
         const pay = document.querySelector('input[name="payment_target"]:checked')?.value
         const td = document.querySelector('input[name="td_type"]:checked')?.value
-        if (pay === 'kumiai') return 3
-        if (pay === 'td' && td === 'ittaku') return 5
-        if (pay === 'td' && td === 'motouke') return 2
+        if (pay === 'kumiai') return 4
+        if (pay === 'td' && td === 'ittaku') return 6
+        if (pay === 'td' && td === 'motouke') return 3
         return 1
       }
 
       // 追加ボタン・ヒント表示の更新（拡張可否を反映）
+      // 注意: ①スロットは常に存在し保護される。②以降のみ追加/削除の対象。
       function updateInvoiceExtraUI() {
         const max = getMaxInvoiceSlots()
         const addBtn = document.getElementById('addInvoiceBtn')
         const hint = document.getElementById('invoiceExtraHint')
         const list = document.getElementById('invoiceExtraList')
         if (!list) return
+        // ①を含む全スロット数
         const existing = list.querySelectorAll('[data-invoice-slot]').length
         // 追加不可(max=1) or 上限達 → 追加ボタン非表示
         const canAdd = max > 1 && existing < max
         if (addBtn) addBtn.classList.toggle('hidden', !canAdd)
         if (hint) {
           if (max > 1) {
-            hint.textContent = '最大' + max + '個まで追加できます'
+            hint.textContent = '最大' + max + '枚まで追加できます（現在 ' + existing + ' 枚）'
             hint.classList.remove('hidden')
           } else {
             hint.classList.add('hidden')
           }
         }
         // 現在の枠数が上限を超えている場合は超過分を削除（支払先切替時のクリーンアップ）
+        // ①(slot=1)は絶対に消さない
         if (existing > max) {
-          document.querySelectorAll('[data-invoice-slot]').forEach(function(el) {
+          list.querySelectorAll('[data-invoice-slot]').forEach(function(el) {
             const slot = parseInt(el.getAttribute('data-invoice-slot'))
-            if (slot > max + 1) el.remove()  // slot=2 が index=1 なので max+1
+            if (slot > max) el.remove()
           })
         }
       }
@@ -1326,59 +1316,65 @@ applications.get('/new', async (c) => {
         calcProfit()
       }
 
-      // 請求書スロットの動的追加（管理組合=最大3、委託内=最大5）
+      // 請求書スロットの動的追加（①と同じA案スタイルで②以降を追加）
+      // 上限: 管理組合=4枚(①〜④) / 委託内=6枚(①〜⑥) / 元請=3枚(①〜③)
       function addInvoiceSlot() {
         const list = document.getElementById('invoiceExtraList')
         if (!list) return
         const max = getMaxInvoiceSlots()
-        // 現在のスロット数を数える
+        // 現在のスロット数（①を含む）
         const existing = list.querySelectorAll('[data-invoice-slot]').length
         if (existing >= max) return
-        const newSlot = existing + 2  // 2,3,4,5,6
-        const marks = ['②', '③', '④', '⑤', '⑥']
-        const mark = marks[newSlot - 2] || ('' + newSlot)
+        const newSlot = existing + 1  // 既存が1(=①のみ)なら次は2、既存が2なら3…
+        const marks = ['①', '②', '③', '④', '⑤', '⑥']
+        const mark = marks[newSlot - 1] || ('' + newSlot)
         const wrap = document.createElement('div')
-        wrap.className = 'flex items-center gap-2'
         wrap.setAttribute('data-invoice-slot', String(newSlot))
         wrap.innerHTML =
-          '<label class="text-xs text-gray-500 w-16 shrink-0">請求書' + mark + '</label>' +
-          '<input type="file" name="invoice' + newSlot + '" accept=".pdf,.jpg,.jpeg,.png" id="invoice' + newSlot + 'Input" ' +
-            'onchange="handleFilePreview(this, \\'invoice' + newSlot + 'Preview\\')" ' +
-            'class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">' +
-          '<button type="button" id="invoice' + newSlot + 'Preview" onclick="openFilePreview(\\'invoice' + newSlot + 'Input\\')" ' +
-            'class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">' +
-            '👁 確認</button>' +
-          '<button type="button" onclick="removeInvoiceSlot(this)" ' +
-            'class="inline-flex items-center px-2 py-1.5 border border-red-300 text-red-500 text-xs rounded-md hover:bg-red-50" title="この欄を削除">' +
-            '×</button>'
+          '<div class="flex items-center justify-between mb-1">' +
+            '<label class="block text-xs text-gray-500">添付資料（請求書）' + mark + '</label>' +
+            '<button type="button" onclick="removeInvoiceSlot(this)" ' +
+              'class="inline-flex items-center px-2 py-0.5 border border-red-300 text-red-500 text-xs rounded hover:bg-red-50" title="この欄を削除">' +
+              '× 削除</button>' +
+          '</div>' +
+          '<div class="flex items-center gap-2">' +
+            '<input type="file" name="invoice' + newSlot + '" accept=".pdf,.jpg,.jpeg,.png" id="invoice' + newSlot + 'Input" ' +
+              'onchange="handleFilePreview(this, \\'invoice' + newSlot + 'Preview\\')" ' +
+              'class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">' +
+            '<button type="button" id="invoice' + newSlot + 'Preview" onclick="openFilePreview(\\'invoice' + newSlot + 'Input\\')" ' +
+              'class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">' +
+              '👁 確認</button>' +
+          '</div>'
         list.appendChild(wrap)
-        // 追加後、上限に達したらボタン非表示
-        if (existing + 1 >= max) {
-          document.getElementById('addInvoiceBtn').classList.add('hidden')
-        }
+        updateInvoiceExtraUI()
       }
 
-      // 動的追加された請求書スロットを削除して番号を再採番
+      // 動的追加された請求書スロットを削除して番号を再採番（①は削除不可）
       function removeInvoiceSlot(btn) {
         const row = btn.closest('[data-invoice-slot]')
-        if (row) row.remove()
-        // 再採番: 残ったスロットのnameとidを詰め直す
+        if (!row) return
+        const slotNum = parseInt(row.getAttribute('data-invoice-slot'))
+        if (slotNum === 1) return  // ①は保護
+        row.remove()
+        // 再採番: ①はそのまま、②以降を詰め直す
         const list = document.getElementById('invoiceExtraList')
         const rows = list.querySelectorAll('[data-invoice-slot]')
-        const marks = ['②', '③', '④', '⑤', '⑥']
+        const marks = ['①', '②', '③', '④', '⑤', '⑥']
         rows.forEach(function(r, idx) {
-          const slot = idx + 2  // 2,3,4,5,6
+          const slot = idx + 1  // 1,2,3,4,5,6
+          if (slot === 1) return  // ①は変更しない
           r.setAttribute('data-invoice-slot', String(slot))
-          const mark = marks[slot - 2] || ('' + slot)
+          const mark = marks[slot - 1] || ('' + slot)
           const label = r.querySelector('label')
-          if (label) label.textContent = '請求書' + mark
+          if (label) label.textContent = '添付資料（請求書）' + mark
           const input = r.querySelector('input[type="file"]')
           if (input) {
             input.name = 'invoice' + slot
             input.id = 'invoice' + slot + 'Input'
             input.setAttribute('onchange', "handleFilePreview(this, 'invoice" + slot + "Preview')")
           }
-          const previewBtn = r.querySelectorAll('button')[0]
+          // 「👁 確認」ボタン（プレビュー）を探して更新
+          const previewBtn = r.querySelector('button[id^="invoice"]')
           if (previewBtn) {
             previewBtn.id = 'invoice' + slot + 'Preview'
             previewBtn.setAttribute('onclick', "openFilePreview('invoice" + slot + "Input')")
