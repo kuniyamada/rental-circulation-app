@@ -541,19 +541,13 @@ applications.get('/new', async (c) => {
             <input type="hidden" name="title" id="titleInput">
           </div>
 
-          <!-- 申請者・回覧開始日 -->
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">申請者</label>
-              <input type="text" value="${user.name}" disabled
-                class="w-full px-3 py-2.5 border border-gray-200 bg-gray-50 rounded-lg text-sm text-gray-500">
-            </div>
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">回覧開始日</label>
-              <input type="date" name="circulation_start_date" value="${resubmitSource ? today : today}" required
-                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
-            </div>
-          </div>
+          <!--
+            【非表示】申請者・回覧開始日
+              - 申請者: セッションから user.uid で取得するため、画面上の表示欄は不要
+              - 回覧開始日: 常に本日を送るため hidden で固定
+                (別日設定が必要になった場合は、この2欄をUI表示に戻せば対応可能)
+          -->
+          <input type="hidden" name="circulation_start_date" value="${today}">
 
           <!-- 添付ファイル（請求書）① ※必須（②以降は「＋請求書を追加」から動的に追加） -->
           <div class="border border-gray-200 rounded-lg p-4">
