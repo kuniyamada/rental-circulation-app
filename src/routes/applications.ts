@@ -1847,6 +1847,8 @@ applications.get('/:id', async (c) => {
     motoukeFlash = `<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">❌ 管理組合宛請求書PDFが未アップロードのためリマインドを送信できません</div>`
   } else if (c.req.query('motouke_dup') === '1') {
     motoukeFlash = `<div class="bg-blue-50 border border-blue-200 text-blue-700 text-sm px-4 py-3 rounded-lg">ℹ️ この元請の後続申請Bは既に作成済みです。既存の申請ページを表示しています。</div>`
+  } else if (c.req.query('motouke_b_created') === '1') {
+    motoukeFlash = `<div class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-3 rounded-lg">✅ 後続申請B の回覧を開始しました！上長へ通知を送信しました。</div>`
   }
 
   const content = `
@@ -1943,7 +1945,7 @@ applications.get('/:id', async (c) => {
           <p class="text-amber-800 font-semibold mb-2">🔗 元請セット申請B（後続）を作成する</p>
           ${motoukeKumiaiUploaded ? `
             <p class="text-amber-700 text-xs mb-2">管理組合宛請求書がアップロード済です。続けて後続申請Bを作成できます。</p>
-            <a href="/applications/new?from_motouke=${id}"
+            <a href="/applications/${id}/motouke-b/confirm"
               class="inline-flex items-center gap-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">
               📝 後続申請Bを作成する →
             </a>
@@ -2616,7 +2618,7 @@ applications.post('/:id/motouke-remind', async (c) => {
   }
 
   const origin = new URL(c.req.url).origin
-  const newAppUrl = `${origin}/applications/new?from_motouke=${id}`
+  const newAppUrl = `${origin}/applications/${id}/motouke-b/confirm`
   const isTestApp = app.is_test === 1
 
   await sendNotification(db, 'motouke_next', app.applicant_id, {
@@ -2632,6 +2634,384 @@ applications.post('/:id/motouke-remind', async (c) => {
   ).bind(id, app.applicant_id, 'motouke_next_remind', '', (isTestApp ? '[TEST] ' : '') + `【元請セット申請リマインド】${app.application_number}`, 'sent').run()
 
   return c.redirect(`/applications/${id}?motouke_remind=ok`)
+})
+
+// ============================================================
+// 元請セット申請B: ワンクリック確認画面 → 回覧開始
+// ============================================================
+applications.get('/:id/motouke-b/confirm', async (c) => {
+  const cookie = c.req.header('Cookie')
+  const sessionId = getSessionIdFromCookie(cookie)
+  const user = await getSessionUser(c.env.DB, sessionId)
+  if (!user) return c.redirect('/login')
+
+  const db = c.env.DB
+  const id = c.req.param('id')
+
+  // 元申請A取得
+  const sourceApp = await db.prepare(`
+    SELECT a.*, m.name as mansion_name, m.mansion_number, m.accounting_user_id
+    FROM applications a
+    LEFT JOIN mansions m ON a.mansion_id = m.id
+    WHERE a.id = ? AND a.payment_target = 'td' AND a.td_type = 'motouke'
+  `).bind(id).first() as any
+
+  if (!sourceApp) {
+    return c.html(`<p style="padding:2rem;color:#dc2626">⛔ 元請申請が見つかりません</p>`, 404)
+  }
+
+  // 権限: 申請者本人 or 管理者のみ
+  if (sourceApp.applicant_id !== user.uid && !user.is_admin) {
+    return c.html(`<p style="padding:2rem;color:#dc2626">⛔ この元請セット申請Bの作成権限がありません（元申請の申請者本人のみ作成できます）</p>`, 403)
+  }
+
+  // 既に後続Bが作成されている場合はそちらへリダイレクト
+  const existingB = await db.prepare(
+    'SELECT id, application_number FROM applications WHERE original_application_id = ? LIMIT 1'
+  ).bind(id).first() as any
+  if (existingB) {
+    return c.redirect(`/applications/${existingB.id}?motouke_dup=1`)
+  }
+
+  // 管理組合宛請求書PDFを取得
+  const kumiaiAtt = await db.prepare(
+    'SELECT * FROM attachments WHERE application_id = ? AND file_type = ? ORDER BY id DESC LIMIT 1'
+  ).bind(id, 'kumiai_invoice').first() as any
+  if (!kumiaiAtt) {
+    return c.html(`<p style="padding:2rem;color:#dc2626">⛔ 元申請にまだ管理組合宛請求書PDFがアップロードされていません。本橋（業務管理課）のアップロード完了をお待ちください。</p>`, 400)
+  }
+
+  // 元申請の回覧ステップ（Step1・Step2の担当者）を取得
+  const sourceSteps = await db.prepare(`
+    SELECT cs.step_number, cs.reviewer_id, u.name as reviewer_name, u.role as reviewer_role
+    FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id
+    WHERE cs.application_id = ? ORDER BY cs.step_number
+  `).bind(id).all()
+
+  const step1 = (sourceSteps.results as any[]).find(s => s.step_number === 1)
+  const step2 = (sourceSteps.results as any[]).find(s => s.step_number === 2)
+
+  // Step3: マンションマスタから会計担当を取得
+  let step3User: any = null
+  if (sourceApp.accounting_user_id) {
+    step3User = await db.prepare(
+      "SELECT id, name, role FROM users WHERE id = ? AND is_active = 1"
+    ).bind(sourceApp.accounting_user_id).first() as any
+  }
+  // マンションに会計担当が未設定の場合は、accountingロールの最初のユーザーをデフォルト提示
+  if (!step3User) {
+    step3User = await db.prepare(
+      "SELECT id, name, role FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name LIMIT 1"
+    ).first() as any
+  }
+
+  // エラー表示
+  const err = c.req.query('err')
+  let errHtml = ''
+  if (err === 'no_step1') errHtml = '<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">❌ 元申請Aに上長（Step1）が設定されていません</div>'
+  else if (err === 'no_step2') errHtml = '<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">❌ 元申請Aに業務管理課（Step2）が設定されていません</div>'
+  else if (err === 'no_step3') errHtml = '<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">❌ マンションに会計担当（マンション会計）が設定されていません。管理画面 → マンション管理から会計担当を設定してください</div>'
+  else if (err) errHtml = `<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">❌ ${err}</div>`
+
+  const isTestApp = sourceApp.is_test === 1
+  const kumiaiAmount = sourceApp.kumiai_amount || 0
+
+  const content = `
+    <div class="max-w-2xl mx-auto space-y-5">
+      ${errHtml}
+
+      <!-- ヘッダー -->
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div class="flex items-center gap-2 mb-2 flex-wrap">
+          <span class="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 rounded-full">🔗 元請セット申請B（後続）</span>
+          ${isTestApp ? '<span class="bg-yellow-100 text-yellow-800 text-xs font-bold px-2 py-0.5 rounded-full border border-yellow-300">🧪 テスト申請</span>' : ''}
+        </div>
+        <h2 class="text-xl font-bold text-gray-800 mb-4">${sourceApp.mansion_name || sourceApp.title} - 管理組合宛請求書の回覧</h2>
+
+        <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm">
+          <p class="text-emerald-800">
+            <strong>🔗 元申請A:</strong>
+            <a href="/applications/${sourceApp.id}" class="text-emerald-700 hover:underline font-mono ml-1">${sourceApp.application_number}</a>
+            <span class="text-emerald-600 text-xs ml-2">（業者請求書の回覧）</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- 申請内容 -->
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div class="flex items-center gap-2 mb-4">
+          <svg class="w-5 h-5 text-[#396999]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          <h3 class="font-semibold text-gray-800">申請内容（自動設定）</h3>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <div>
+            <p class="text-xs text-gray-400">マンション</p>
+            <p class="font-medium mt-0.5">${sourceApp.mansion_name || '-'}</p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-400">支払先</p>
+            <p class="font-medium mt-0.5"><span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span></p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-400">管理組合請求金額</p>
+            <p class="font-medium mt-0.5 text-lg">${Number(kumiaiAmount).toLocaleString()}円</p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-400">申請者</p>
+            <p class="font-medium mt-0.5">${user.name}</p>
+          </div>
+          ${sourceApp.remarks ? `
+          <div class="col-span-full">
+            <p class="text-xs text-gray-400">備考（元申請Aから継承）</p>
+            <p class="text-sm mt-0.5 bg-gray-50 border border-gray-200 rounded p-2">${sourceApp.remarks}</p>
+          </div>
+          ` : ''}
+        </div>
+      </div>
+
+      <!-- 回覧経路 -->
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div class="flex items-center gap-2 mb-4">
+          <svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/>
+          </svg>
+          <h3 class="font-semibold text-gray-800">回覧経路（元申請Aから自動流用）</h3>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center gap-3 border border-[#AECBE5] bg-[#EEF4FA] rounded-lg p-3">
+            <span class="inline-flex items-center justify-center w-7 h-7 bg-[#D5E5F2] text-[#2E5580] rounded-full text-xs font-bold">1</span>
+            <span class="text-xs text-gray-500 w-16 shrink-0">上長</span>
+            <span class="text-sm font-medium text-gray-800 flex-1">${step1 ? step1.reviewer_name : '<span class="text-red-500">未設定</span>'}</span>
+          </div>
+          <div class="flex items-center gap-3 border border-orange-200 bg-orange-50 rounded-lg p-3">
+            <span class="inline-flex items-center justify-center w-7 h-7 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">2</span>
+            <span class="text-xs text-gray-500 w-16 shrink-0">業務管理課</span>
+            <span class="text-sm font-medium text-gray-800 flex-1">${step2 ? step2.reviewer_name : '<span class="text-red-500">未設定</span>'}</span>
+          </div>
+          <div class="flex items-center gap-3 border border-green-200 bg-green-50 rounded-lg p-3">
+            <span class="inline-flex items-center justify-center w-7 h-7 bg-green-100 text-green-700 rounded-full text-xs font-bold">3</span>
+            <span class="text-xs text-gray-500 w-16 shrink-0">マンション会計</span>
+            <span class="text-sm font-medium text-gray-800 flex-1">${step3User ? step3User.name : '<span class="text-red-500">未設定（マンション管理から設定してください）</span>'}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 添付ファイル（管理組合宛請求書PDF） -->
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div class="flex items-center gap-2 mb-4">
+          <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+          </svg>
+          <h3 class="font-semibold text-gray-800">管理組合宛請求書PDF</h3>
+          <span class="text-xs text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full font-medium">👉 内容をご確認ください</span>
+        </div>
+        ${(() => {
+          const ext = (kumiaiAtt.file_name.split('.').pop() || '').toLowerCase()
+          const isPdf = ext === 'pdf'
+          const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext)
+          const iconColor = isPdf ? 'text-red-500' : isImg ? 'text-blue-500' : 'text-gray-500'
+          const icon = isPdf
+            ? '<svg class="w-10 h-10 ' + iconColor + '" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/><text x="10" y="15" text-anchor="middle" fill="white" font-size="5" font-weight="bold">PDF</text></svg>'
+            : isImg
+            ? '<svg class="w-10 h-10 ' + iconColor + '" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'
+            : '<svg class="w-10 h-10 ' + iconColor + '" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>'
+          const safeName = kumiaiAtt.file_name.replace(/'/g, "\\'")
+          return `
+          <div class="flex items-center gap-3 border-2 border-amber-300 bg-amber-50 rounded-lg p-4">
+            <div class="flex-shrink-0">${icon}</div>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-semibold text-amber-800">管理組合宛請求書</p>
+              <p class="text-sm text-gray-700 truncate" title="${kumiaiAtt.file_name}">${kumiaiAtt.file_name}</p>
+            </div>
+            <div class="flex gap-1 flex-shrink-0">
+              <button type="button" onclick="openSavedFilePreview('/files/${kumiaiAtt.id}', '${safeName}')"
+                class="inline-flex items-center gap-1 bg-[#396999] hover:bg-[#2E5580] text-white text-xs font-semibold px-4 py-2.5 rounded transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                内容を確認
+              </button>
+              <a href="/files/${kumiaiAtt.id}?dl=1" download="${kumiaiAtt.file_name}"
+                class="inline-flex items-center gap-1 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold px-3 py-2.5 rounded border border-gray-300 transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                DL
+              </a>
+            </div>
+          </div>`
+        })()}
+      </div>
+
+      <!-- 注意書き + 実行ボタン -->
+      <div class="bg-blue-50 border-2 border-blue-200 rounded-xl p-5">
+        <p class="text-sm text-blue-900 mb-4">
+          ⚠️ 内容をご確認の上、<strong>回覧を開始</strong>してください。<br>
+          開始後は「申請B」として自動的に上記の承認フローが動きます。
+        </p>
+        <form method="POST" action="/applications/${id}/motouke-b/confirm" id="motoukeBForm">
+          <div class="flex gap-3 flex-wrap">
+            <button type="submit" id="startBtn"
+              class="flex-1 min-w-[200px] bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3 rounded-lg transition text-base shadow-md flex items-center justify-center gap-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              内容OK・回覧を開始する →
+            </button>
+            <a href="/applications/${id}"
+              class="px-5 py-3 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition flex items-center justify-center">
+              ← キャンセル
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      // 二重送信防止
+      document.getElementById('motoukeBForm').addEventListener('submit', function(e) {
+        const btn = document.getElementById('startBtn')
+        btn.disabled = true
+        btn.innerHTML = '<svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"></circle><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"></path></svg>回覧を開始しています...'
+      })
+    </script>
+  `
+  return c.html(layout('後続申請B の確認・回覧開始', content, user))
+})
+
+// 元請セット申請B の作成実行（確認画面からの POST）
+applications.post('/:id/motouke-b/confirm', async (c) => {
+  const cookie = c.req.header('Cookie')
+  const sessionId = getSessionIdFromCookie(cookie)
+  const user = await getSessionUser(c.env.DB, sessionId)
+  if (!user) return c.redirect('/login')
+
+  const db = c.env.DB
+  const id = c.req.param('id')
+
+  // 元申請A取得
+  const sourceApp = await db.prepare(`
+    SELECT a.*, m.name as mansion_name, m.accounting_user_id
+    FROM applications a LEFT JOIN mansions m ON a.mansion_id = m.id
+    WHERE a.id = ? AND a.payment_target = 'td' AND a.td_type = 'motouke'
+  `).bind(id).first() as any
+
+  if (!sourceApp) {
+    return c.html(`<p style="padding:2rem;color:#dc2626">⛔ 元請申請が見つかりません</p>`, 404)
+  }
+  if (sourceApp.applicant_id !== user.uid && !user.is_admin) {
+    return c.html(`<p style="padding:2rem;color:#dc2626">⛔ 作成権限がありません</p>`, 403)
+  }
+
+  // 二重作成防止
+  const existingB = await db.prepare(
+    'SELECT id FROM applications WHERE original_application_id = ? LIMIT 1'
+  ).bind(id).first() as any
+  if (existingB) {
+    return c.redirect(`/applications/${existingB.id}?motouke_dup=1`)
+  }
+
+  // 管理組合宛請求書取得
+  const kumiaiAtt = await db.prepare(
+    'SELECT * FROM attachments WHERE application_id = ? AND file_type = ? ORDER BY id DESC LIMIT 1'
+  ).bind(id, 'kumiai_invoice').first() as any
+  if (!kumiaiAtt) {
+    return c.redirect(`/applications/${id}/motouke-b/confirm?err=${encodeURIComponent('管理組合宛請求書PDFが未アップロードです')}`)
+  }
+
+  // 元申請の Step1/Step2 担当者を取得
+  const sourceSteps = await db.prepare(
+    'SELECT step_number, reviewer_id FROM circulation_steps WHERE application_id = ? ORDER BY step_number'
+  ).bind(id).all()
+  const step1 = (sourceSteps.results as any[]).find(s => s.step_number === 1)
+  const step2 = (sourceSteps.results as any[]).find(s => s.step_number === 2)
+
+  if (!step1) return c.redirect(`/applications/${id}/motouke-b/confirm?err=no_step1`)
+  if (!step2) return c.redirect(`/applications/${id}/motouke-b/confirm?err=no_step2`)
+
+  // Step3: マンションの会計担当
+  let step3Id: number | null = sourceApp.accounting_user_id || null
+  if (!step3Id) {
+    const fallback = await db.prepare(
+      "SELECT id FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name LIMIT 1"
+    ).first() as any
+    step3Id = fallback?.id || null
+  }
+  if (!step3Id) return c.redirect(`/applications/${id}/motouke-b/confirm?err=no_step3`)
+
+  // 申請B の application_number を生成
+  const appNumber = generateApplicationNumber()
+
+  // 元申請の is_test を継承
+  const isTestFlag = sourceApp.is_test === 1 ? 1 : 0
+
+  // 回覧開始日: 本日
+  const today = new Date().toISOString().substring(0, 10)
+
+  // 申請B を INSERT
+  const result = await db.prepare(`
+    INSERT INTO applications (
+      application_number, title, mansion_id, applicant_id, circulation_start_date,
+      payment_target, account_item, td_type, kumiai_amount, gyosha_amount, budget_amount,
+      commission_rate, remarks, status, current_step, resubmit_count, original_application_id, is_test
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, 0, ?, ?)
+  `).bind(
+    appNumber,
+    sourceApp.title || sourceApp.mansion_name || '',   // タイトルは元申請A から継承
+    sourceApp.mansion_id,
+    user.uid,
+    today,
+    'kumiai',                     // 支払先: 管理組合
+    null,                         // account_item は元請Bでは未設定（必要なら申請Aから継承も可）
+    null,                         // td_type: 元請Bは kumiai なので null
+    sourceApp.kumiai_amount,      // 組合請求金額
+    null,                         // 業者支払金額は kumiai には不要
+    0,                            // 手数料（円）: 完全スキップ = 0（Q2 案A）
+    null,                         // 手数料（％）: なし
+    sourceApp.remarks || null,    // 備考は元申請Aから継承（Q3 案A）
+    id,                           // original_application_id: 元申請AのID
+    isTestFlag                    // is_test 継承
+  ).run()
+
+  const appId = result.meta.last_row_id as number
+
+  // 添付ファイル: 管理組合宛請求書PDFを invoice1 として引き継ぐ（同じR2キーを参照）
+  await db.prepare(
+    'INSERT INTO attachments (application_id, file_type, file_name, file_key) VALUES (?, ?, ?, ?)'
+  ).bind(appId, 'invoice1', kumiaiAtt.file_name, kumiaiAtt.file_key).run()
+
+  // 回覧ステップを直接 INSERT（元申請Aから流用した担当者ID）
+  await db.prepare(
+    'INSERT INTO circulation_steps (application_id, step_number, reviewer_id, status) VALUES (?, 1, ?, "pending")'
+  ).bind(appId, step1.reviewer_id).run()
+  await db.prepare(
+    'INSERT INTO circulation_steps (application_id, step_number, reviewer_id, status) VALUES (?, 2, ?, "pending")'
+  ).bind(appId, step2.reviewer_id).run()
+  await db.prepare(
+    'INSERT INTO circulation_steps (application_id, step_number, reviewer_id, status) VALUES (?, 3, ?, "pending")'
+  ).bind(appId, step3Id).run()
+
+  // 最初の承認者（上長）にメール/LINE WORKS通知
+  const firstStep = await db.prepare(
+    'SELECT cs.*, u.email, u.name FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.application_id = ? AND cs.step_number = 1'
+  ).bind(appId).first() as any
+
+  if (firstStep) {
+    const appUrl = `${new URL(c.req.url).origin}/applications/${appId}`
+    await sendNotification(db, 'review_request', firstStep.reviewer_id, {
+      appNumber,
+      title: sourceApp.title || sourceApp.mansion_name || '',
+      applicantName: user.name,
+      appUrl,
+      isTest: isTestFlag === 1
+    })
+    await db.prepare(
+      'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
+      (isTestFlag === 1 ? '[TEST] ' : '') + buildMailSubject('review_request', appNumber), 'sent'
+    ).run()
+  }
+
+  // 完了 → 申請B詳細画面へ
+  return c.redirect(`/applications/${appId}?motouke_b_created=1`)
 })
 
 // 承認アクション処理
@@ -2700,7 +3080,7 @@ applications.post('/:id/review/:stepId', async (c) => {
 
       if (!existingB && kumiaiAtt) {
         const origin = new URL(c.req.url).origin
-        const newAppUrl = `${origin}/applications/new?from_motouke=${id}`
+        const newAppUrl = `${origin}/applications/${id}/motouke-b/confirm`
         await sendNotification(db, 'motouke_next', app.applicant_id, {
           appNumber: app.application_number,
           title: app.title,
