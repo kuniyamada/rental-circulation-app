@@ -661,82 +661,6 @@ applications.get('/new', async (c) => {
             </button>
           </div>
 
-          <!-- 回覧・承認先 -->
-          <div class="border border-purple-200 bg-purple-50 rounded-lg p-4 space-y-4">
-            <div class="flex items-center gap-2 mb-1">
-              <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/>
-              </svg>
-              <span class="text-sm font-semibold text-purple-700">回覧・承認先</span>
-            </div>
-
-            <!-- Step1: 上長 -->
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1.5">
-                <span class="inline-flex items-center justify-center w-5 h-5 bg-[#D5E5F2] text-[#2E5580] rounded-full text-xs font-bold mr-1">1</span>
-                回覧・承認先（上長） <span class="text-red-500">*</span>
-                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
-              </label>
-              <select name="reviewer_step1" required
-                onchange="updateReviewerPreview()"
-                class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
-                <option value="">選択してください</option>
-                ${(supervisorCandidates.results as any[]).map((u: any) => {
-                  const roleTag = isTestMode && u.role ? ` [${u.role}]` : ''
-                  return `<option value="${u.id}">${u.name}${roleTag}</option>`
-                }).join('')}
-              </select>
-            </div>
-
-            <!-- Step2: 業務管理課 -->
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1.5">
-                <span class="inline-flex items-center justify-center w-5 h-5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold mr-1">2</span>
-                回覧・承認先（業務管理課） <span class="text-red-500">*</span>
-                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
-              </label>
-              <select name="reviewer_step2" required
-                onchange="updateReviewerPreview()"
-                class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
-                <option value="">選択してください</option>
-                ${(opStaffCandidates.results as any[]).map((u: any) => {
-                  const roleTag = isTestMode && u.role ? ` [${u.role}]` : ''
-                  return `<option value="${u.id}"${defaultStep2User && u.id === defaultStep2User.id ? ' selected' : ''}>${u.name}${roleTag}</option>`
-                }).join('')}
-              </select>
-            </div>
-
-            <!-- Step3: 最終承認 -->
-            <div class="space-y-3">
-              <label class="block text-sm font-medium text-gray-700">
-                <span class="inline-flex items-center justify-center w-5 h-5 bg-green-100 text-green-700 rounded-full text-xs font-bold mr-1">3</span>
-                回覧・承認先（最終） <span class="text-red-500">*</span>
-                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
-              </label>
-              <!-- 役割選択 -->
-              <div class="flex gap-4">
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="reviewer_step3_role" value="accounting" required
-                    onchange="updateStep3Users(); setPaymentTarget('kumiai'); updateReviewerPreview()"
-                    class="w-4 h-4 text-purple-600">
-                  <span class="text-sm">マンション会計課</span>
-                </label>
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="reviewer_step3_role" value="honsha"
-                    onchange="updateStep3Users(); setPaymentTarget('td'); updateReviewerPreview()"
-                    class="w-4 h-4 text-purple-600">
-                  <span class="text-sm">本社経理</span>
-                </label>
-              </div>
-              <!-- 担当者プルダウン -->
-              <select name="reviewer_step3" id="step3UserSelect" required
-                onchange="updateReviewerPreview()"
-                class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
-                <option value="">先に役割を選択してください</option>
-              </select>
-            </div>
-          </div>
-
           <!-- 支払先 -->
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">支払先 <span class="text-red-500">*</span></label>
@@ -859,8 +783,81 @@ applications.get('/new', async (c) => {
             <p id="feeValidationMsg" class="hidden text-xs text-red-500 mt-1.5">⚠ 手数料（円）または手数料（％）のいずれかを入力してください</p>
           </div>
 
-          <!-- 「添付ファイル（請求書）②〜」セクションは
-               「添付ファイル（請求書）」セクションに統合したため削除 -->
+          <!-- 回覧・承認先 -->
+          <div class="border border-purple-200 bg-purple-50 rounded-lg p-4 space-y-4">
+            <div class="flex items-center gap-2 mb-1">
+              <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/>
+              </svg>
+              <span class="text-sm font-semibold text-purple-700">回覧・承認先</span>
+            </div>
+
+            <!-- Step1: 上長 -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                <span class="inline-flex items-center justify-center w-5 h-5 bg-[#D5E5F2] text-[#2E5580] rounded-full text-xs font-bold mr-1">1</span>
+                回覧・承認先（上長） <span class="text-red-500">*</span>
+                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
+              </label>
+              <select name="reviewer_step1" required
+                onchange="updateReviewerPreview()"
+                class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                <option value="">選択してください</option>
+                ${(supervisorCandidates.results as any[]).map((u: any) => {
+                  const roleTag = isTestMode && u.role ? ` [${u.role}]` : ''
+                  return `<option value="${u.id}">${u.name}${roleTag}</option>`
+                }).join('')}
+              </select>
+            </div>
+
+            <!-- Step2: 業務管理課 -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                <span class="inline-flex items-center justify-center w-5 h-5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold mr-1">2</span>
+                回覧・承認先（業務管理課） <span class="text-red-500">*</span>
+                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
+              </label>
+              <select name="reviewer_step2" required
+                onchange="updateReviewerPreview()"
+                class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                <option value="">選択してください</option>
+                ${(opStaffCandidates.results as any[]).map((u: any) => {
+                  const roleTag = isTestMode && u.role ? ` [${u.role}]` : ''
+                  return `<option value="${u.id}"${defaultStep2User && u.id === defaultStep2User.id ? ' selected' : ''}>${u.name}${roleTag}</option>`
+                }).join('')}
+              </select>
+            </div>
+
+            <!-- Step3: 最終承認 -->
+            <div class="space-y-3">
+              <label class="block text-sm font-medium text-gray-700">
+                <span class="inline-flex items-center justify-center w-5 h-5 bg-green-100 text-green-700 rounded-full text-xs font-bold mr-1">3</span>
+                回覧・承認先（最終） <span class="text-red-500">*</span>
+                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
+              </label>
+              <!-- 役割選択 -->
+              <div class="flex gap-4">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="reviewer_step3_role" value="accounting" required
+                    onchange="updateStep3Users(); setPaymentTarget('kumiai'); updateReviewerPreview()"
+                    class="w-4 h-4 text-purple-600">
+                  <span class="text-sm">マンション会計課</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="reviewer_step3_role" value="honsha"
+                    onchange="updateStep3Users(); setPaymentTarget('td'); updateReviewerPreview()"
+                    class="w-4 h-4 text-purple-600">
+                  <span class="text-sm">本社経理</span>
+                </label>
+              </div>
+              <!-- 担当者プルダウン -->
+              <select name="reviewer_step3" id="step3UserSelect" required
+                onchange="updateReviewerPreview()"
+                class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                <option value="">先に役割を選択してください</option>
+              </select>
+            </div>
+          </div>
 
           <!-- 送信先（承認者）プレビュー -->
           <div id="reviewerPreview" class="border border-indigo-200 bg-indigo-50 rounded-lg p-4">
