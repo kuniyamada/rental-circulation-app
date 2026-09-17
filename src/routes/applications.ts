@@ -1840,13 +1840,13 @@ applications.get('/:id', async (c) => {
   const flashMotouke = c.req.query('motouke_remind') || c.req.query('motouke_dup')
   let motoukeFlash = ''
   if (c.req.query('motouke_remind') === 'ok') {
-    motoukeFlash = `<div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg">✅ 申請者にリマインド通知を送信しました</div>`
+    motoukeFlash = `<div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg">✅ 申請者へ「承認・回覧開始」のお知らせを再送信しました</div>`
   } else if (c.req.query('motouke_remind') === 'already') {
-    motoukeFlash = `<div class="bg-yellow-50 border border-yellow-200 text-yellow-700 text-sm px-4 py-3 rounded-lg">⚠️ 既に後続申請Bが作成されています</div>`
+    motoukeFlash = `<div class="bg-yellow-50 border border-yellow-200 text-yellow-700 text-sm px-4 py-3 rounded-lg">⚠️ 既に承認・回覧が開始されています</div>`
   } else if (c.req.query('motouke_remind') === 'no_pdf') {
-    motoukeFlash = `<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">❌ 管理組合宛請求書PDFが未アップロードのためリマインドを送信できません</div>`
+    motoukeFlash = `<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">❌ 管理組合宛の請求書がまだ添付されていないため、お知らせを送信できません</div>`
   } else if (c.req.query('motouke_dup') === '1') {
-    motoukeFlash = `<div class="bg-blue-50 border border-blue-200 text-blue-700 text-sm px-4 py-3 rounded-lg">ℹ️ この元請の後続申請Bは既に作成済みです。既存の申請ページを表示しています。</div>`
+    motoukeFlash = `<div class="bg-blue-50 border border-blue-200 text-blue-700 text-sm px-4 py-3 rounded-lg">ℹ️ この元請の管理組合宛請求書は既に回覧が開始されています。既存の申請ページを表示しています。</div>`
   } else if (c.req.query('motouke_b_created') === '1') {
     motoukeFlash = `<div class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-3 rounded-lg">✅ 管理組合宛の請求書の回覧を開始しました！上長へ通知を送信しました。</div>`
   }
@@ -1978,14 +1978,19 @@ applications.get('/:id', async (c) => {
         ` : ''}
 
         ${(app.payment_target === 'td' && app.td_type === 'motouke' && !motoukeSuccessorB && motoukeKumiaiUploaded && (user.is_admin || user.role === 'operations')) ? `
-        <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm flex items-center justify-between gap-3">
-          <div>
-            <p class="text-blue-800 font-semibold">📢 後続申請Bのリマインド送信</p>
-            <p class="text-blue-700 text-xs mt-0.5">申請者が後続申請Bをまだ作成していません。リマインドを送信できます。</p>
+        <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
+          <div class="flex-1 min-w-0">
+            <p class="text-blue-800 font-semibold flex items-center gap-1">
+              <span>📢</span> 申請者へ「承認・回覧開始」のお願いを再送信
+            </p>
+            <p class="text-blue-700 text-xs mt-1 leading-relaxed">
+              管理組合宛の請求書は添付済みですが、申請者（${app.applicant_name}さん）が<strong>まだ承認・回覧を開始していません</strong>。<br>
+              下のボタンを押すと、申請者へ再度お知らせを送信します（メール / LINE WORKS）。
+            </p>
           </div>
-          <form method="POST" action="/applications/${id}/motouke-remind" onsubmit="return confirm('${app.applicant_name}さんに、後続申請Bのリマインド通知を送信しますか？')">
-            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
-              リマインド送信
+          <form method="POST" action="/applications/${id}/motouke-remind" onsubmit="return confirm('${app.applicant_name}さんに、管理組合宛の請求書の「承認・回覧開始」お知らせを再送信しますか？')" class="flex-shrink-0">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition whitespace-nowrap">
+              📨 お知らせを再送信
             </button>
           </form>
         </div>
@@ -2653,7 +2658,7 @@ applications.post('/:id/motouke-remind', async (c) => {
 
   await db.prepare(
     'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
-  ).bind(id, app.applicant_id, 'motouke_next_remind', '', (isTestApp ? '[TEST] ' : '') + `【元請セット申請リマインド】${app.application_number}`, 'sent').run()
+  ).bind(id, app.applicant_id, 'motouke_next_remind', '', (isTestApp ? '[TEST] ' : '') + `【再送信】${app.application_number} - 管理組合宛の請求書の承認・回覧開始のお願い`, 'sent').run()
 
   return c.redirect(`/applications/${id}?motouke_remind=ok`)
 })
