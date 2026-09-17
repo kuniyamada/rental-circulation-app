@@ -28,7 +28,15 @@ app.get('/', async (c) => {
   const db = c.env.DB
 
   const myApps = await db.prepare(`
-    SELECT a.*, m.name as mansion_name
+    SELECT
+      a.*,
+      m.name as mansion_name,
+      -- 元請セット申請A の場合、管理組合宛請求書PDFの有無を判定
+      (SELECT COUNT(*) FROM attachments WHERE application_id = a.id AND file_type = 'kumiai_invoice') as has_kumiai_pdf,
+      -- 後続申請B（管理組合宛請求書の回覧）の情報
+      (SELECT id FROM applications b WHERE b.original_application_id = a.id ORDER BY b.id DESC LIMIT 1) as successor_b_id,
+      (SELECT status FROM applications b WHERE b.original_application_id = a.id ORDER BY b.id DESC LIMIT 1) as successor_b_status,
+      (SELECT application_number FROM applications b WHERE b.original_application_id = a.id ORDER BY b.id DESC LIMIT 1) as successor_b_number
     FROM applications a LEFT JOIN mansions m ON a.mansion_id = m.id
     WHERE a.applicant_id = ? ORDER BY a.created_at DESC LIMIT 20
   `).bind(user.uid).all()
@@ -58,6 +66,26 @@ app.get('/', async (c) => {
     WHERE a.applicant_id = ? AND a.status = 'returned'
       AND NOT EXISTS (
         SELECT 1 FROM applications a2 WHERE a2.original_application_id = a.id
+      )
+    ORDER BY a.updated_at DESC
+  `).bind(user.uid).all()
+
+  // 管理組合宛 回覧開始待ち案件
+  //   元請セット申請A で、管理組合宛請求書PDFがアップロード済みだが
+  //   申請者自身がまだ「承認・回覧開始」していないもの
+  //   → 申請者が今すぐアクション可能な最重要TODO
+  const motoukeBWaiting = await db.prepare(`
+    SELECT a.*, m.name as mansion_name
+    FROM applications a LEFT JOIN mansions m ON a.mansion_id = m.id
+    WHERE a.applicant_id = ?
+      AND a.payment_target = 'td'
+      AND a.td_type = 'motouke'
+      AND a.original_application_id IS NULL
+      AND EXISTS (
+        SELECT 1 FROM attachments att WHERE att.application_id = a.id AND att.file_type = 'kumiai_invoice'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM applications b WHERE b.original_application_id = a.id
       )
     ORDER BY a.updated_at DESC
   `).bind(user.uid).all()
@@ -98,6 +126,39 @@ app.get('/', async (c) => {
     }
     const s = map[status] || { label: status, cls: 'bg-gray-100 text-gray-600' }
     return `<span class="text-xs font-semibold px-2 py-0.5 rounded-full ${s.cls}">${s.label}</span>`
+  }
+
+  // 元請セット申請A の状態バッジ（申請A本体の状態＋管理組合宛請求書回覧の状態を併記）
+  const motoukeStatusBadge = (app: any): string => {
+    const isMotoukeA = app.payment_target === 'td' && app.td_type === 'motouke' && !app.original_application_id
+    // 元請セット申請A 以外は通常バッジのみ
+    if (!isMotoukeA) return statusBadge(app.status)
+
+    const baseBadge = statusBadge(app.status)
+
+    // 後続申請B（管理組合宛請求書の回覧）の状態
+    let subBadge = ''
+    if (app.successor_b_status) {
+      // 後続Bが既に作成されている
+      const subMap: Record<string, { label: string; cls: string }> = {
+        draft:       { label: '📬 管理組合宛：下書き',   cls: 'bg-gray-100 text-gray-700 border border-gray-300' },
+        circulating: { label: '📬 管理組合宛：回覧中',   cls: 'bg-blue-50 text-blue-700 border border-blue-300' },
+        approved:    { label: '📬 管理組合宛：承認済',   cls: 'bg-green-50 text-green-700 border border-green-300' },
+        rejected:    { label: '📬 管理組合宛：否決',     cls: 'bg-red-50 text-red-700 border border-red-300' },
+        returned:    { label: '📬 管理組合宛：差し戻し', cls: 'bg-orange-50 text-orange-700 border border-orange-300' },
+        on_hold:     { label: '📬 管理組合宛：保留中',   cls: 'bg-yellow-50 text-yellow-700 border border-yellow-300' },
+        completed:   { label: '📬 管理組合宛：完了',     cls: 'bg-purple-50 text-purple-700 border border-purple-300' },
+      }
+      const sub = subMap[app.successor_b_status] || { label: `📬 管理組合宛：${app.successor_b_status}`, cls: 'bg-gray-50 text-gray-600 border border-gray-300' }
+      subBadge = `<span class="ml-1 text-xs font-semibold px-2 py-0.5 rounded-full ${sub.cls}">${sub.label}</span>`
+    } else if (app.has_kumiai_pdf > 0) {
+      // 管理組合宛請求書PDFはアップロード済みだが、まだ申請者が「承認・回覧開始」していない
+      subBadge = `<span class="ml-1 text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-400 animate-pulse">📬 管理組合宛 回覧開始待ち</span>`
+    } else if (app.status === 'completed' || app.status === 'circulating') {
+      // 申請A は進行中/完了だが、業務管理課がまだ管理組合宛請求書PDFをアップロードしていない
+      subBadge = `<span class="ml-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-50 text-gray-600 border border-gray-300">📬 管理組合宛 作成待ち</span>`
+    }
+    return baseBadge + subBadge
   }
 
   const roleLabel: Record<string, string> = {
@@ -256,7 +317,7 @@ app.get('/', async (c) => {
           ` : ''}
 
           <!-- 統計カード -->
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <div class="flex items-center justify-between">
                 <div><p class="text-xs text-gray-500">承認待ち</p><p class="text-3xl font-bold text-orange-500 mt-1">${pendingReviews.results.length}</p></div>
@@ -278,6 +339,17 @@ app.get('/', async (c) => {
                 <div><p class="text-xs text-gray-500">差し戻し</p><p class="text-3xl font-bold text-orange-600 mt-1">${returnedApps.results.length}</p></div>
                 <div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
                   <svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-xl shadow-sm border p-5 ${(motoukeBWaiting.results as any[]).length > 0 ? 'border-amber-300 bg-amber-50' : 'border-gray-100 bg-white'}">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-xs ${(motoukeBWaiting.results as any[]).length > 0 ? 'text-amber-800 font-semibold' : 'text-gray-500'}">📬 管理組合宛 回覧開始待ち</p>
+                  <p class="text-3xl font-bold ${(motoukeBWaiting.results as any[]).length > 0 ? 'text-amber-600' : 'text-gray-300'} mt-1">${(motoukeBWaiting.results as any[]).length}</p>
+                </div>
+                <div class="w-10 h-10 ${(motoukeBWaiting.results as any[]).length > 0 ? 'bg-amber-100' : 'bg-gray-100'} rounded-full flex items-center justify-center">
+                  <svg class="w-5 h-5 ${(motoukeBWaiting.results as any[]).length > 0 ? 'text-amber-600' : 'text-gray-300'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
                 </div>
               </div>
             </div>
@@ -365,6 +437,40 @@ app.get('/', async (c) => {
           </div>
           ` : ''}
 
+          <!-- 管理組合宛 回覧開始待ち（元請セット申請A 完了 → 管理組合宛請求書PDFあり → 申請B未作成） -->
+          ${(motoukeBWaiting.results as any[]).length > 0 ? `
+          <div class="bg-amber-50 border border-amber-300 rounded-xl">
+            <div class="px-6 py-4 border-b border-amber-200 flex items-center gap-2">
+              <span class="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></span>
+              <h2 class="text-lg font-semibold text-amber-900">📬 管理組合宛の請求書 – 承認・回覧開始のお願い</h2>
+              <span class="ml-auto bg-amber-500 text-white text-xs font-semibold px-2 py-1 rounded-full">${(motoukeBWaiting.results as any[]).length}件</span>
+            </div>
+            <div class="px-6 py-3 bg-amber-100/50 text-xs text-amber-900">
+              業務管理課が<strong>管理組合宛の請求書</strong>を作成・添付しました。<br>
+              内容をご確認いただき、下のボタンから<strong>承認・回覧開始</strong>を実施してください。
+            </div>
+            <div class="divide-y divide-amber-100">
+              ${(motoukeBWaiting.results as any[]).map((app: any) => `
+                <div class="px-6 py-4 hover:bg-amber-100 transition">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="flex-1 min-w-0">
+                      <p class="font-semibold text-gray-800 truncate">${app.mansion_name || app.title}</p>
+                      <p class="text-xs text-amber-700 mt-1">
+                        <span class="font-mono">${app.application_number}</span>
+                        <span class="ml-2">組合請求金額：${Number(app.kumiai_amount || 0).toLocaleString()}円</span>
+                      </p>
+                      <p class="text-xs text-gray-400 mt-0.5">${app.updated_at?.substring(0,16)}</p>
+                    </div>
+                    <a href="/applications/${app.id}/motouke-b/confirm" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition shrink-0 flex items-center gap-1">
+                      内容確認 →
+                    </a>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
+
           <!-- 自分の申請一覧 -->
           <div class="bg-white rounded-xl shadow-sm border border-gray-100">
             <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -400,9 +506,9 @@ app.get('/', async (c) => {
                       <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${app.resubmit_count > 0 && app.returned_reason ? `<span class="ml-1 bg-orange-100 text-orange-700 text-xs px-1.5 rounded">差し戻し再申請</span>` : app.resubmit_count > 0 ? `<span class="ml-1 bg-purple-100 text-purple-600 text-xs px-1.5 rounded">再提出</span>` : ''}</td>
                         <td class="px-4 py-3 font-medium text-gray-800">${app.mansion_name || app.title}</td>
-                        <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
+                        <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : app.td_type === 'motouke' ? '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD/元請)</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
                         <td class="px-4 py-3 text-gray-700">${Number(app.budget_amount).toLocaleString()}円</td>
-                        <td class="px-4 py-3">${statusBadge(app.status)}</td>
+                        <td class="px-4 py-3">${motoukeStatusBadge(app)}</td>
                         <td class="px-4 py-3 text-gray-400 text-xs">${app.created_at?.substring(0,10)}</td>
                         <td class="px-4 py-3"><a href="/applications/${app.id}" class="text-[#396999] hover:underline text-xs">詳細</a></td>
                       </tr>
