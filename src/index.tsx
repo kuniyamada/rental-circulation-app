@@ -468,10 +468,14 @@ app.get('/files/:attachId', async (c) => {
   const obj = await c.env.R2.get(att.file_key)
   if (!obj) return c.notFound()
 
+  // ?dl=1 の場合は attachment（ダウンロード）、それ以外は inline（プレビュー）
+  const isDownload = c.req.query('dl') === '1'
+  const disposition = isDownload ? 'attachment' : 'inline'
+
   return new Response(obj.body, {
     headers: {
       'Content-Type': obj.httpMetadata?.contentType || 'application/octet-stream',
-      'Content-Disposition': `inline; filename="${encodeURIComponent(att.file_name)}"`,
+      'Content-Disposition': `${disposition}; filename="${encodeURIComponent(att.file_name)}"`,
     }
   })
 })
