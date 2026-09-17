@@ -261,11 +261,44 @@ applications.get('/new', async (c) => {
   const sessionId = getSessionIdFromCookie(cookie)
   const user = await getSessionUser(c.env.DB, sessionId)
   if (!user) return c.redirect('/login')
-  if (!user.is_admin && !ALLOWED_NEW_APP_ROLES.includes(user.role)) {
+
+  const db = c.env.DB
+
+  // === 差し戻し再申請の引き継ぎ ===
+  // resubmit_id が指定されている場合、元申請の申請者本人（または管理者）のみ許可
+  // returned または rejected の状態のもののみ再申請可能
+  const resubmitId = c.req.query('resubmit_id') ? parseInt(c.req.query('resubmit_id')!) : null
+  let resubmitSource: any = null
+  let resubmitAttachments: any[] = []
+  if (resubmitId) {
+    resubmitSource = await db.prepare(`
+      SELECT a.*, m.name as mansion_name, m.mansion_number
+      FROM applications a LEFT JOIN mansions m ON a.mansion_id = m.id
+      WHERE a.id = ? AND (a.status = 'returned' OR a.status = 'rejected')
+    `).bind(resubmitId).first() as any
+    if (!resubmitSource) {
+      return c.html(`<p style="padding:2rem;font-family:sans-serif;color:#dc2626">⛔ 指定された申請は再申請できません（差し戻し・否決状態の申請のみ対象です）。</p>`, 404)
+    }
+    if (resubmitSource.applicant_id !== user.uid && !user.is_admin) {
+      return c.html(`<p style="padding:2rem;font-family:sans-serif;color:#dc2626">⛔ 再申請の権限がありません（申請者本人のみ再申請できます）。</p>`, 403)
+    }
+    // 元申請の添付ファイル一覧
+    const attRes = await db.prepare(
+      'SELECT * FROM attachments WHERE application_id = ? ORDER BY id'
+    ).bind(resubmitId).all()
+    resubmitAttachments = (attRes.results || []) as any[]
+    // 元申請の回覧ステップ（Step1-3 のreviewer_id）
+    const stepsRes = await db.prepare(
+      'SELECT step_number, reviewer_id FROM circulation_steps WHERE application_id = ? ORDER BY step_number'
+    ).bind(resubmitId).all()
+    resubmitSource._steps = (stepsRes.results || []) as any[]
+  }
+
+  // 新規申請の権限チェックは、差し戻し再申請の場合はスキップ（申請者本人であればOK）
+  if (!resubmitSource && !user.is_admin && !ALLOWED_NEW_APP_ROLES.includes(user.role)) {
     return c.html(`<p style="padding:2rem;font-family:sans-serif;color:#dc2626">⛔ この画面へのアクセス権限がありません。</p>`, 403)
   }
 
-  const db = c.env.DB
   const mansions = await db.prepare(
     'SELECT * FROM mansions WHERE is_active = 1 ORDER BY CAST(mansion_number AS INTEGER)'
   ).all()
@@ -371,8 +404,40 @@ applications.get('/new', async (c) => {
         </div>
       </div>
 
-      <form method="POST" action="/applications" enctype="multipart/form-data" id="appForm" onsubmit="return checkFeeRequired()">
-        ${isTestMode ? `
+      <form method="POST" action="${resubmitSource ? `/applications/${resubmitSource.id}/resubmit` : '/applications'}" enctype="multipart/form-data" id="appForm" onsubmit="return checkFeeRequired()">
+        ${resubmitSource ? `
+        <!-- 差し戻し再申請バナー -->
+        <div class="mb-5 bg-orange-50 border-2 border-orange-300 rounded-lg p-4">
+          <div class="flex items-start gap-3">
+            <span class="text-2xl">↩</span>
+            <div class="flex-1">
+              <p class="text-sm font-bold text-orange-900">
+                ${resubmitSource.status === 'returned' ? '差し戻し再申請' : '否決後の再申請'}
+                <span class="ml-2 text-xs font-normal text-orange-700">元申請: <a href="/applications/${resubmitSource.id}" class="underline font-mono">${resubmitSource.application_number}</a></span>
+              </p>
+              ${resubmitSource.returned_reason ? `
+              <div class="mt-2 bg-white border border-orange-200 rounded-lg p-3">
+                <p class="text-xs font-semibold text-orange-600 mb-1">差し戻し理由</p>
+                <p class="text-sm text-gray-800 whitespace-pre-wrap">${resubmitSource.returned_reason}</p>
+              </div>
+              ` : ''}
+              <p class="text-xs text-orange-700 mt-2">
+                ✓ 元申請の内容を引き継いでいます。必要な項目を修正してください。<br>
+                ✓ 添付ファイルは元申請から自動引き継ぎされます（新しいファイルを選択した場合のみ上書きされます）。
+              </p>
+            </div>
+          </div>
+        </div>
+        <input type="hidden" name="resubmit_id" value="${resubmitSource.id}">
+        <!-- 再申請理由・修正内容 -->
+        <div class="mb-5">
+          <label class="block text-sm font-semibold text-orange-700 mb-1.5">再申請理由・修正内容 <span class="text-red-500">*</span></label>
+          <textarea name="reapply_reason" required rows="3"
+            class="w-full px-3 py-2.5 border border-orange-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none resize-none"
+            placeholder="差し戻し理由に対してどのように修正・対応したかを記入してください"></textarea>
+        </div>
+        ` : ''}
+        ${isTestMode && !resubmitSource ? `
         <!-- テストモード稼働中バナー -->
         <div class="mb-5 bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4">
           <div class="flex items-start gap-3">
@@ -464,7 +529,7 @@ applications.get('/new', async (c) => {
             </div>
             <div>
               <label class="block text-sm font-semibold text-gray-700 mb-1.5">回覧開始日</label>
-              <input type="date" name="circulation_start_date" value="${today}" required
+              <input type="date" name="circulation_start_date" value="${resubmitSource ? today : today}" required
                 class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
             </div>
           </div>
@@ -474,7 +539,28 @@ applications.get('/new', async (c) => {
             <h3 class="text-sm font-semibold text-gray-700 mb-3">添付ファイル（請求書）</h3>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）① <span class="text-red-500">*</span></label>
-              ${inboxData?.attachment_key ? `
+              ${(() => {
+                const resubmitInv1 = resubmitAttachments.find(a => a.file_type === 'invoice1')
+                if (resubmitInv1) {
+                  return `
+              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
+                <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${resubmitInv1.file_name}</span>
+                <a href="/applications/files/${resubmitInv1.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                <span class="text-xs text-gray-400 ml-auto">（別ファイルを選択すると上書きされます）</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
+                  onchange="handleFilePreview(this, 'invoice1Preview')"
+                  class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                <button type="button" id="invoice1Preview" onclick="openFilePreview('invoice1Input')"
+                  class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                  👁 確認
+                </button>
+              </div>
+                  `
+                }
+                if (inboxData?.attachment_key) {
+                  return `
               <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg">
                 <span class="text-[#396999] text-xs">📎 引き継ぎ：${inboxData.attachment_name || 'invoice.pdf'}</span>
                 <input type="hidden" name="inbox_attachment_key" value="${inboxData.attachment_key}">
@@ -490,7 +576,9 @@ applications.get('/new', async (c) => {
                   👁 確認
                 </button>
               </div>
-              ` : `
+                  `
+                }
+                return `
               <div class="flex items-center gap-2">
                 <input type="file" name="invoice1" required accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
                   onchange="handleFilePreview(this, 'invoice1Preview')"
@@ -500,7 +588,8 @@ applications.get('/new', async (c) => {
                   👁 確認
                 </button>
               </div>
-              `}
+                `
+              })()}
             </div>
           </div>
 
@@ -710,7 +799,38 @@ applications.get('/new', async (c) => {
               <span id="invoiceExtraHint" class="hidden text-xs text-gray-400"></span>
             </div>
             <div id="invoiceExtraList" class="space-y-2">
-              <!-- 請求書② (初期表示) -->
+              ${(() => {
+                // 再申請の場合: 元申請の invoice2〜invoice6 を初期スロットとして展開
+                const marks = ['②', '③', '④', '⑤', '⑥']
+                const slots: string[] = []
+                for (let i = 2; i <= 6; i++) {
+                  const att = resubmitAttachments.find(a => a.file_type === `invoice${i}`)
+                  const mark = marks[i - 2]
+                  if (att) {
+                    slots.push(`
+              <div class="space-y-1" data-invoice-slot="${i}">
+                <div class="flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
+                  <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${att.file_name}</span>
+                  <a href="/applications/files/${att.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                  <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <label class="text-xs text-gray-500 w-16 shrink-0">請求書${mark}</label>
+                  <input type="file" name="invoice${i}" accept=".pdf,.jpg,.jpeg,.png" id="invoice${i}Input"
+                    onchange="handleFilePreview(this, 'invoice${i}Preview')"
+                    class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                  <button type="button" id="invoice${i}Preview" onclick="openFilePreview('invoice${i}Input')"
+                    class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                    👁 確認
+                  </button>
+                </div>
+              </div>
+                    `)
+                  }
+                }
+                if (slots.length > 0) return slots.join('')
+                // 通常時 or 再申請でも②以降が無い場合: 空の請求書②枠だけ表示
+                return `
               <div class="flex items-center gap-2" data-invoice-slot="2">
                 <label class="text-xs text-gray-500 w-16 shrink-0">請求書②</label>
                 <input type="file" name="invoice2" accept=".pdf,.jpg,.jpeg,.png" id="invoice2Input"
@@ -721,6 +841,8 @@ applications.get('/new', async (c) => {
                   👁 確認
                 </button>
               </div>
+                `
+              })()}
               <!-- 請求書③〜⑥ はJSで動的に追加される -->
             </div>
             <!-- 追加ボタン（管理組合=3枠 / 委託内=5枠まで） -->
@@ -746,14 +868,24 @@ applications.get('/new', async (c) => {
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">備考</label>
             <textarea name="remarks" rows="3"
               class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none resize-none"
-              placeholder="備考があれば入力してください"></textarea>
+              placeholder="備考があれば入力してください">${resubmitSource ? (resubmitSource.remarks || '') : ''}</textarea>
           </div>
 
           <!-- 添付資料（その他） -->
           <div class="border border-gray-200 rounded-lg p-4 space-y-3">
             <h3 class="text-sm font-semibold text-gray-700">添付資料</h3>
+            ${(() => {
+              const other1Att = resubmitAttachments.find(a => a.file_type === 'other1')
+              const other2Att = resubmitAttachments.find(a => a.file_type === 'other2')
+              return `
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料①</label>
+              ${other1Att ? `
+              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
+                <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${other1Att.file_name}</span>
+                <a href="/applications/files/${other1Att.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
+              </div>` : ''}
               <div class="flex items-center gap-2">
                 <input type="file" name="other1" accept=".pdf,.jpg,.jpeg,.png" id="other1Input"
                   onchange="handleFilePreview(this, 'other1Preview')"
@@ -766,6 +898,12 @@ applications.get('/new', async (c) => {
             </div>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料②</label>
+              ${other2Att ? `
+              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
+                <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${other2Att.file_name}</span>
+                <a href="/applications/files/${other2Att.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
+              </div>` : ''}
               <div class="flex items-center gap-2">
                 <input type="file" name="other2" accept=".pdf,.jpg,.jpeg,.png" id="other2Input"
                   onchange="handleFilePreview(this, 'other2Preview')"
@@ -776,15 +914,18 @@ applications.get('/new', async (c) => {
                 </button>
               </div>
             </div>
+              `
+            })()}
           </div>
         </div>
 
         <div class="flex gap-3 mt-8">
-          <a href="/" class="flex-1 text-center px-4 py-3 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 transition text-sm font-semibold">
+          <a href="${resubmitSource ? `/applications/${resubmitSource.id}` : '/'}" class="flex-1 text-center px-4 py-3 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 transition text-sm font-semibold">
             キャンセル
           </a>
-          <button type="submit" class="flex-2 flex-grow-[2] bg-[#396999] hover:bg-[#2E5580] text-white font-semibold py-3 px-8 rounded-lg transition text-sm">
-            次へ：回覧先の確認 →
+          <button type="submit" class="flex-2 flex-grow-[2] ${resubmitSource ? 'bg-orange-500 hover:bg-orange-600' : 'bg-[#396999] hover:bg-[#2E5580]'} text-white font-semibold py-3 px-8 rounded-lg transition text-sm"
+            ${resubmitSource ? `onclick="return confirm('修正内容で再申請します。よろしいですか？')"` : ''}>
+            ${resubmitSource ? '↩ 再申請する' : '次へ：回覧先の確認 →'}
           </button>
         </div>
       </form>
@@ -887,6 +1028,114 @@ applications.get('/new', async (c) => {
           numInput.value = '${inboxData.mansion_number}'
           searchMansion('${inboxData.mansion_number}')
         }
+      })
+      ` : ''}
+
+      // === 差し戻し再申請: 元申請の値でフォームをprefill ===
+      ${resubmitSource ? `
+      window.addEventListener('DOMContentLoaded', function() {
+        // 1) マンション自動セット
+        const numInput = document.getElementById('mansionNumberInput')
+        if (numInput && ${resubmitSource.mansion_number != null ? resubmitSource.mansion_number : 'null'} !== null) {
+          numInput.value = '${resubmitSource.mansion_number || ''}'
+          searchMansion('${resubmitSource.mansion_number || ''}')
+        }
+        setTimeout(function() {
+          // 2) 支払先
+          const payTarget = ${JSON.stringify(resubmitSource.payment_target || '')}
+          if (payTarget) {
+            const payRadio = document.querySelector('input[name="payment_target"][value="' + payTarget + '"]')
+            if (payRadio) {
+              payRadio.checked = true
+              payRadio.dispatchEvent(new Event('change'))
+            }
+          }
+          // 3) TD区分（委託内/元請）
+          const tdType = ${JSON.stringify(resubmitSource.td_type || '')}
+          if (tdType) {
+            setTimeout(function() {
+              const tdRadio = document.querySelector('input[name="td_type"][value="' + tdType + '"]')
+              if (tdRadio) {
+                tdRadio.checked = true
+                tdRadio.dispatchEvent(new Event('change'))
+              }
+            }, 50)
+          }
+          // 4) 勘定科目（管理組合の場合）
+          const accountItem = ${JSON.stringify(resubmitSource.account_item || '')}
+          if (accountItem) {
+            setTimeout(function() {
+              const acctSel = document.querySelector('select[name="account_item"]')
+              if (acctSel) acctSel.value = accountItem
+            }, 100)
+          }
+          // 5) 金額系: 元請の場合 kumiai_amount, gyosha_amount
+          const kumiaiAmt = ${resubmitSource.kumiai_amount != null ? resubmitSource.kumiai_amount : 'null'}
+          const gyoshaAmt = ${resubmitSource.gyosha_amount != null ? resubmitSource.gyosha_amount : 'null'}
+          setTimeout(function() {
+            if (kumiaiAmt != null) {
+              const kD = document.getElementById('kumiaiAmountDisplay')
+              const kH = document.getElementById('kumiaiAmountHidden')
+              if (kD) kD.value = Number(kumiaiAmt).toLocaleString()
+              if (kH) kH.value = String(kumiaiAmt)
+            }
+            if (gyoshaAmt != null) {
+              const gD = document.getElementById('gyoshaAmountDisplay')
+              const gH = document.getElementById('gyoshaAmountHidden')
+              if (gD) gD.value = Number(gyoshaAmt).toLocaleString()
+              if (gH) gH.value = String(gyoshaAmt)
+            }
+            if (typeof calcProfit === 'function') calcProfit()
+          }, 150)
+          // 6) 手数料（管理組合の場合の budget_amount / commission_rate）
+          const budgetAmt = ${resubmitSource.budget_amount != null ? resubmitSource.budget_amount : 'null'}
+          const commissionRate = ${resubmitSource.commission_rate != null ? resubmitSource.commission_rate : 'null'}
+          setTimeout(function() {
+            if (budgetAmt != null && payTarget !== 'td') {
+              const bInput = document.getElementById('budgetAmountInput')
+              const bHidden = document.getElementById('budgetAmountHidden')
+              if (bInput) bInput.value = Number(budgetAmt).toLocaleString()
+              if (bHidden) bHidden.value = String(budgetAmt)
+            }
+            if (commissionRate != null && payTarget !== 'td') {
+              const cInput = document.getElementById('commissionRateInput')
+              if (cInput) cInput.value = String(commissionRate)
+            }
+            if (typeof validateFeeFields === 'function') validateFeeFields()
+          }, 200)
+          // 7) 回覧・承認先 Step1/Step2/Step3 (元申請から取得済のcirculation_stepsをJSに渡す)
+          const rsSteps = ${JSON.stringify(resubmitSource._steps || [])}
+          setTimeout(function() {
+            const s1 = rsSteps.find(function(s){ return s.step_number === 1 })
+            const s2 = rsSteps.find(function(s){ return s.step_number === 2 })
+            const s3 = rsSteps.find(function(s){ return s.step_number === 3 })
+            if (s1) {
+              const sel1 = document.querySelector('select[name="reviewer_step1"]')
+              if (sel1) sel1.value = String(s1.reviewer_id)
+            }
+            if (s2) {
+              const sel2 = document.querySelector('select[name="reviewer_step2"]')
+              if (sel2) sel2.value = String(s2.reviewer_id)
+            }
+            if (s3) {
+              // Step3のロール判定: accountingユーザーに含まれるか
+              const isAccounting = ACCOUNTING_USERS.some(function(u){ return u.id === s3.reviewer_id })
+              const roleVal = isAccounting ? 'accounting' : 'honsha'
+              const roleRadio = document.querySelector('input[name="reviewer_step3_role"][value="' + roleVal + '"]')
+              if (roleRadio) {
+                roleRadio.checked = true
+                if (typeof updateStep3Users === 'function') updateStep3Users()
+                setTimeout(function() {
+                  const sel3 = document.getElementById('step3UserSelect')
+                  if (sel3) sel3.value = String(s3.reviewer_id)
+                  if (typeof updateReviewerPreview === 'function') updateReviewerPreview()
+                }, 50)
+              }
+            } else {
+              if (typeof updateReviewerPreview === 'function') updateReviewerPreview()
+            }
+          }, 250)
+        }, 100)
       })
       ` : ''}
 
@@ -1785,20 +2034,14 @@ applications.get('/:id', async (c) => {
       ${isApplicant && isReturned ? `
       <div class="bg-orange-50 border border-orange-300 rounded-xl p-6">
         <h3 class="font-semibold text-orange-800 mb-2">↩ 差し戻し – 再申請が必要です</h3>
-        <p class="text-sm text-orange-700 mb-4">内容を確認の上、再申請理由・修正内容を入力して再申請してください。</p>
-        <form method="POST" action="/applications/${id}/resubmit">
-          <div class="mb-4">
-            <label class="block text-sm font-semibold text-gray-700 mb-1.5">再申請理由・修正内容 <span class="text-red-500">*</span></label>
-            <textarea name="reapply_reason" required rows="4"
-              class="w-full px-3 py-2.5 border border-orange-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none resize-none"
-              placeholder="差し戻し理由に対してどのように修正・対応したかを記入してください"></textarea>
-          </div>
-          <button type="submit"
-            class="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-8 py-2.5 rounded-lg transition text-sm"
-            onclick="return confirm('再申請します。よろしいですか？')">
-            ↩ 再申請する
-          </button>
-        </form>
+        <p class="text-sm text-orange-700 mb-4">
+          「編集して再申請する」ボタンから、内容（金額・請求書・添付・備考など）を修正のうえ、再申請理由を入力して再申請してください。<br>
+          <span class="text-xs text-orange-600">※添付ファイルは元申請から自動引き継ぎされます。差し替えたい場合のみ新しいファイルを選択してください。</span>
+        </p>
+        <a href="/applications/new?resubmit_id=${id}"
+          class="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-8 py-2.5 rounded-lg transition text-sm">
+          ✏ 編集して再申請する →
+        </a>
       </div>
       ` : ''}
 
@@ -1806,13 +2049,11 @@ applications.get('/:id', async (c) => {
       ${isApplicant && isRejected ? `
       <div class="bg-red-50 border border-red-200 rounded-xl p-6">
         <h3 class="font-semibold text-red-800 mb-2">❌ 否決</h3>
-        <p class="text-sm text-red-600 mb-4">この申請は否決されました。同じ内容で再提出できます。</p>
-        <form method="POST" action="/applications/${id}/resubmit">
-          <button type="submit" class="bg-red-500 hover:bg-red-600 text-white font-semibold px-6 py-2 rounded-lg transition text-sm"
-            onclick="return confirm('同じ内容で再提出しますか？')">
-            再提出する
-          </button>
-        </form>
+        <p class="text-sm text-red-600 mb-4">この申請は否決されました。内容を確認・修正のうえ、再提出できます。</p>
+        <a href="/applications/new?resubmit_id=${id}"
+          class="inline-flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white font-semibold px-6 py-2 rounded-lg transition text-sm">
+          ✏ 編集して再提出する →
+        </a>
       </div>
       ` : ''}
 
@@ -2397,9 +2638,39 @@ applications.post('/:id/resubmit', async (c) => {
   ).bind(id, user.uid).first() as any
   if (!orig) return c.redirect(`/applications/${id}`)
 
-  const body = await c.req.parseBody() as any
+  const body = await c.req.parseBody({ all: true }) as any
   const reapplyReason = body.reapply_reason || null
   const isReturned = orig.status === 'returned'
+
+  // === 編集後の値を取得（未入力 or フォームから来ていない場合は元申請の値を使用） ===
+  const editedTitle = body.title || orig.title
+  const editedMansionId = body.mansion_id ? parseInt(body.mansion_id) : orig.mansion_id
+  const editedStartDate = body.circulation_start_date || orig.circulation_start_date
+  const editedPaymentTarget = body.payment_target || orig.payment_target
+  const editedAccountItem = body.account_item !== undefined && body.account_item !== '' ? body.account_item : (editedPaymentTarget === 'kumiai' ? orig.account_item : null)
+  const editedTdType = editedPaymentTarget === 'td' ? (body.td_type || orig.td_type) : null
+  const editedKumiaiAmount = body.kumiai_amount !== undefined && body.kumiai_amount !== ''
+    ? parseInt(String(body.kumiai_amount).replace(/,/g, ''))
+    : (editedTdType === 'motouke' ? orig.kumiai_amount : null)
+  const editedGyoshaAmount = body.gyosha_amount !== undefined && body.gyosha_amount !== ''
+    ? parseInt(String(body.gyosha_amount).replace(/,/g, ''))
+    : (editedTdType === 'motouke' ? orig.gyosha_amount : null)
+  const editedBudgetAmount = body.budget_amount !== undefined && body.budget_amount !== ''
+    ? (parseInt(String(body.budget_amount).replace(/,/g, '')) || 0)
+    : orig.budget_amount
+  const editedCommissionRate = body.commission_rate !== undefined && body.commission_rate !== ''
+    ? parseFloat(body.commission_rate)
+    : orig.commission_rate
+  const editedRemarks = body.remarks !== undefined ? body.remarks : orig.remarks
+
+  // 手数料バリデーション（管理組合の場合、円か％どちらか必須）
+  if (editedPaymentTarget !== 'td') {
+    const hasBudget = editedBudgetAmount !== null && editedBudgetAmount !== undefined && editedBudgetAmount !== ''
+    const hasCommission = editedCommissionRate !== null && editedCommissionRate !== undefined && !isNaN(editedCommissionRate)
+    if (!hasBudget && !hasCommission) {
+      return c.redirect(`/applications/new?resubmit_id=${id}&error=fee_required`)
+    }
+  }
 
   const newNumber = generateApplicationNumber()
   const result = await db.prepare(`
@@ -2407,42 +2678,93 @@ applications.post('/:id/resubmit', async (c) => {
       application_number, title, mansion_id, applicant_id, circulation_start_date,
       payment_target, account_item, td_type, kumiai_amount, gyosha_amount, budget_amount,
       commission_rate, remarks, status, current_step, resubmit_count, original_application_id,
-      returned_reason, reapply_reason, returned_from_step, returned_by_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, ?, ?, ?, ?, ?, ?)
+      returned_reason, reapply_reason, returned_from_step, returned_by_id, is_test
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'circulating', 1, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
-    newNumber, orig.title, orig.mansion_id, orig.applicant_id, orig.circulation_start_date,
-    orig.payment_target, orig.account_item, orig.td_type, orig.kumiai_amount, orig.gyosha_amount, orig.budget_amount,
-    null, orig.remarks, (orig.resubmit_count || 0) + 1, orig.id,
+    newNumber, editedTitle, editedMansionId, orig.applicant_id, editedStartDate,
+    editedPaymentTarget, editedAccountItem, editedTdType, editedKumiaiAmount, editedGyoshaAmount, editedBudgetAmount,
+    editedCommissionRate, editedRemarks, (orig.resubmit_count || 0) + 1, orig.id,
     isReturned ? orig.returned_reason : null,
     reapplyReason,
     isReturned ? orig.returned_from_step : null,
-    isReturned ? orig.returned_by_id : null
+    isReturned ? orig.returned_by_id : null,
+    orig.is_test || 0
   ).run()
 
-  const newId = result.meta.last_row_id
+  const newId = result.meta.last_row_id as number
 
-  // 添付ファイルもコピー
-  const attachments = await db.prepare('SELECT * FROM attachments WHERE application_id = ?').bind(id).all()
-  for (const att of attachments.results as any[]) {
-    await db.prepare('INSERT INTO attachments (application_id, file_type, file_name, file_key) VALUES (?, ?, ?, ?)').bind(newId, att.file_type, att.file_name, att.file_key).run()
+  // === 添付ファイル処理: 新しいファイルがあればR2にアップロード、なければ元申請の添付をコピー ===
+  const origAttachments = (await db.prepare('SELECT * FROM attachments WHERE application_id = ?').bind(id).all()).results as any[]
+  const origAttMap: Record<string, any> = {}
+  for (const att of origAttachments) {
+    origAttMap[att.file_type] = att
   }
 
-  await createCirculationSteps(db, newId as number, user.uid, orig.payment_target, orig.mansion_id)
+  // invoice1〜invoice6, other1, other2 それぞれ処理
+  const fileTypes = ['invoice1', 'invoice2', 'invoice3', 'invoice4', 'invoice5', 'invoice6', 'other1', 'other2']
+  for (const fileType of fileTypes) {
+    const uploaded = body[fileType] as File | undefined
+    if (uploaded && uploaded.size > 0) {
+      // 新規アップロード: R2に保存
+      const ext = uploaded.name.split('.').pop()
+      const key = `attachments/${newNumber}/${fileType}.${ext}`
+      await c.env.R2.put(key, await uploaded.arrayBuffer(), {
+        httpMetadata: { contentType: uploaded.type }
+      })
+      await db.prepare(
+        'INSERT INTO attachments (application_id, file_type, file_name, file_key) VALUES (?, ?, ?, ?)'
+      ).bind(newId, fileType, uploaded.name, key).run()
+    } else if (origAttMap[fileType]) {
+      // 元申請から引き継ぎ（file_keyを共有）
+      const orig_att = origAttMap[fileType]
+      await db.prepare(
+        'INSERT INTO attachments (application_id, file_type, file_name, file_key) VALUES (?, ?, ?, ?)'
+      ).bind(newId, fileType, orig_att.file_name, orig_att.file_key).run()
+    }
+  }
 
-  // 差し戻し再申請の場合、全承認者に統合通知（メール + LINE WORKS）
+  // kumiai_invoice など、フォームに現れないその他の添付タイプも引き継ぐ
+  for (const att of origAttachments) {
+    if (!fileTypes.includes(att.file_type)) {
+      await db.prepare(
+        'INSERT INTO attachments (application_id, file_type, file_name, file_key) VALUES (?, ?, ?, ?)'
+      ).bind(newId, att.file_type, att.file_name, att.file_key).run()
+    }
+  }
+
+  // === 回覧ステップ作成（編集後のフォーム値を優先） ===
+  const reviewerStep1 = body.reviewer_step1 ? parseInt(body.reviewer_step1) : null
+  const reviewerStep2 = body.reviewer_step2 ? parseInt(body.reviewer_step2) : null
+  const reviewerStep3 = body.reviewer_step3 ? parseInt(body.reviewer_step3) : null
+  await createCirculationSteps(db, newId, user.uid, editedPaymentTarget, editedMansionId, reviewerStep1, reviewerStep2, reviewerStep3)
+
+  // === 通知送信 ===
+  const appUrl = `${new URL(c.req.url).origin}/applications/${newId}`
   if (isReturned) {
+    // 差し戻し再申請の場合、全承認者に統合通知
     const steps = await db.prepare(
       'SELECT cs.reviewer_id FROM circulation_steps cs WHERE cs.application_id = ?'
     ).bind(newId).all()
-    const appUrl = `${new URL(c.req.url).origin}/applications/${newId}`
     for (const step of steps.results as any[]) {
       await sendNotification(db, 'reapplied', step.reviewer_id, {
         appNumber: newNumber,
-        title: orig.title,
+        title: editedTitle,
         applicantName: user.name,
         returnedReason: orig.returned_reason,
         reapplyReason,
-        appUrl
+        appUrl,
+        isTest: orig.is_test === 1
+      })
+    }
+  } else {
+    // rejected からの再提出: 最初の承認者にのみ通知（新規申請と同じ挙動）
+    const firstStep = await db.prepare(
+      'SELECT cs.*, u.email, u.name FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.application_id = ? AND cs.step_number = 1'
+    ).bind(newId).first() as any
+    if (firstStep) {
+      await sendNotification(db, 'review_request', firstStep.reviewer_id, {
+        appNumber: newNumber, title: editedTitle, applicantName: user.name, appUrl,
+        isTest: orig.is_test === 1
       })
     }
   }
