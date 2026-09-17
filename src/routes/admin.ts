@@ -22,8 +22,18 @@ admin.use('*', async (c, next) => {
   const cookie = c.req.header('Cookie')
   const sessionId = getSessionIdFromCookie(cookie)
   const user = await getSessionUser(c.env.DB, sessionId)
-  if (!user) return c.redirect('/login')
-  if (!user.is_admin) return c.redirect('/')
+  // AJAX呼び出し (fetch/xhr) の場合はJSONで401を返す（HTMLリダイレクトしない）
+  const isAjax = c.req.header('X-Requested-With') === 'XMLHttpRequest'
+    || (c.req.header('Content-Type') || '').includes('application/json')
+    || (c.req.header('Accept') || '').includes('application/json')
+  if (!user) {
+    if (isAjax) return c.json({ ok: false, error: 'セッションが切れています。再ログインしてください。', needsLogin: true }, 401)
+    return c.redirect('/login')
+  }
+  if (!user.is_admin) {
+    if (isAjax) return c.json({ ok: false, error: '管理者権限が必要です' }, 403)
+    return c.redirect('/')
+  }
   c.set('user' as any, user)
   await next()
 })
@@ -358,9 +368,28 @@ admin.get('/users', async (c) => {
         try {
           const res = await fetch('/admin/users/' + userId + '/lw-test', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            }
           });
-          const data = await res.json();
+          // レスポンスが JSON でない可能性（セッション切れ等）に対応
+          const contentType = res.headers.get('content-type') || '';
+          let data;
+          if (contentType.includes('application/json')) {
+            data = await res.json();
+          } else {
+            // HTMLが返ってきたら「セッション切れ」の可能性が高い
+            const text = await res.text();
+            const looksLikeLogin = text.includes('<title>ログイン') || text.includes('/login');
+            data = {
+              ok: false,
+              error: looksLikeLogin
+                ? 'セッションが切れています。ページを再読込してログインし直してください。'
+                : ('サーバーが予期しないレスポンスを返しました (HTTP ' + res.status + ')')
+            };
+          }
           document.getElementById('lwTestSpinner').classList.add('hidden');
           document.getElementById('lwTestCloseBtn').classList.remove('hidden');
           if (data.ok) {
@@ -370,14 +399,38 @@ admin.get('/users', async (c) => {
           } else {
             statusEl.textContent = '❌ 送信失敗';
             statusEl.className = 'text-center text-red-600 font-semibold text-base';
-            msgEl.textContent = data.error || '不明なエラー';
+            msgEl.innerHTML = '';
+            const errP = document.createElement('p');
+            errP.className = 'text-xs text-red-600';
+            errP.textContent = data.error || '不明なエラー';
+            msgEl.appendChild(errP);
+            if (data.hint) {
+              const hintP = document.createElement('p');
+              hintP.className = 'text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded p-2 mt-2';
+              hintP.textContent = '💡 ' + data.hint;
+              msgEl.appendChild(hintP);
+            }
+            if (data.needsLogin) {
+              const reloadBtn = document.createElement('button');
+              reloadBtn.textContent = '再ログイン画面へ';
+              reloadBtn.className = 'mt-3 w-full bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold py-2 rounded-lg';
+              reloadBtn.onclick = () => { window.location.href = '/login'; };
+              msgEl.appendChild(reloadBtn);
+            }
+            if (data.needsToken) {
+              const cfgBtn = document.createElement('a');
+              cfgBtn.textContent = 'LINE WORKS設定を開く';
+              cfgBtn.href = '/admin/lineworks';
+              cfgBtn.className = 'mt-3 block text-center bg-[#00B900] hover:bg-[#009e00] text-white text-sm font-semibold py-2 rounded-lg';
+              msgEl.appendChild(cfgBtn);
+            }
           }
         } catch(e) {
           document.getElementById('lwTestSpinner').classList.add('hidden');
           document.getElementById('lwTestCloseBtn').classList.remove('hidden');
           statusEl.textContent = '❌ 通信エラー';
           statusEl.className = 'text-center text-red-600 font-semibold text-base';
-          msgEl.textContent = String(e);
+          msgEl.textContent = String(e && e.message ? e.message : e);
         }
       }
       function closeLwTestModal() {
@@ -533,11 +586,42 @@ admin.post('/users/:id/lw-test', async (c) => {
       type: 'text' as const,
       text: `【テスト通知】\n宛先: ${target.name} さん\nこのメッセージはユーザー管理画面から送信されたテストです。\nLINE WORKS通知は正常に動作しています。\n－－－\nhttps://webapp-production-exu.pages.dev/login`,
     }
-    const result = await sendLineWorksMessage(config, target.lineworks_user_id, msg)
+    // トークン更新時のコールバックでDBを更新
+    const result = await sendLineWorksMessage(
+      config,
+      target.lineworks_user_id,
+      msg,
+      async (tokenData) => {
+        const expiresAt = Math.floor(Date.now() / 1000) + Number(tokenData.expires_in || 86400)
+        await db.prepare(`
+          UPDATE lineworks_config
+          SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=datetime("now")
+          WHERE is_active=1
+        `).bind(
+          tokenData.access_token,
+          tokenData.refresh_token || config.refreshToken || null,
+          expiresAt
+        ).run()
+      }
+    )
     if (result === true) {
       return c.json({ ok: true, message: `${target.name} さんへ送信しました` })
     } else {
-      return c.json({ ok: false, error: result })
+      // Refresh Token エラーなど、トークン期限切れっぽい場合はガイドを付ける
+      const isTokenError = typeof result === 'string' && (
+        result.includes('Refresh token') ||
+        result.includes('unauthorized_client') ||
+        result.includes('invalid_token') ||
+        result.includes('401')
+      )
+      return c.json({
+        ok: false,
+        error: result,
+        needsToken: isTokenError,
+        hint: isTokenError
+          ? 'LINE WORKSのアクセストークンが期限切れの可能性があります。「LINE WORKS設定」画面でトークンを再取得してください。'
+          : undefined
+      })
     }
   } catch (e: any) {
     return c.json({ ok: false, error: e?.message || '不明なエラー' })
