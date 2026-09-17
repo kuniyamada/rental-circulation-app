@@ -180,6 +180,42 @@ export function layout(title: string, content: string, user: any): string {
     </div>
   </nav>
 
+  <!-- 保存済みファイルプレビューモーダル（詳細/承認画面共通） -->
+  <div id="savedFilePreviewModal" class="hidden fixed inset-0 bg-black/70 z-[60] items-center justify-center p-2 sm:p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
+        <h3 id="savedFilePreviewTitle" class="font-semibold text-gray-800 text-sm truncate pr-4"></h3>
+        <div class="flex items-center gap-2 shrink-0">
+          <a id="savedFilePreviewDL" href="#" download
+            class="inline-flex items-center gap-1 text-xs px-3 py-1.5 bg-white border border-gray-300 rounded hover:bg-gray-50">
+            ⬇ DL
+          </a>
+          <a id="savedFilePreviewNewTab" href="#" target="_blank"
+            class="inline-flex items-center gap-1 text-xs px-3 py-1.5 bg-white border border-gray-300 rounded hover:bg-gray-50">
+            🗗 新タブ
+          </a>
+          <button type="button" onclick="closeSavedFilePreview()"
+            class="text-gray-500 hover:text-gray-700 text-2xl leading-none p-1">×</button>
+        </div>
+      </div>
+      <div class="flex-1 bg-gray-100 overflow-hidden">
+        <iframe id="savedFilePreviewFrame" class="w-full h-full border-0 bg-white" src=""></iframe>
+        <div id="savedFilePreviewFallback" class="hidden h-full flex items-center justify-center p-6">
+          <div class="text-center max-w-md">
+            <p class="text-sm text-gray-600 mb-3">
+              このブラウザではプレビュー表示できませんでした。<br>
+              下のボタンからダウンロードまたは新しいタブで開いてください。
+            </p>
+            <a id="savedFilePreviewFallbackDL" href="#" target="_blank"
+              class="inline-flex items-center gap-1 px-4 py-2 bg-[#396999] text-white text-sm rounded-lg hover:bg-[#2E5580]">
+              新しいタブで開く
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     function toggleSidebar() {
       const sidebar = document.getElementById('sidebar')
@@ -187,6 +223,70 @@ export function layout(title: string, content: string, user: any): string {
       sidebar.classList.toggle('-translate-x-full')
       overlay.classList.toggle('hidden')
     }
+
+    // 保存済みファイル（R2上のPDF/画像）のプレビュー
+    function openSavedFilePreview(url, filename) {
+      const modal = document.getElementById('savedFilePreviewModal')
+      if (!modal) { window.open(url, '_blank'); return; }
+      document.getElementById('savedFilePreviewTitle').textContent = filename || 'プレビュー'
+      const frame = document.getElementById('savedFilePreviewFrame')
+      const fallback = document.getElementById('savedFilePreviewFallback')
+      const dlLink = document.getElementById('savedFilePreviewDL')
+      const newTabLink = document.getElementById('savedFilePreviewNewTab')
+      const fallbackDL = document.getElementById('savedFilePreviewFallbackDL')
+
+      // モバイル判定: iframe内PDF表示に対応していない環境（iOS Safari など）
+      const ua = navigator.userAgent || ''
+      const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/.test(ua)
+      const isPDF = /\.pdf($|\?)/i.test(filename || '') || /\.pdf($|\?)/i.test(url)
+
+      dlLink.href = url
+      dlLink.setAttribute('download', filename || '')
+      newTabLink.href = url
+      fallbackDL.href = url
+
+      if (isIOS && isPDF) {
+        // iOS Safari では iframe 内 PDF が動かないのでフォールバック表示
+        frame.style.display = 'none'
+        frame.src = ''
+        fallback.classList.remove('hidden')
+        fallback.classList.add('flex')
+      } else {
+        frame.style.display = ''
+        frame.src = url
+        fallback.classList.add('hidden')
+        fallback.classList.remove('flex')
+      }
+      modal.classList.remove('hidden')
+      modal.classList.add('flex')
+    }
+
+    function closeSavedFilePreview() {
+      const modal = document.getElementById('savedFilePreviewModal')
+      if (!modal) return
+      modal.classList.add('hidden')
+      modal.classList.remove('flex')
+      const frame = document.getElementById('savedFilePreviewFrame')
+      if (frame) frame.src = ''
+    }
+
+    // 背景クリックで閉じる
+    document.addEventListener('DOMContentLoaded', function() {
+      const modal = document.getElementById('savedFilePreviewModal')
+      if (modal) {
+        modal.addEventListener('click', function(e) {
+          if (e.target === modal) closeSavedFilePreview()
+        })
+      }
+      // Escキーで閉じる
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          const m = document.getElementById('savedFilePreviewModal')
+          if (m && !m.classList.contains('hidden')) closeSavedFilePreview()
+        }
+      })
+    })
   </script>
 </body>
 </html>`
