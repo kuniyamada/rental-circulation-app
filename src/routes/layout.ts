@@ -239,7 +239,9 @@ export function layout(title: string, content: string, user: any): string {
       const ua = navigator.userAgent || ''
       const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream
       const isMobile = /Android|iPhone|iPad|iPod|Mobile/.test(ua)
-      const isPDF = /\.pdf($|\?)/i.test(filename || '') || /\.pdf($|\?)/i.test(url)
+      const nameLower = (filename || '').toLowerCase()
+      const urlLower = (url || '').toLowerCase()
+      const isPDF = nameLower.endsWith('.pdf') || urlLower.indexOf('.pdf') > -1
 
       dlLink.href = url
       dlLink.setAttribute('download', filename || '')
