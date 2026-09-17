@@ -1808,15 +1808,16 @@ applications.get('/:id', async (c) => {
   // 申請A の場合: 後続申請Bの情報を取得
   let motoukeSuccessorB: any = null
   let motoukeKumiaiUploaded = false
+  let motoukeKumiaiAtt: any = null  // バナー内でPDFプレビューを表示するために保持
   if (app.payment_target === 'td' && app.td_type === 'motouke') {
     motoukeSuccessorB = await db.prepare(`
       SELECT id, application_number, status FROM applications
       WHERE original_application_id = ? ORDER BY id DESC LIMIT 1
     `).bind(id).first() as any
-    const kumiaiAtt = await db.prepare(
-      'SELECT id FROM attachments WHERE application_id = ? AND file_type = ? LIMIT 1'
+    motoukeKumiaiAtt = await db.prepare(
+      'SELECT id, file_name FROM attachments WHERE application_id = ? AND file_type = ? LIMIT 1'
     ).bind(id, 'kumiai_invoice').first() as any
-    motoukeKumiaiUploaded = !!kumiaiAtt
+    motoukeKumiaiUploaded = !!motoukeKumiaiAtt
   }
   // 申請B の場合: 元申請Aの情報を取得
   let motoukeSourceA: any = null
@@ -1943,16 +1944,54 @@ applications.get('/:id', async (c) => {
         ${(app.payment_target === 'td' && app.td_type === 'motouke' && !motoukeSuccessorB && isApplicant) ? `
         <div class="mt-3 bg-amber-50 border-2 border-amber-300 rounded-lg p-4 text-sm">
           ${motoukeKumiaiUploaded ? `
-            <div class="flex items-start gap-2 mb-2">
+            <div class="flex items-start gap-2 mb-3">
               <span class="text-xl">📬</span>
               <div class="flex-1">
                 <p class="text-amber-900 font-bold text-base mb-1">管理組合宛の請求書ができました</p>
                 <p class="text-amber-800 leading-relaxed">
                   業務管理課が作成した<strong>管理組合宛の請求書</strong>を添付済みです。<br>
-                  下のボタンから内容をご確認いただき、問題なければ<strong>承認・回覧開始</strong>してください。
+                  <strong class="text-amber-900">下のPDFで内容をご確認</strong>いただき、問題なければ<strong>承認・回覧開始</strong>してください。
                 </p>
               </div>
             </div>
+            <!-- 管理組合宛請求書PDF: ボタン直前に大きく表示（案②） -->
+            ${motoukeKumiaiAtt ? (() => {
+              const ext = (motoukeKumiaiAtt.file_name.split('.').pop() || '').toLowerCase()
+              const isPdf = ext === 'pdf'
+              const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext)
+              const iconColor = isPdf ? 'text-red-500' : isImg ? 'text-blue-500' : 'text-gray-500'
+              const icon = isPdf
+                ? '<svg class="w-12 h-12 ' + iconColor + '" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/><text x="10" y="15" text-anchor="middle" fill="white" font-size="5" font-weight="bold">PDF</text></svg>'
+                : isImg
+                ? '<svg class="w-12 h-12 ' + iconColor + '" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'
+                : '<svg class="w-12 h-12 ' + iconColor + '" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>'
+              const safeName = motoukeKumiaiAtt.file_name.replace(/'/g, "\\'")
+              return `
+              <div class="mb-3 bg-white border-2 border-amber-400 rounded-lg p-4 shadow-sm">
+                <div class="flex items-center gap-1 mb-2">
+                  <span class="text-xs font-bold text-orange-700 bg-orange-100 border border-orange-300 px-2 py-0.5 rounded-full">👉 承認前に必ずご確認ください</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <div class="flex-shrink-0">${icon}</div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs font-semibold text-amber-800">管理組合宛請求書</p>
+                    <p class="text-sm text-gray-800 font-medium truncate" title="${motoukeKumiaiAtt.file_name}">${motoukeKumiaiAtt.file_name}</p>
+                  </div>
+                  <div class="flex gap-1 flex-shrink-0">
+                    <button type="button" onclick="openSavedFilePreview('/files/${motoukeKumiaiAtt.id}', '${safeName}')"
+                      class="inline-flex items-center gap-1 bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2.5 rounded transition shadow-sm">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                      内容を確認
+                    </button>
+                    <a href="/files/${motoukeKumiaiAtt.id}?dl=1" download="${motoukeKumiaiAtt.file_name}"
+                      class="inline-flex items-center gap-1 bg-white hover:bg-gray-50 text-gray-700 text-sm font-semibold px-3 py-2.5 rounded border border-gray-300 transition">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                      DL
+                    </a>
+                  </div>
+                </div>
+              </div>`
+            })() : ''}
             <div class="mt-3">
               <a href="/applications/${id}/motouke-b/confirm"
                 class="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold px-5 py-2.5 rounded-lg transition shadow-sm">
@@ -2856,54 +2895,21 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
         </div>
       </div>
 
-      <!-- 添付ファイル（管理組合宛請求書PDF） -->
-      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <div class="flex items-center gap-2 mb-4">
-          <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
-          </svg>
-          <h3 class="font-semibold text-gray-800">管理組合宛請求書PDF</h3>
-          <span class="text-xs text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full font-medium">👉 内容をご確認ください</span>
-        </div>
-        ${(() => {
-          const ext = (kumiaiAtt.file_name.split('.').pop() || '').toLowerCase()
-          const isPdf = ext === 'pdf'
-          const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext)
-          const iconColor = isPdf ? 'text-red-500' : isImg ? 'text-blue-500' : 'text-gray-500'
-          const icon = isPdf
-            ? '<svg class="w-10 h-10 ' + iconColor + '" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/><text x="10" y="15" text-anchor="middle" fill="white" font-size="5" font-weight="bold">PDF</text></svg>'
-            : isImg
-            ? '<svg class="w-10 h-10 ' + iconColor + '" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'
-            : '<svg class="w-10 h-10 ' + iconColor + '" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>'
-          const safeName = kumiaiAtt.file_name.replace(/'/g, "\\'")
-          return `
-          <div class="flex items-center gap-3 border-2 border-amber-300 bg-amber-50 rounded-lg p-4">
-            <div class="flex-shrink-0">${icon}</div>
-            <div class="flex-1 min-w-0">
-              <p class="text-xs font-semibold text-amber-800">管理組合宛請求書</p>
-              <p class="text-sm text-gray-700 truncate" title="${kumiaiAtt.file_name}">${kumiaiAtt.file_name}</p>
-            </div>
-            <div class="flex gap-1 flex-shrink-0">
-              <button type="button" onclick="openSavedFilePreview('/files/${kumiaiAtt.id}', '${safeName}')"
-                class="inline-flex items-center gap-1 bg-[#396999] hover:bg-[#2E5580] text-white text-xs font-semibold px-4 py-2.5 rounded transition">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                内容を確認
-              </button>
-              <a href="/files/${kumiaiAtt.id}?dl=1" download="${kumiaiAtt.file_name}"
-                class="inline-flex items-center gap-1 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold px-3 py-2.5 rounded border border-gray-300 transition">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                DL
-              </a>
-            </div>
-          </div>`
-        })()}
-      </div>
+      <!--
+        【削除】管理組合宛請求書PDF セクション（案②）
+        削除理由:
+          - 直前の申請詳細画面のバナー内で既に大きくPDFプレビュー/DLボタンを表示済み
+          - 同じPDFを2画面で見せるのは冗長 (ユーザー要望による整理)
+        補足:
+          - PDF取得ロジック (kumiaiAtt fetch) は上部で残しており
+            未アップロード時のエラー画面表示に引き続き使用されます
+      -->
 
       <!-- 注意書き + 実行ボタン -->
       <div class="bg-blue-50 border-2 border-blue-200 rounded-xl p-5">
         <p class="text-sm text-blue-900 mb-4">
-          ⚠️ <strong>管理組合宛の請求書の内容</strong>をご確認いただき、問題なければ下のボタンを押してください。<br>
-          ボタンを押すと、この請求書が<strong>上長 → 業務管理課 → マンション会計課</strong>の順で回覧されます。
+          ⚠️ <strong>管理組合宛の請求書の内容を前の画面でご確認</strong>いただけましたでしょうか？<br>
+          下のボタンを押すと、この請求書が<strong>上長 → 業務管理課 → マンション会計課</strong>の順で回覧されます。
         </p>
         <form method="POST" action="/applications/${id}/motouke-b/confirm" id="motoukeBForm">
           <div class="flex gap-3 flex-wrap">
@@ -2916,7 +2922,7 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
             </button>
             <a href="/applications/${id}"
               class="px-5 py-3 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition flex items-center justify-center">
-              ← キャンセル
+              ← 前の画面に戻ってPDFを再確認
             </a>
           </div>
         </form>
