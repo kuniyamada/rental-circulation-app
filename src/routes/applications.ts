@@ -2820,7 +2820,7 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
   let errHtml = ''
   if (err === 'no_step1') errHtml = '<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">❌ 元申請Aに上長（Step1）が設定されていません</div>'
   else if (err === 'no_step2') errHtml = '<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">❌ 元申請Aに業務管理課（Step2）が設定されていません</div>'
-  else if (err === 'no_step3') errHtml = '<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">❌ マンションに会計担当（マンション会計）が設定されていません。管理画面 → マンション管理から会計担当を設定してください</div>'
+  else if (err === 'no_step3') errHtml = '<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">❌ マンションに会計担当（マンション会計）が設定されていません。管理画面 → マンション管理マスタから会計担当を設定してください</div>'
   else if (err) errHtml = `<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">❌ ${err}</div>`
 
   const isTestApp = sourceApp.is_test === 1
@@ -2967,7 +2967,7 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
                         </p>`
                       : `<p class="text-xs text-amber-800 mt-1 leading-relaxed">
                           ⚠️ このマンションには会計担当が未設定のため、今回はこちらから選んでください。<br>
-                          恒久設定は <a href="/admin/mansions" target="_blank" class="text-amber-900 underline font-semibold">マンション管理</a> から行うのが本来です。
+                          恒久設定は <a href="/admin/mansions" target="_blank" class="text-amber-900 underline font-semibold">マンション管理マスタ</a> から行うのが本来です。
                         </p>`
                     }
                   </div>

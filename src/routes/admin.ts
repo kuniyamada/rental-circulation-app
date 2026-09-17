@@ -1041,7 +1041,7 @@ admin.get('/mansions', async (c) => {
     </script>
     ` : ''}
   `
-  return c.html(layout('マンション管理', content, user))
+  return c.html(layout('マンション管理マスタ', content, user))
 })
 
 // マンション追加フォーム
