@@ -124,7 +124,7 @@ export function buildMailSubject(type: string, appNumber: string, extra?: string
     resubmitted:    `【再提出】${appNumber} - 請求書が再提出されました`,
     returned:       `【差し戻し】${appNumber} - ${extra || '請求書が差し戻されました。修正の上、再申請してください'}`,
     reapplied:      `【差し戻し再申請】${appNumber} - 差し戻し後の再申請が届きました`,
-    motouke_next:   `【元請セット申請】${appNumber} - 管理組合宛請求書の申請をお願いします`,
+    motouke_next:   `【承認・回覧開始のお願い】${appNumber} - 管理組合宛の請求書ができました`,
   }
   return subjects[type] || `【通知】${appNumber}`
 }
@@ -165,15 +165,15 @@ export function buildMailBody(type: string, data: {
         <strong>再申請理由・修正内容：</strong><br>${data.reapplyReason}
       </p>` : ''}`,
     motouke_next: `
-      <p><strong style="color:#d97706;">元請セット申請のお知らせ</strong></p>
-      <p>業者請求書（申請A）の業務管理課承認が完了し、<strong>管理組合宛請求書（PDF）</strong>がアップロードされました。</p>
+      <p><strong style="color:#d97706;">📬 管理組合宛の請求書ができました</strong></p>
+      <p>業務管理課が<strong>管理組合宛の請求書</strong>を作成・添付しました。</p>
       <p style="background:#fffbeb;border-left:4px solid #d97706;padding:12px;margin:12px 0;font-size:13px;">
-        <strong>次のアクション：</strong><br>
-        下記ボタンから、管理組合宛請求書の<strong>後続申請B</strong>を作成してください。<br>
-        マンション名・金額・PDFは自動で引き継がれます。
+        下のボタンから内容をご確認いただき、問題なければ<br>
+        <strong>「承認・回覧開始」</strong>ボタンを押してください。<br>
+        押すと、そのまま<strong>上長 → 業務管理課 → マンション会計課</strong>の順に回覧されます。
       </p>
       <p style="font-size:12px;color:#6b7280;margin-top:8px;">
-        ※ 申請Bは「上長 → 本橋（業務管理課） → マンション会計」の短縮フローで回覧されます。
+        ※ 金額・回覧先はすべて自動設定済みです。追加入力は不要です。
       </p>`,
   }
 
@@ -207,7 +207,7 @@ export function buildMailBody(type: string, data: {
       </table>
       <a href="${data.appUrl}"
         style="display:inline-block;padding:12px 28px;background:${type === 'motouke_next' ? '#d97706' : '#396999'};color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-top:8px;">
-        ${type === 'motouke_next' ? '後続申請Bを作成する →' : '詳細を確認する →'}
+        ${type === 'motouke_next' ? '内容を確認して承認・回覧開始 →' : '詳細を確認する →'}
       </a>
     </div>
     <!-- フッター -->

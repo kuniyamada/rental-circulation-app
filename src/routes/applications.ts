@@ -1848,7 +1848,7 @@ applications.get('/:id', async (c) => {
   } else if (c.req.query('motouke_dup') === '1') {
     motoukeFlash = `<div class="bg-blue-50 border border-blue-200 text-blue-700 text-sm px-4 py-3 rounded-lg">ℹ️ この元請の後続申請Bは既に作成済みです。既存の申請ページを表示しています。</div>`
   } else if (c.req.query('motouke_b_created') === '1') {
-    motoukeFlash = `<div class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-3 rounded-lg">✅ 後続申請B の回覧を開始しました！上長へ通知を送信しました。</div>`
+    motoukeFlash = `<div class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-3 rounded-lg">✅ 管理組合宛の請求書の回覧を開始しました！上長へ通知を送信しました。</div>`
   }
 
   const content = `
@@ -1941,16 +1941,38 @@ applications.get('/:id', async (c) => {
         ` : ''}
 
         ${(app.payment_target === 'td' && app.td_type === 'motouke' && !motoukeSuccessorB && isApplicant) ? `
-        <div class="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
-          <p class="text-amber-800 font-semibold mb-2">🔗 元請セット申請B（後続）を作成する</p>
+        <div class="mt-3 bg-amber-50 border-2 border-amber-300 rounded-lg p-4 text-sm">
           ${motoukeKumiaiUploaded ? `
-            <p class="text-amber-700 text-xs mb-2">管理組合宛請求書がアップロード済です。続けて後続申請Bを作成できます。</p>
-            <a href="/applications/${id}/motouke-b/confirm"
-              class="inline-flex items-center gap-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">
-              📝 後続申請Bを作成する →
-            </a>
+            <div class="flex items-start gap-2 mb-2">
+              <span class="text-xl">📬</span>
+              <div class="flex-1">
+                <p class="text-amber-900 font-bold text-base mb-1">管理組合宛の請求書ができました</p>
+                <p class="text-amber-800 leading-relaxed">
+                  業務管理課が作成した<strong>管理組合宛の請求書</strong>を添付済みです。<br>
+                  下のボタンから内容をご確認いただき、問題なければ<strong>承認・回覧開始</strong>してください。
+                </p>
+              </div>
+            </div>
+            <div class="mt-3">
+              <a href="/applications/${id}/motouke-b/confirm"
+                class="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold px-5 py-2.5 rounded-lg transition shadow-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                内容を確認して、承認・回覧開始 →
+              </a>
+            </div>
           ` : `
-            <p class="text-amber-700 text-xs">本橋（業務管理課）が管理組合宛請求書PDFをアップロードした後、後続申請Bを作成できます。</p>
+            <div class="flex items-start gap-2">
+              <span class="text-xl">⏳</span>
+              <div class="flex-1">
+                <p class="text-amber-900 font-bold mb-1">管理組合宛の請求書 作成待ち</p>
+                <p class="text-amber-700 text-xs">
+                  業務管理課が管理組合宛の請求書を作成・添付するまでお待ちください。<br>
+                  添付が完了すると、こちらに<strong>承認・回覧開始</strong>ボタンが表示されます。
+                </p>
+              </div>
+            </div>
           `}
         </div>
         ` : ''}
@@ -2728,6 +2750,19 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
         </div>
         <h2 class="text-xl font-bold text-gray-800 mb-4">${sourceApp.mansion_name || sourceApp.title} - 管理組合宛請求書の回覧</h2>
 
+        <!-- 業務ユーザー向けの説明バナー -->
+        <div class="bg-amber-50 border-2 border-amber-300 rounded-lg p-4 mb-3 flex items-start gap-3">
+          <span class="text-2xl">📬</span>
+          <div class="flex-1 text-sm">
+            <p class="font-bold text-amber-900 mb-1">管理組合宛の請求書ができました</p>
+            <p class="text-amber-800 leading-relaxed">
+              業務管理課が作成した<strong>管理組合宛の請求書</strong>を下に表示しています。<br>
+              内容を確認して問題なければ、ページ下の <strong>「承認・回覧開始」</strong> ボタンを押してください。<br>
+              押すと、この請求書が上長へ回覧されます（金額・回覧先は自動設定済）。
+            </p>
+          </div>
+        </div>
+
         <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm">
           <p class="text-emerald-800">
             <strong>🔗 元申請A:</strong>
@@ -2844,8 +2879,8 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
       <!-- 注意書き + 実行ボタン -->
       <div class="bg-blue-50 border-2 border-blue-200 rounded-xl p-5">
         <p class="text-sm text-blue-900 mb-4">
-          ⚠️ 内容をご確認の上、<strong>回覧を開始</strong>してください。<br>
-          開始後は「申請B」として自動的に上記の承認フローが動きます。
+          ⚠️ <strong>管理組合宛の請求書の内容</strong>をご確認いただき、問題なければ下のボタンを押してください。<br>
+          ボタンを押すと、この請求書が<strong>上長 → 業務管理課 → マンション会計課</strong>の順で回覧されます。
         </p>
         <form method="POST" action="/applications/${id}/motouke-b/confirm" id="motoukeBForm">
           <div class="flex gap-3 flex-wrap">
@@ -2854,7 +2889,7 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
               </svg>
-              内容OK・回覧を開始する →
+              承認・回覧開始 →
             </button>
             <a href="/applications/${id}"
               class="px-5 py-3 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition flex items-center justify-center">
@@ -2874,7 +2909,7 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
       })
     </script>
   `
-  return c.html(layout('後続申請B の確認・回覧開始', content, user))
+  return c.html(layout('管理組合宛の請求書 - 承認・回覧開始', content, user))
 })
 
 // 元請セット申請B の作成実行（確認画面からの POST）
