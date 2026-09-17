@@ -702,12 +702,12 @@ applications.get('/new', async (c) => {
             <p id="feeValidationMsg" class="hidden text-xs text-red-500 mt-1.5">⚠ 手数料（円）または手数料（％）のいずれかを入力してください</p>
           </div>
 
-          <!-- 添付ファイル（請求書）②〜⑥ -->
-          <!-- 「請求書②」欄は常時表示。委託内(ittaku)の場合のみ「+ 追加」ボタンで③〜⑥まで動的追加可能 -->
+          <!-- 添付ファイル（請求書）②〜 -->
+          <!-- 「請求書②」欄は常時表示。管理組合=最大3枠(②③④) / 委託内=最大5枠(②〜⑥) の追加ボタンが表示される -->
           <div class="border border-gray-200 rounded-lg p-4">
             <div class="flex items-center justify-between mb-3">
-              <h3 class="text-sm font-semibold text-gray-700">添付ファイル（請求書）② 〜 ⑥</h3>
-              <span id="invoiceExtraHint" class="hidden text-xs text-gray-400">最大5個まで追加できます</span>
+              <h3 class="text-sm font-semibold text-gray-700">添付ファイル（請求書）②〜</h3>
+              <span id="invoiceExtraHint" class="hidden text-xs text-gray-400"></span>
             </div>
             <div id="invoiceExtraList" class="space-y-2">
               <!-- 請求書② (初期表示) -->
@@ -721,9 +721,9 @@ applications.get('/new', async (c) => {
                   👁 確認
                 </button>
               </div>
-              <!-- 請求書③〜⑥ はJSで動的に追加される（委託内のみ） -->
+              <!-- 請求書③〜⑥ はJSで動的に追加される -->
             </div>
-            <!-- 追加ボタン（td_type=ittaku かつ 未達5件のときのみ表示） -->
+            <!-- 追加ボタン（管理組合=3枠 / 委託内=5枠まで） -->
             <button type="button" id="addInvoiceBtn" onclick="addInvoiceSlot()"
               class="hidden mt-3 inline-flex items-center gap-1 px-3 py-1.5 border border-dashed border-[#396999] text-[#396999] text-xs font-semibold rounded-md hover:bg-[#EEF4FA]">
               ＋ 請求書を追加
@@ -988,6 +988,46 @@ applications.get('/new', async (c) => {
         }
       }
 
+      // 現在の支払先/区分に応じた請求書②以降の追加上限を返す
+      // - 管理組合(kumiai) → 最大3枠 (②③④)
+      // - 会社(TD) 委託内(ittaku) → 最大5枠 (②〜⑥)
+      // - それ以外（TD 元請 or 未選択）→ 追加不可（1枠のみ）
+      function getMaxInvoiceSlots() {
+        const pay = document.querySelector('input[name="payment_target"]:checked')?.value
+        const td = document.querySelector('input[name="td_type"]:checked')?.value
+        if (pay === 'kumiai') return 3
+        if (pay === 'td' && td === 'ittaku') return 5
+        return 1
+      }
+
+      // 追加ボタン・ヒント表示の更新（拡張可否を反映）
+      function updateInvoiceExtraUI() {
+        const max = getMaxInvoiceSlots()
+        const addBtn = document.getElementById('addInvoiceBtn')
+        const hint = document.getElementById('invoiceExtraHint')
+        const list = document.getElementById('invoiceExtraList')
+        if (!list) return
+        const existing = list.querySelectorAll('[data-invoice-slot]').length
+        // 追加不可(max=1) or 上限達 → 追加ボタン非表示
+        const canAdd = max > 1 && existing < max
+        if (addBtn) addBtn.classList.toggle('hidden', !canAdd)
+        if (hint) {
+          if (max > 1) {
+            hint.textContent = '最大' + max + '個まで追加できます'
+            hint.classList.remove('hidden')
+          } else {
+            hint.classList.add('hidden')
+          }
+        }
+        // 現在の枠数が上限を超えている場合は超過分を削除（支払先切替時のクリーンアップ）
+        if (existing > max) {
+          document.querySelectorAll('[data-invoice-slot]').forEach(function(el) {
+            const slot = parseInt(el.getAttribute('data-invoice-slot'))
+            if (slot > max + 1) el.remove()  // slot=2 が index=1 なので max+1
+          })
+        }
+      }
+
       function togglePaymentFields() {
         const val = document.querySelector('input[name="payment_target"]:checked')?.value
         document.getElementById('kumiaiFields').classList.toggle('hidden', val !== 'kumiai')
@@ -998,35 +1038,26 @@ applications.get('/new', async (c) => {
         // TD選択時はrequiredを完全解除（手数料バリデーションはcheckFeeRequired()で行う）
         const budgetInput = document.querySelector('input[name="budget_amount"]')
         if (budgetInput) budgetInput.required = false
+        // 請求書追加UIの表示を更新
+        updateInvoiceExtraUI()
         updateReviewerPreview()
       }
       function toggleMotouke() {
         const val = document.querySelector('input[name="td_type"]:checked')?.value
         document.getElementById('motoukeFields').classList.toggle('hidden', val !== 'motouke')
-        // 委託内(ittaku)の時のみ「+ 追加」ボタンとヒントを表示
-        const addBtn = document.getElementById('addInvoiceBtn')
-        const hint = document.getElementById('invoiceExtraHint')
-        const isIttaku = val === 'ittaku'
-        if (addBtn) addBtn.classList.toggle('hidden', !isIttaku)
-        if (hint) hint.classList.toggle('hidden', !isIttaku)
-        // 委託内OFFになったら、動的追加された請求書③〜⑥を削除（データ混在防止）
-        if (!isIttaku) {
-          document.querySelectorAll('[data-invoice-slot]').forEach(function(el) {
-            const slot = parseInt(el.getAttribute('data-invoice-slot'))
-            if (slot >= 3) el.remove()
-          })
-        }
+        // 請求書追加UIの表示を更新（委託内=5枠、元請=追加不可）
+        updateInvoiceExtraUI()
         calcProfit()
       }
 
-      // 請求書スロットの動的追加（最大6=請求書②〜⑥の合計5枠）
+      // 請求書スロットの動的追加（管理組合=最大3、委託内=最大5）
       function addInvoiceSlot() {
         const list = document.getElementById('invoiceExtraList')
         if (!list) return
+        const max = getMaxInvoiceSlots()
         // 現在のスロット数を数える
         const existing = list.querySelectorAll('[data-invoice-slot]').length
-        // ②③④⑤⑥ = 5枠まで（既存はスロット2から始まる）
-        if (existing >= 5) return
+        if (existing >= max) return
         const newSlot = existing + 2  // 2,3,4,5,6
         const marks = ['②', '③', '④', '⑤', '⑥']
         const mark = marks[newSlot - 2] || ('' + newSlot)
@@ -1045,8 +1076,8 @@ applications.get('/new', async (c) => {
             'class="inline-flex items-center px-2 py-1.5 border border-red-300 text-red-500 text-xs rounded-md hover:bg-red-50" title="この欄を削除">' +
             '×</button>'
         list.appendChild(wrap)
-        // 追加後、5枠達したらボタン非表示
-        if (existing + 1 >= 5) {
+        // 追加後、上限に達したらボタン非表示
+        if (existing + 1 >= max) {
           document.getElementById('addInvoiceBtn').classList.add('hidden')
         }
       }
@@ -1055,7 +1086,7 @@ applications.get('/new', async (c) => {
       function removeInvoiceSlot(btn) {
         const row = btn.closest('[data-invoice-slot]')
         if (row) row.remove()
-        // 再採番: 残った③〜⑥のnameとidを詰め直す
+        // 再採番: 残ったスロットのnameとidを詰め直す
         const list = document.getElementById('invoiceExtraList')
         const rows = list.querySelectorAll('[data-invoice-slot]')
         const marks = ['②', '③', '④', '⑤', '⑥']
@@ -1077,11 +1108,8 @@ applications.get('/new', async (c) => {
             previewBtn.setAttribute('onclick', "openFilePreview('invoice" + slot + "Input')")
           }
         })
-        // 追加ボタンを再表示
-        const td = document.querySelector('input[name="td_type"]:checked')?.value
-        if (td === 'ittaku') {
-          document.getElementById('addInvoiceBtn').classList.remove('hidden')
-        }
+        // 追加ボタンを再表示（上限未達ならON）
+        updateInvoiceExtraUI()
       }
 
       function calcProfit() {
