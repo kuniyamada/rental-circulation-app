@@ -847,9 +847,14 @@ admin.get('/mansions', async (c) => {
   const user = (c as any).get('user')
   const db = c.env.DB
   const mansions = await db.prepare(`
-    SELECT m.*, uf.name as front_name, ua.name as accounting_name
+    SELECT
+      m.*,
+      uf.name as front_name,
+      us.name as supervisor_name,
+      ua.name as accounting_name
     FROM mansions m
     LEFT JOIN users uf ON m.front_user_id = uf.id
+    LEFT JOIN users us ON m.supervisor_user_id = us.id
     LEFT JOIN users ua ON m.accounting_user_id = ua.id
     ORDER BY CAST(m.mansion_number AS INTEGER)
   `).all()
@@ -858,22 +863,44 @@ admin.get('/mansions', async (c) => {
   const allUsers = await db.prepare("SELECT id, name, role FROM users WHERE is_active = 1 ORDER BY name").all()
   const users = allUsers.results as any[]
   const fronts = users.filter(u => ['front', 'front_supervisor', 'manager', 'operations', 'admin'].includes(u.role))
+  const supervisors = users.filter(u => ['front_supervisor', 'manager', 'operations', 'admin'].includes(u.role))
   const accountings = users.filter(u => ['accounting', 'honsha', 'admin'].includes(u.role))
+
+  // 課の enum定数
+  const SECTION_OPTIONS = ['1課', '2課', '3課']
 
   // 編集権限: admin または operations
   const canEdit = user.is_admin || user.role === 'operations' || user.role === 'admin'
 
   // 未設定件数（サマリー用）
   const missingFront = (mansions.results as any[]).filter(m => !m.front_user_id).length
+  const missingSupervisor = (mansions.results as any[]).filter(m => !m.supervisor_user_id).length
   const missingAccounting = (mansions.results as any[]).filter(m => !m.accounting_user_id).length
+  const missingSection = (mansions.results as any[]).filter(m => !m.section).length
 
   const frontOptions = (selectedId: number | null) =>
     `<option value="">（未設定）</option>` +
     fronts.map(u => `<option value="${u.id}" ${selectedId === u.id ? 'selected' : ''}>${u.name}</option>`).join('')
 
+  const supervisorOptions = (selectedId: number | null) =>
+    `<option value="">（未設定）</option>` +
+    supervisors.map(u => `<option value="${u.id}" ${selectedId === u.id ? 'selected' : ''}>${u.name}</option>`).join('')
+
   const accountingOptions = (selectedId: number | null) =>
     `<option value="">（未設定）</option>` +
     accountings.map(u => `<option value="${u.id}" ${selectedId === u.id ? 'selected' : ''}>${u.name}</option>`).join('')
+
+  const sectionOptions = (selected: string | null) =>
+    `<option value="">（未設定）</option>` +
+    SECTION_OPTIONS.map(s => `<option value="${s}" ${selected === s ? 'selected' : ''}>${s}</option>`).join('')
+
+  // 課ごとの色（バッジ用）
+  const sectionColor = (s: string | null): string => {
+    if (s === '1課') return 'bg-purple-100 text-purple-700 border-purple-300'
+    if (s === '2課') return 'bg-blue-100 text-blue-700 border-blue-300'
+    if (s === '3課') return 'bg-emerald-100 text-emerald-700 border-emerald-300'
+    return 'bg-gray-100 text-gray-500 border-gray-300'
+  }
 
   const content = `
     <div class="bg-white rounded-xl shadow-sm border border-gray-100">
@@ -884,12 +911,18 @@ admin.get('/mansions', async (c) => {
             <p class="text-xs text-gray-500 mt-1">💡 担当フロント・会計担当はプルダウンから変更するとその場で保存されます</p>
           ` : ''}
         </div>
-        <div class="flex items-center gap-3">
-          ${missingAccounting > 0 ? `
-            <span class="text-xs bg-amber-50 border border-amber-300 text-amber-800 px-2.5 py-1 rounded-full">⚠️ 会計担当未設定: ${missingAccounting}件</span>
+        <div class="flex items-center gap-2 flex-wrap">
+          ${missingSection > 0 ? `
+            <span class="text-xs bg-gray-50 border border-gray-300 text-gray-700 px-2.5 py-1 rounded-full">課 未設定: ${missingSection}件</span>
           ` : ''}
           ${missingFront > 0 ? `
             <span class="text-xs bg-blue-50 border border-blue-300 text-blue-800 px-2.5 py-1 rounded-full">ℹ️ フロント未設定: ${missingFront}件</span>
+          ` : ''}
+          ${missingSupervisor > 0 ? `
+            <span class="text-xs bg-indigo-50 border border-indigo-300 text-indigo-800 px-2.5 py-1 rounded-full">ℹ️ 上長 未設定: ${missingSupervisor}件</span>
+          ` : ''}
+          ${missingAccounting > 0 ? `
+            <span class="text-xs bg-amber-50 border border-amber-300 text-amber-800 px-2.5 py-1 rounded-full">⚠️ 会計担当未設定: ${missingAccounting}件</span>
           ` : ''}
           <a href="/admin/mansions/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition whitespace-nowrap">＋ マンション追加</a>
         </div>
@@ -907,22 +940,40 @@ admin.get('/mansions', async (c) => {
 
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead class="bg-gray-50">
+          <thead class="bg-slate-800 text-white">
             <tr>
-              <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 w-16">番号</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">マンション名</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-56">担当フロント</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-56">管理組合 会計担当者</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-24">状態</th>
-              <th class="px-4 py-3 w-16"></th>
+              <th class="px-3 py-3 text-left text-xs font-semibold w-20">物件№</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold">管理組合名</th>
+              <th class="px-3 py-3 text-left text-xs font-semibold w-32">課</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold w-48">フロント担当</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold w-48">上長</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold w-48">会計担当</th>
+              <th class="px-3 py-3 text-left text-xs font-semibold w-20">状態</th>
+              <th class="px-3 py-3 w-12"></th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-50">
-            ${(mansions.results as any[]).length === 0 ? '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">マンションが登録されていません</td></tr>' :
-              (mansions.results as any[]).map(m => `
+          <tbody class="divide-y divide-gray-100">
+            ${(mansions.results as any[]).length === 0 ? '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">マンションが登録されていません</td></tr>' :
+              (mansions.results as any[]).map(m => {
+                const numStr = m.mansion_number != null ? String(m.mansion_number).padStart(3, '0') : '-'
+                return `
                 <tr class="hover:bg-gray-50" data-mansion-id="${m.id}">
-                  <td class="px-3 py-3 text-center font-mono text-xs text-gray-400 bg-gray-50">${m.mansion_number ?? '-'}</td>
-                  <td class="px-4 py-3 font-medium">${m.name}</td>
+                  <td class="px-3 py-2 text-center font-mono text-xs text-gray-500 bg-gray-50 border-r border-gray-100">${numStr}</td>
+                  <td class="px-4 py-2 font-medium text-gray-800">${m.name}</td>
+                  <td class="px-3 py-2">
+                    ${canEdit ? `
+                      <select
+                        onchange="saveMansionField(${m.id}, 'section', this.value, this)"
+                        class="w-full px-2 py-1 border rounded text-xs font-semibold ${sectionColor(m.section)} focus:ring-2 focus:ring-[#396999] outline-none">
+                        ${sectionOptions(m.section)}
+                      </select>
+                    ` : `
+                      ${m.section
+                        ? `<span class="inline-block text-xs font-semibold px-2 py-0.5 rounded-full border ${sectionColor(m.section)}">${m.section}</span>`
+                        : `<span class="text-xs text-gray-400">（未設定）</span>`
+                      }
+                    `}
+                  </td>
                   <td class="px-4 py-2">
                     ${canEdit ? `
                       <select
@@ -937,6 +988,17 @@ admin.get('/mansions', async (c) => {
                   <td class="px-4 py-2">
                     ${canEdit ? `
                       <select
+                        onchange="saveMansionField(${m.id}, 'supervisor_user_id', this.value, this)"
+                        class="w-full px-2 py-1.5 border rounded text-xs focus:ring-2 focus:ring-[#396999] outline-none ${!m.supervisor_user_id ? 'border-indigo-300 bg-indigo-50 text-indigo-900' : 'border-gray-200'}">
+                        ${supervisorOptions(m.supervisor_user_id)}
+                      </select>
+                    ` : `
+                      <span class="text-xs ${!m.supervisor_name ? 'text-indigo-600 font-semibold' : 'text-gray-700'}">${m.supervisor_name || '（未設定）'}</span>
+                    `}
+                  </td>
+                  <td class="px-4 py-2">
+                    ${canEdit ? `
+                      <select
                         onchange="saveMansionField(${m.id}, 'accounting_user_id', this.value, this)"
                         class="w-full px-2 py-1.5 border rounded text-xs focus:ring-2 focus:ring-[#396999] outline-none ${!m.accounting_user_id ? 'border-amber-400 bg-amber-50 text-amber-900 font-semibold' : 'border-gray-200'}">
                         ${accountingOptions(m.accounting_user_id)}
@@ -945,17 +1007,16 @@ admin.get('/mansions', async (c) => {
                       <span class="text-xs ${!m.accounting_name ? 'text-amber-700 font-semibold' : 'text-gray-700'}">${m.accounting_name || '⚠️ 未設定'}</span>
                     `}
                   </td>
-                  <td class="px-4 py-3">
-                    <form method="POST" action="/admin/mansions/${m.id}/toggle" class="flex items-center gap-2">
-                      <button type="submit" class="relative inline-flex items-center w-11 h-6 rounded-full transition-colors focus:outline-none ${m.is_active ? 'bg-green-500' : 'bg-gray-300'}">
-                        <span class="inline-block w-4 h-4 bg-white rounded-full shadow transition-transform ${m.is_active ? 'translate-x-6' : 'translate-x-1'}"></span>
+                  <td class="px-3 py-2">
+                    <form method="POST" action="/admin/mansions/${m.id}/toggle" class="flex items-center gap-1.5">
+                      <button type="submit" class="relative inline-flex items-center w-9 h-5 rounded-full transition-colors focus:outline-none ${m.is_active ? 'bg-green-500' : 'bg-gray-300'}">
+                        <span class="inline-block w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${m.is_active ? 'translate-x-5' : 'translate-x-0.5'}"></span>
                       </button>
-                      <span class="text-xs ${m.is_active ? 'text-green-600 font-medium' : 'text-gray-400'}">${m.is_active ? 'ON' : 'OFF'}</span>
                     </form>
                   </td>
-                  <td class="px-4 py-3"><a href="/admin/mansions/${m.id}/edit" class="text-[#396999] hover:underline text-xs">詳細</a></td>
+                  <td class="px-3 py-2 text-center"><a href="/admin/mansions/${m.id}/edit" class="text-[#396999] hover:underline text-xs">詳細</a></td>
                 </tr>
-              `).join('')
+              `}).join('')
             }
           </tbody>
         </table>
@@ -1022,6 +1083,14 @@ admin.get('/mansions', async (c) => {
               selectEl.classList.add('border-blue-300', 'bg-blue-50', 'text-blue-900')
               selectEl.classList.remove('border-gray-200')
             }
+          } else if (field === 'supervisor_user_id') {
+            if (value) {
+              selectEl.classList.remove('border-indigo-300', 'bg-indigo-50', 'text-indigo-900')
+              selectEl.classList.add('border-gray-200')
+            } else {
+              selectEl.classList.add('border-indigo-300', 'bg-indigo-50', 'text-indigo-900')
+              selectEl.classList.remove('border-gray-200')
+            }
           } else if (field === 'accounting_user_id') {
             if (value) {
               selectEl.classList.remove('border-amber-400', 'bg-amber-50', 'text-amber-900', 'font-semibold')
@@ -1030,6 +1099,23 @@ admin.get('/mansions', async (c) => {
               selectEl.classList.add('border-amber-400', 'bg-amber-50', 'text-amber-900', 'font-semibold')
               selectEl.classList.remove('border-gray-200')
             }
+          } else if (field === 'section') {
+            // 課の色をリセット後、新しい値に応じて再適用
+            const sectionColorMap = {
+              '1課': ['bg-purple-100', 'text-purple-700', 'border-purple-300'],
+              '2課': ['bg-blue-100', 'text-blue-700', 'border-blue-300'],
+              '3課': ['bg-emerald-100', 'text-emerald-700', 'border-emerald-300'],
+            }
+            // 全部のカラークラスを外す
+            const allColorClasses = [
+              'bg-purple-100','text-purple-700','border-purple-300',
+              'bg-blue-100','text-blue-700','border-blue-300',
+              'bg-emerald-100','text-emerald-700','border-emerald-300',
+              'bg-gray-100','text-gray-500','border-gray-300',
+            ]
+            allColorClasses.forEach(cls => selectEl.classList.remove(cls))
+            const colors = sectionColorMap[value] || ['bg-gray-100', 'text-gray-500', 'border-gray-300']
+            colors.forEach(cls => selectEl.classList.add(cls))
           }
         } catch (e) {
           showToast('ng', '通信エラー: ' + (e.message || e))
@@ -1057,9 +1143,18 @@ admin.post('/mansions', async (c) => {
   const db = c.env.DB
   const body = await c.req.parseBody() as any
   const mansionNumber = body.mansion_number ? parseInt(body.mansion_number) : null
+  const SECTION_OPTIONS = ['1課', '2課', '3課']
+  const section = body.section && SECTION_OPTIONS.includes(body.section) ? body.section : null
   await db.prepare(
-    'INSERT INTO mansions (name, mansion_number, front_user_id, accounting_user_id) VALUES (?, ?, ?, ?)'
-  ).bind(body.name, mansionNumber, body.front_user_id || null, body.accounting_user_id || null).run()
+    'INSERT INTO mansions (name, mansion_number, section, front_user_id, supervisor_user_id, accounting_user_id) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(
+    body.name,
+    mansionNumber,
+    section,
+    body.front_user_id || null,
+    body.supervisor_user_id || null,
+    body.accounting_user_id || null
+  ).run()
   return c.redirect('/admin/mansions')
 })
 
@@ -1089,9 +1184,20 @@ admin.post('/mansions/:id', async (c) => {
   const id = c.req.param('id')
   const body = await c.req.parseBody() as any
   const mansionNumber = body.mansion_number ? parseInt(body.mansion_number) : null
+  const SECTION_OPTIONS = ['1課', '2課', '3課']
+  const section = body.section && SECTION_OPTIONS.includes(body.section) ? body.section : null
   await db.prepare(
-    'UPDATE mansions SET name=?, mansion_number=?, front_user_id=?, accounting_user_id=?, is_active=?, updated_at=datetime("now") WHERE id=?'
-  ).bind(body.name, mansionNumber, body.front_user_id || null, body.accounting_user_id || null, body.is_active ? 1 : 0, id).run()
+    'UPDATE mansions SET name=?, mansion_number=?, section=?, front_user_id=?, supervisor_user_id=?, accounting_user_id=?, is_active=?, updated_at=datetime("now") WHERE id=?'
+  ).bind(
+    body.name,
+    mansionNumber,
+    section,
+    body.front_user_id || null,
+    body.supervisor_user_id || null,
+    body.accounting_user_id || null,
+    body.is_active ? 1 : 0,
+    id
+  ).run()
   return c.redirect('/admin/mansions')
 })
 
@@ -1115,22 +1221,44 @@ admin.post('/mansions/:id/inline-update', async (c) => {
   }
   const field = payload?.field
   const rawValue = payload?.value
-  const value = rawValue === '' || rawValue === undefined || rawValue === null ? null : parseInt(String(rawValue))
-
-  // 更新可能フィールドをホワイトリストで制限
-  const allowedFields: Record<string, { role: string[]; label: string }> = {
-    front_user_id:      { role: ['front', 'front_supervisor', 'manager', 'operations', 'admin'], label: '担当フロント' },
-    accounting_user_id: { role: ['accounting', 'honsha', 'admin'],                                label: '管理組合 会計担当者' },
-  }
-  const meta = allowedFields[field]
-  if (!meta) {
-    return c.json({ success: false, error: '更新できない項目です' }, 400)
-  }
 
   // 対象マンション存在チェック
   const mansion = await db.prepare('SELECT id, name FROM mansions WHERE id = ?').bind(id).first() as any
   if (!mansion) {
     return c.json({ success: false, error: 'マンションが見つかりません' }, 404)
+  }
+
+  // === section フィールド (文字列 enum) ===
+  if (field === 'section') {
+    const SECTION_OPTIONS = ['1課', '2課', '3課']
+    const strValue = rawValue === '' || rawValue === undefined || rawValue === null
+      ? null
+      : String(rawValue).trim()
+    if (strValue !== null && !SECTION_OPTIONS.includes(strValue)) {
+      return c.json({ success: false, error: `課は「1課」「2課」「3課」のいずれかを指定してください` }, 400)
+    }
+    await db.prepare(`UPDATE mansions SET section = ?, updated_at = datetime('now') WHERE id = ?`)
+      .bind(strValue, id).run()
+    return c.json({
+      success: true,
+      message: `${mansion.name} の課を「${strValue || '（未設定）'}」に更新しました`,
+      field,
+      value: strValue,
+    })
+  }
+
+  // === ユーザーID系フィールド ===
+  const value = rawValue === '' || rawValue === undefined || rawValue === null ? null : parseInt(String(rawValue))
+
+  // 更新可能フィールドをホワイトリストで制限
+  const allowedFields: Record<string, { role: string[]; label: string }> = {
+    front_user_id:      { role: ['front', 'front_supervisor', 'manager', 'operations', 'admin'], label: 'フロント担当' },
+    supervisor_user_id: { role: ['front_supervisor', 'manager', 'operations', 'admin'],           label: '上長' },
+    accounting_user_id: { role: ['accounting', 'honsha', 'admin'],                                label: '管理組合 会計担当者' },
+  }
+  const meta = allowedFields[field]
+  if (!meta) {
+    return c.json({ success: false, error: '更新できない項目です' }, 400)
   }
 
   // ユーザー存在＆ロール整合性チェック（未設定=nullは許可）
@@ -1164,8 +1292,10 @@ admin.post('/mansions/:id/inline-update', async (c) => {
 
 function mansionForm(mansion: any, users: any[]): string {
   const isEdit = !!mansion
-  const fronts = users.filter(u => ['front', 'manager', 'operations', 'admin'].includes(u.role))
+  const fronts = users.filter(u => ['front', 'front_supervisor', 'manager', 'operations', 'admin'].includes(u.role))
+  const supervisors = users.filter(u => ['front_supervisor', 'manager', 'operations', 'admin'].includes(u.role))
   const accountings = users.filter(u => ['accounting', 'honsha', 'admin'].includes(u.role))
+  const SECTION_OPTIONS = ['1課', '2課', '3課']
 
   return `
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-xl">
@@ -1173,21 +1303,35 @@ function mansionForm(mansion: any, users: any[]): string {
         <div class="space-y-4">
           <div class="grid grid-cols-3 gap-3">
             <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">管理組合番号</label>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">物件№</label>
               <input type="number" name="mansion_number" value="${mansion?.mansion_number ?? ''}" placeholder="例: 1"
                 class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
             </div>
             <div class="col-span-2">
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">マンション名 <span class="text-red-500">*</span></label>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">管理組合名 <span class="text-red-500">*</span></label>
               <input type="text" name="name" value="${mansion?.name || ''}" required
                 class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
             </div>
           </div>
           <div>
-            <label class="block text-sm font-semibold text-gray-700 mb-1.5">担当フロント</label>
+            <label class="block text-sm font-semibold text-gray-700 mb-1.5">課</label>
+            <select name="section" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+              <option value="">選択してください</option>
+              ${SECTION_OPTIONS.map(s => `<option value="${s}" ${mansion?.section === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1.5">フロント担当</label>
             <select name="front_user_id" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
               <option value="">選択してください</option>
               ${fronts.map(u => `<option value="${u.id}" ${mansion?.front_user_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1.5">上長</label>
+            <select name="supervisor_user_id" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+              <option value="">選択してください</option>
+              ${supervisors.map(u => `<option value="${u.id}" ${mansion?.supervisor_user_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
             </select>
           </div>
           <div>
