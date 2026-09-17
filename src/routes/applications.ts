@@ -172,7 +172,18 @@ applications.get('/', async (c) => {
                 const motoukeBbadge = app.original_application_id ? '<span class="ml-1 bg-emerald-100 text-emerald-700 text-xs px-1.5 rounded" title="元請セット申請B（後続）">🔗B</span>' : ''
                 const resubmitBadge = app.resubmit_count > 0 ? `<span class="ml-1 bg-purple-100 text-purple-600 text-xs px-1.5 rounded">再提出</span>` : ''
                 const testBadge = app.is_test ? '<span class="ml-1 bg-yellow-100 text-yellow-700 text-xs px-1.5 rounded font-semibold" title="テスト申請">🧪TEST</span>' : ''
-                const rowClass = app.is_test ? 'hover:bg-yellow-50 bg-yellow-50/40' : 'hover:bg-gray-50'
+                const rowClass = app.is_test ? 'hover:bg-yellow-50 bg-yellow-50/40'
+                  : app.status === 'returned' && app.applicant_id === user.uid ? 'hover:bg-orange-100 bg-orange-50/60'
+                  : app.status === 'rejected' && app.applicant_id === user.uid ? 'hover:bg-red-100 bg-red-50/60'
+                  : 'hover:bg-gray-50'
+                // ★案D: 申請者本人＆差し戻し/否決の場合、「編集して再申請」への直リンクを表示
+                const isMyReturned = app.status === 'returned' && app.applicant_id === user.uid
+                const isMyRejected = app.status === 'rejected' && app.applicant_id === user.uid
+                const resubmitLink = isMyReturned
+                  ? `<a href="/applications/new?resubmit_id=${app.id}" class="inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-2 py-1 rounded transition whitespace-nowrap" title="編集して再申請">✏ 再申請</a>`
+                  : isMyRejected
+                  ? `<a href="/applications/new?resubmit_id=${app.id}" class="inline-flex items-center gap-1 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold px-2 py-1 rounded transition whitespace-nowrap" title="編集して再提出">✏ 再提出</a>`
+                  : ''
                 return `
                 <tr class="${rowClass}">
                   <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${testBadge}${resubmitBadge}${motoukeAbadge}${motoukeBbadge}</td>
@@ -182,7 +193,12 @@ applications.get('/', async (c) => {
                   <td class="px-4 py-3 text-gray-700">${Number(app.budget_amount).toLocaleString()}円</td>
                   <td class="px-4 py-3">${statusBadge(app.status)}</td>
                   <td class="px-4 py-3 text-gray-400 text-xs">${app.created_at?.substring(0,10)}</td>
-                  <td class="px-4 py-3"><a href="/applications/${app.id}" class="text-[#396999] hover:underline text-xs">詳細</a></td>
+                  <td class="px-4 py-3">
+                    <div class="flex items-center gap-2 justify-end">
+                      ${resubmitLink}
+                      <a href="/applications/${app.id}" class="text-[#396999] hover:underline text-xs whitespace-nowrap">詳細</a>
+                    </div>
+                  </td>
                 </tr>
                 `
               }).join('')
@@ -1823,6 +1839,43 @@ applications.get('/:id', async (c) => {
   const content = `
     <div class="space-y-6 max-w-3xl">
       ${motoukeFlash}
+
+      <!-- ★案A: 差し戻し中 or 否決 の申請者向け目立つ通知バー（ページ最上部） -->
+      ${isApplicant && isReturned ? `
+      <div class="bg-gradient-to-r from-orange-100 to-orange-50 border-2 border-orange-400 rounded-xl p-5 shadow-md">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+          <div class="flex items-start gap-3 flex-1 min-w-0">
+            <span class="text-3xl leading-none">↩</span>
+            <div class="min-w-0">
+              <p class="text-base font-bold text-orange-900">この申請は差し戻されました</p>
+              <p class="text-xs text-orange-700 mt-0.5">内容（金額・請求書・添付・備考など）を修正して再申請してください。</p>
+            </div>
+          </div>
+          <a href="/applications/new?resubmit_id=${id}"
+            class="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-3 rounded-lg shadow transition text-sm whitespace-nowrap">
+            ✏ 編集して再申請する →
+          </a>
+        </div>
+      </div>
+      ` : ''}
+      ${isApplicant && isRejected ? `
+      <div class="bg-gradient-to-r from-red-100 to-red-50 border-2 border-red-400 rounded-xl p-5 shadow-md">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+          <div class="flex items-start gap-3 flex-1 min-w-0">
+            <span class="text-3xl leading-none">❌</span>
+            <div class="min-w-0">
+              <p class="text-base font-bold text-red-900">この申請は否決されました</p>
+              <p class="text-xs text-red-700 mt-0.5">内容を確認・修正して再提出できます。</p>
+            </div>
+          </div>
+          <a href="/applications/new?resubmit_id=${id}"
+            class="inline-flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white font-bold px-6 py-3 rounded-lg shadow transition text-sm whitespace-nowrap">
+            ✏ 編集して再提出する →
+          </a>
+        </div>
+      </div>
+      ` : ''}
+
       <!-- ヘッダー -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div class="flex items-start justify-between mb-4">
@@ -1944,6 +1997,15 @@ applications.get('/:id', async (c) => {
           <p class="text-xs font-medium text-purple-600 mb-1">再申請理由・修正内容</p>
           <p class="text-sm text-purple-900 bg-white rounded-lg p-3 border border-purple-200">${app.reapply_reason}</p>
         </div>` : ''}
+        ${isApplicant && isReturned ? `
+        <!-- ★案B: 差し戻し理由ボックス内の再申請ボタン（文脈上の自然な導線） -->
+        <div class="pt-2 border-t border-orange-200">
+          <a href="/applications/new?resubmit_id=${id}"
+            class="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-5 py-2.5 rounded-lg transition text-sm">
+            ✏ この理由に対応して編集・再申請する →
+          </a>
+        </div>
+        ` : ''}
       </div>` : ''}
 
       <!-- 回覧フロー タイムライン -->
@@ -2030,32 +2092,9 @@ applications.get('/:id', async (c) => {
       </div>
       ` : ''}
 
-      <!-- 差し戻し後の再申請（returned ステータス） -->
-      ${isApplicant && isReturned ? `
-      <div class="bg-orange-50 border border-orange-300 rounded-xl p-6">
-        <h3 class="font-semibold text-orange-800 mb-2">↩ 差し戻し – 再申請が必要です</h3>
-        <p class="text-sm text-orange-700 mb-4">
-          「編集して再申請する」ボタンから、内容（金額・請求書・添付・備考など）を修正のうえ、再申請理由を入力して再申請してください。<br>
-          <span class="text-xs text-orange-600">※添付ファイルは元申請から自動引き継ぎされます。差し替えたい場合のみ新しいファイルを選択してください。</span>
-        </p>
-        <a href="/applications/new?resubmit_id=${id}"
-          class="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-8 py-2.5 rounded-lg transition text-sm">
-          ✏ 編集して再申請する →
-        </a>
-      </div>
-      ` : ''}
+      <!-- 差し戻し・否決後の再申請ボタンは、ページ上部の通知バー（案A）と
+           差し戻し理由ボックス内のボタン（案B）に統合したため、ここでは非表示。 -->
 
-      <!-- 否決後の再提出（rejected ステータス） -->
-      ${isApplicant && isRejected ? `
-      <div class="bg-red-50 border border-red-200 rounded-xl p-6">
-        <h3 class="font-semibold text-red-800 mb-2">❌ 否決</h3>
-        <p class="text-sm text-red-600 mb-4">この申請は否決されました。内容を確認・修正のうえ、再提出できます。</p>
-        <a href="/applications/new?resubmit_id=${id}"
-          class="inline-flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white font-semibold px-6 py-2 rounded-lg transition text-sm">
-          ✏ 編集して再提出する →
-        </a>
-      </div>
-      ` : ''}
 
       <div class="flex gap-3">
         <a href="/applications" class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1">
