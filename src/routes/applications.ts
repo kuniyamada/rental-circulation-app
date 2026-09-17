@@ -2842,6 +2842,29 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
         </div>
       </div>
 
+      <!-- 注意書き + 実行ボタン（申請内容の上に配置） -->
+      <div class="bg-blue-50 border-2 border-blue-200 rounded-xl p-5">
+        <p class="text-sm text-blue-900 mb-4">
+          ⚠️ <strong>管理組合宛の請求書の内容を前の画面でご確認</strong>いただけましたでしょうか？<br>
+          下のボタンを押すと、この請求書が<strong>上長 → 業務管理課 → マンション会計課</strong>の順で回覧されます。
+        </p>
+        <form method="POST" action="/applications/${id}/motouke-b/confirm" id="motoukeBForm">
+          <div class="flex gap-3 flex-wrap">
+            <button type="submit" id="startBtn"
+              class="flex-1 min-w-[200px] bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3 rounded-lg transition text-base shadow-md flex items-center justify-center gap-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              承認・回覧開始 →
+            </button>
+            <a href="/applications/${id}"
+              class="px-5 py-3 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition flex items-center justify-center">
+              ← 前の画面に戻ってPDFを再確認
+            </a>
+          </div>
+        </form>
+      </div>
+
       <!-- 申請内容 -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div class="flex items-center gap-2 mb-4">
@@ -2911,30 +2934,9 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
         補足:
           - PDF取得ロジック (kumiaiAtt fetch) は上部で残しており
             未アップロード時のエラー画面表示に引き続き使用されます
+        【移動】注意書き + 実行ボタンは「申請内容」ブロックの上に移動しました
+          （申請者がスクロールせずに承認・回覧開始ボタンに到達できるよう改善）
       -->
-
-      <!-- 注意書き + 実行ボタン -->
-      <div class="bg-blue-50 border-2 border-blue-200 rounded-xl p-5">
-        <p class="text-sm text-blue-900 mb-4">
-          ⚠️ <strong>管理組合宛の請求書の内容を前の画面でご確認</strong>いただけましたでしょうか？<br>
-          下のボタンを押すと、この請求書が<strong>上長 → 業務管理課 → マンション会計課</strong>の順で回覧されます。
-        </p>
-        <form method="POST" action="/applications/${id}/motouke-b/confirm" id="motoukeBForm">
-          <div class="flex gap-3 flex-wrap">
-            <button type="submit" id="startBtn"
-              class="flex-1 min-w-[200px] bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3 rounded-lg transition text-base shadow-md flex items-center justify-center gap-2">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-              </svg>
-              承認・回覧開始 →
-            </button>
-            <a href="/applications/${id}"
-              class="px-5 py-3 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition flex items-center justify-center">
-              ← 前の画面に戻ってPDFを再確認
-            </a>
-          </div>
-        </form>
-      </div>
     </div>
 
     <script>
