@@ -113,6 +113,10 @@ applications.get('/', async (c) => {
 
   const apps = await db.prepare(sql).bind(...params).all()
 
+  // 保留中案件が存在するかを確認（存在する場合のみ、絞り込みプルダウンに「保留中」を表示）
+  const holdCountRow = await db.prepare("SELECT COUNT(*) as c FROM applications WHERE status = 'on_hold'").first() as any
+  const hasHoldApps = (holdCountRow?.c || 0) > 0
+
   const content = `
     <!-- 検索フォーム -->
     <form method="GET" action="/applications" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
@@ -124,7 +128,7 @@ applications.get('/', async (c) => {
           <option value="circulating" ${status==='circulating'?'selected':''}>回覧中</option>
           <option value="completed" ${status==='completed'?'selected':''}>完了</option>
           <option value="rejected" ${status==='rejected'?'selected':''}>差し戻し</option>
-          <option value="on_hold" ${status==='on_hold'?'selected':''}>保留中</option>
+          ${(hasHoldApps || status === 'on_hold') ? `<option value="on_hold" ${status==='on_hold'?'selected':''}>保留中</option>` : ''}
           <option value="draft" ${status==='draft'?'selected':''}>下書き</option>
         </select>
         <button type="submit" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition">検索</button>
@@ -1860,10 +1864,14 @@ applications.get('/:id/review/:stepId', async (c) => {
               class="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 rounded-lg transition text-sm flex items-center justify-center gap-2">
               ↩ 差し戻し
             </button>
+            <!--
+              保留ボタン: 業務判断により非表示化中（案B）。復活させる場合は以下のコメントを解除してください。
+              関連機能（サーバー側の保留処理、保留回答フォーム、on_holdステータス）は残してあります。
             <button type="button" onclick="openModal('hold')"
               class="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-3 rounded-lg transition text-sm flex items-center justify-center gap-2">
               ⏸ 保留
             </button>
+            -->
           </div>
         </form>
       </div>
