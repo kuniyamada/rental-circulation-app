@@ -98,7 +98,8 @@ applications.get('/', async (c) => {
   const from = c.req.query('from') || ''
   const to = c.req.query('to') || ''
 
-  let sql = `SELECT a.*, m.name as mansion_name, u.name as applicant_name
+  let sql = `SELECT a.*, m.name as mansion_name, u.name as applicant_name,
+      (SELECT COUNT(*) FROM applications a2 WHERE a2.original_application_id = a.id) as successor_count
     FROM applications a
     LEFT JOIN mansions m ON a.mansion_id = m.id
     LEFT JOIN users u ON a.applicant_id = u.id
@@ -172,17 +173,21 @@ applications.get('/', async (c) => {
                 const motoukeBbadge = app.original_application_id ? '<span class="ml-1 bg-emerald-100 text-emerald-700 text-xs px-1.5 rounded" title="元請セット申請B（後続）">🔗B</span>' : ''
                 const resubmitBadge = app.resubmit_count > 0 ? `<span class="ml-1 bg-purple-100 text-purple-600 text-xs px-1.5 rounded">再提出</span>` : ''
                 const testBadge = app.is_test ? '<span class="ml-1 bg-yellow-100 text-yellow-700 text-xs px-1.5 rounded font-semibold" title="テスト申請">🧪TEST</span>' : ''
+                // ★案D: 申請者本人＆差し戻し/否決＆後続未作成の場合、「編集して再申請」への直リンクを表示
+                // 後続が既に作成されている場合はボタン非表示（背景も通常色に）
+                const hasSuccessor = (app.successor_count || 0) > 0
+                const isMyReturned = app.status === 'returned' && app.applicant_id === user.uid && !hasSuccessor
+                const isMyRejected = app.status === 'rejected' && app.applicant_id === user.uid && !hasSuccessor
                 const rowClass = app.is_test ? 'hover:bg-yellow-50 bg-yellow-50/40'
-                  : app.status === 'returned' && app.applicant_id === user.uid ? 'hover:bg-orange-100 bg-orange-50/60'
-                  : app.status === 'rejected' && app.applicant_id === user.uid ? 'hover:bg-red-100 bg-red-50/60'
+                  : isMyReturned ? 'hover:bg-orange-100 bg-orange-50/60'
+                  : isMyRejected ? 'hover:bg-red-100 bg-red-50/60'
                   : 'hover:bg-gray-50'
-                // ★案D: 申請者本人＆差し戻し/否決の場合、「編集して再申請」への直リンクを表示
-                const isMyReturned = app.status === 'returned' && app.applicant_id === user.uid
-                const isMyRejected = app.status === 'rejected' && app.applicant_id === user.uid
                 const resubmitLink = isMyReturned
                   ? `<a href="/applications/new?resubmit_id=${app.id}" class="inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-2 py-1 rounded transition whitespace-nowrap" title="編集して再申請">✏ 再申請</a>`
                   : isMyRejected
                   ? `<a href="/applications/new?resubmit_id=${app.id}" class="inline-flex items-center gap-1 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold px-2 py-1 rounded transition whitespace-nowrap" title="編集して再提出">✏ 再提出</a>`
+                  : hasSuccessor && app.applicant_id === user.uid && (app.status === 'returned' || app.status === 'rejected')
+                  ? `<span class="inline-flex items-center gap-1 bg-gray-100 text-gray-500 text-xs font-semibold px-2 py-1 rounded whitespace-nowrap" title="この申請は既に再申請済です">✅ 再申請済</span>`
                   : ''
                 return `
                 <tr class="${rowClass}">
@@ -1823,6 +1828,16 @@ applications.get('/:id', async (c) => {
     `).bind(app.original_application_id).first() as any
   }
 
+  // === 差し戻し・否決からの再申請の後続情報を取得 ===
+  // この申請が差し戻し/否決状態で、既に後続の再申請が作成されているかを判定
+  let resubmitSuccessor: any = null
+  if (isReturned || isRejected) {
+    resubmitSuccessor = await db.prepare(`
+      SELECT id, application_number, status, created_at FROM applications
+      WHERE original_application_id = ? ORDER BY id DESC LIMIT 1
+    `).bind(id).first() as any
+  }
+
   // クエリパラメータからのフラッシュメッセージ
   const flashMotouke = c.req.query('motouke_remind') || c.req.query('motouke_dup')
   let motoukeFlash = ''
@@ -1841,7 +1856,8 @@ applications.get('/:id', async (c) => {
       ${motoukeFlash}
 
       <!-- ★案A: 差し戻し中 or 否決 の申請者向け目立つ通知バー（ページ最上部） -->
-      ${isApplicant && isReturned ? `
+      <!-- 後続の再申請が既に作成されている場合は「再申請済」の案内に切り替え -->
+      ${isApplicant && isReturned && !resubmitSuccessor ? `
       <div class="bg-gradient-to-r from-orange-100 to-orange-50 border-2 border-orange-400 rounded-xl p-5 shadow-md">
         <div class="flex items-center justify-between gap-4 flex-wrap">
           <div class="flex items-start gap-3 flex-1 min-w-0">
@@ -1858,7 +1874,7 @@ applications.get('/:id', async (c) => {
         </div>
       </div>
       ` : ''}
-      ${isApplicant && isRejected ? `
+      ${isApplicant && isRejected && !resubmitSuccessor ? `
       <div class="bg-gradient-to-r from-red-100 to-red-50 border-2 border-red-400 rounded-xl p-5 shadow-md">
         <div class="flex items-center justify-between gap-4 flex-wrap">
           <div class="flex items-start gap-3 flex-1 min-w-0">
@@ -1871,6 +1887,28 @@ applications.get('/:id', async (c) => {
           <a href="/applications/new?resubmit_id=${id}"
             class="inline-flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white font-bold px-6 py-3 rounded-lg shadow transition text-sm whitespace-nowrap">
             ✏ 編集して再提出する →
+          </a>
+        </div>
+      </div>
+      ` : ''}
+      <!-- 再申請済の案内（後続申請へのリンク） -->
+      ${(isReturned || isRejected) && resubmitSuccessor ? `
+      <div class="bg-gradient-to-r from-emerald-50 to-white border-2 border-emerald-300 rounded-xl p-5 shadow-sm">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+          <div class="flex items-start gap-3 flex-1 min-w-0">
+            <span class="text-3xl leading-none">✅</span>
+            <div class="min-w-0">
+              <p class="text-base font-bold text-emerald-800">この申請は${isReturned ? '再申請済' : '再提出済'}です</p>
+              <p class="text-xs text-emerald-700 mt-0.5">
+                後続申請: <a href="/applications/${resubmitSuccessor.id}" class="font-mono underline hover:text-emerald-900">${resubmitSuccessor.application_number}</a>
+                <span class="ml-2 text-emerald-600">(${resubmitSuccessor.status === 'circulating' ? '回覧中' : resubmitSuccessor.status === 'completed' ? '完了' : resubmitSuccessor.status === 'returned' ? '差し戻し' : resubmitSuccessor.status === 'rejected' ? '否決' : resubmitSuccessor.status})</span>
+                <span class="ml-2 text-gray-400">${resubmitSuccessor.created_at?.substring(0,16)}</span>
+              </p>
+            </div>
+          </div>
+          <a href="/applications/${resubmitSuccessor.id}"
+            class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2.5 rounded-lg shadow-sm transition text-sm whitespace-nowrap">
+            後続申請を開く →
           </a>
         </div>
       </div>
@@ -1997,13 +2035,22 @@ applications.get('/:id', async (c) => {
           <p class="text-xs font-medium text-purple-600 mb-1">再申請理由・修正内容</p>
           <p class="text-sm text-purple-900 bg-white rounded-lg p-3 border border-purple-200">${app.reapply_reason}</p>
         </div>` : ''}
-        ${isApplicant && isReturned ? `
+        ${isApplicant && isReturned && !resubmitSuccessor ? `
         <!-- ★案B: 差し戻し理由ボックス内の再申請ボタン（文脈上の自然な導線） -->
         <div class="pt-2 border-t border-orange-200">
           <a href="/applications/new?resubmit_id=${id}"
             class="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-5 py-2.5 rounded-lg transition text-sm">
             ✏ この理由に対応して編集・再申請する →
           </a>
+        </div>
+        ` : ''}
+        ${isReturned && resubmitSuccessor ? `
+        <div class="pt-2 border-t border-orange-200">
+          <p class="text-xs text-emerald-700">
+            ✅ この差し戻しには既に対応済みです。後続申請
+            <a href="/applications/${resubmitSuccessor.id}" class="font-mono underline hover:text-emerald-900">${resubmitSuccessor.application_number}</a>
+            をご確認ください。
+          </p>
         </div>
         ` : ''}
       </div>` : ''}

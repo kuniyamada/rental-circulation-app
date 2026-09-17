@@ -50,11 +50,15 @@ app.get('/', async (c) => {
     ORDER BY cs.created_at DESC
   `).bind(user.uid).all()
 
-  // 差し戻し案件（自分が申請者で status = 'returned'）
+  // 差し戻し案件（自分が申請者で status = 'returned' かつ 後続の再申請がまだ作成されていないもの）
+  // NOT EXISTS で「この申請を original_application_id として持つ後続申請」の有無を判定
   const returnedApps = await db.prepare(`
     SELECT a.*, m.name as mansion_name
     FROM applications a LEFT JOIN mansions m ON a.mansion_id = m.id
     WHERE a.applicant_id = ? AND a.status = 'returned'
+      AND NOT EXISTS (
+        SELECT 1 FROM applications a2 WHERE a2.original_application_id = a.id
+      )
     ORDER BY a.updated_at DESC
   `).bind(user.uid).all()
 
