@@ -702,12 +702,17 @@ applications.get('/new', async (c) => {
             <p id="feeValidationMsg" class="hidden text-xs text-red-500 mt-1.5">⚠ 手数料（円）または手数料（％）のいずれかを入力してください</p>
           </div>
 
-          <!-- 添付ファイル（請求書）② -->
+          <!-- 添付ファイル（請求書）②〜⑥ -->
+          <!-- 「請求書②」欄は常時表示。委託内(ittaku)の場合のみ「+ 追加」ボタンで③〜⑥まで動的追加可能 -->
           <div class="border border-gray-200 rounded-lg p-4">
-            <h3 class="text-sm font-semibold text-gray-700 mb-3">添付ファイル（請求書）②</h3>
-            <div>
-              <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）②</label>
-              <div class="flex items-center gap-2">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-semibold text-gray-700">添付ファイル（請求書）② 〜 ⑥</h3>
+              <span id="invoiceExtraHint" class="hidden text-xs text-gray-400">最大5個まで追加できます</span>
+            </div>
+            <div id="invoiceExtraList" class="space-y-2">
+              <!-- 請求書② (初期表示) -->
+              <div class="flex items-center gap-2" data-invoice-slot="2">
+                <label class="text-xs text-gray-500 w-16 shrink-0">請求書②</label>
                 <input type="file" name="invoice2" accept=".pdf,.jpg,.jpeg,.png" id="invoice2Input"
                   onchange="handleFilePreview(this, 'invoice2Preview')"
                   class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
@@ -716,7 +721,13 @@ applications.get('/new', async (c) => {
                   👁 確認
                 </button>
               </div>
+              <!-- 請求書③〜⑥ はJSで動的に追加される（委託内のみ） -->
             </div>
+            <!-- 追加ボタン（td_type=ittaku かつ 未達5件のときのみ表示） -->
+            <button type="button" id="addInvoiceBtn" onclick="addInvoiceSlot()"
+              class="hidden mt-3 inline-flex items-center gap-1 px-3 py-1.5 border border-dashed border-[#396999] text-[#396999] text-xs font-semibold rounded-md hover:bg-[#EEF4FA]">
+              ＋ 請求書を追加
+            </button>
           </div>
 
           <!-- 送信先（承認者）プレビュー -->
@@ -992,7 +1003,85 @@ applications.get('/new', async (c) => {
       function toggleMotouke() {
         const val = document.querySelector('input[name="td_type"]:checked')?.value
         document.getElementById('motoukeFields').classList.toggle('hidden', val !== 'motouke')
+        // 委託内(ittaku)の時のみ「+ 追加」ボタンとヒントを表示
+        const addBtn = document.getElementById('addInvoiceBtn')
+        const hint = document.getElementById('invoiceExtraHint')
+        const isIttaku = val === 'ittaku'
+        if (addBtn) addBtn.classList.toggle('hidden', !isIttaku)
+        if (hint) hint.classList.toggle('hidden', !isIttaku)
+        // 委託内OFFになったら、動的追加された請求書③〜⑥を削除（データ混在防止）
+        if (!isIttaku) {
+          document.querySelectorAll('[data-invoice-slot]').forEach(function(el) {
+            const slot = parseInt(el.getAttribute('data-invoice-slot'))
+            if (slot >= 3) el.remove()
+          })
+        }
         calcProfit()
+      }
+
+      // 請求書スロットの動的追加（最大6=請求書②〜⑥の合計5枠）
+      function addInvoiceSlot() {
+        const list = document.getElementById('invoiceExtraList')
+        if (!list) return
+        // 現在のスロット数を数える
+        const existing = list.querySelectorAll('[data-invoice-slot]').length
+        // ②③④⑤⑥ = 5枠まで（既存はスロット2から始まる）
+        if (existing >= 5) return
+        const newSlot = existing + 2  // 2,3,4,5,6
+        const marks = ['②', '③', '④', '⑤', '⑥']
+        const mark = marks[newSlot - 2] || ('' + newSlot)
+        const wrap = document.createElement('div')
+        wrap.className = 'flex items-center gap-2'
+        wrap.setAttribute('data-invoice-slot', String(newSlot))
+        wrap.innerHTML =
+          '<label class="text-xs text-gray-500 w-16 shrink-0">請求書' + mark + '</label>' +
+          '<input type="file" name="invoice' + newSlot + '" accept=".pdf,.jpg,.jpeg,.png" id="invoice' + newSlot + 'Input" ' +
+            'onchange="handleFilePreview(this, \\'invoice' + newSlot + 'Preview\\')" ' +
+            'class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">' +
+          '<button type="button" id="invoice' + newSlot + 'Preview" onclick="openFilePreview(\\'invoice' + newSlot + 'Input\\')" ' +
+            'class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">' +
+            '👁 確認</button>' +
+          '<button type="button" onclick="removeInvoiceSlot(this)" ' +
+            'class="inline-flex items-center px-2 py-1.5 border border-red-300 text-red-500 text-xs rounded-md hover:bg-red-50" title="この欄を削除">' +
+            '×</button>'
+        list.appendChild(wrap)
+        // 追加後、5枠達したらボタン非表示
+        if (existing + 1 >= 5) {
+          document.getElementById('addInvoiceBtn').classList.add('hidden')
+        }
+      }
+
+      // 動的追加された請求書スロットを削除して番号を再採番
+      function removeInvoiceSlot(btn) {
+        const row = btn.closest('[data-invoice-slot]')
+        if (row) row.remove()
+        // 再採番: 残った③〜⑥のnameとidを詰め直す
+        const list = document.getElementById('invoiceExtraList')
+        const rows = list.querySelectorAll('[data-invoice-slot]')
+        const marks = ['②', '③', '④', '⑤', '⑥']
+        rows.forEach(function(r, idx) {
+          const slot = idx + 2  // 2,3,4,5,6
+          r.setAttribute('data-invoice-slot', String(slot))
+          const mark = marks[slot - 2] || ('' + slot)
+          const label = r.querySelector('label')
+          if (label) label.textContent = '請求書' + mark
+          const input = r.querySelector('input[type="file"]')
+          if (input) {
+            input.name = 'invoice' + slot
+            input.id = 'invoice' + slot + 'Input'
+            input.setAttribute('onchange', "handleFilePreview(this, 'invoice" + slot + "Preview')")
+          }
+          const previewBtn = r.querySelectorAll('button')[0]
+          if (previewBtn) {
+            previewBtn.id = 'invoice' + slot + 'Preview'
+            previewBtn.setAttribute('onclick', "openFilePreview('invoice" + slot + "Input')")
+          }
+        })
+        // 追加ボタンを再表示
+        const td = document.querySelector('input[name="td_type"]:checked')?.value
+        if (td === 'ittaku') {
+          document.getElementById('addInvoiceBtn').classList.remove('hidden')
+        }
       }
 
       function calcProfit() {
@@ -1178,7 +1267,8 @@ applications.post('/', async (c) => {
   const inboxAttachmentKey = body.inbox_attachment_key || null
   const inboxAttachmentName = body.inbox_attachment_name || null
 
-  for (const fileKey of ['invoice1', 'invoice2', 'other1', 'other2']) {
+  // 委託内時に動的追加された invoice3〜invoice6 も保存対象に含める（最大5枠 invoice2〜invoice6）
+  for (const fileKey of ['invoice1', 'invoice2', 'invoice3', 'invoice4', 'invoice5', 'invoice6', 'other1', 'other2']) {
     const file = body[fileKey] as File | undefined
     if (file && file.size > 0) {
       const ext = file.name.split('.').pop()
@@ -1540,7 +1630,7 @@ applications.get('/:id', async (c) => {
         <h3 class="font-semibold text-gray-800 mb-3">添付ファイル</h3>
         <div class="space-y-2">
           ${(attachments.results as any[]).map(att => {
-            const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', other1: '添付資料①', other2: '添付資料②', kumiai_invoice: '管理組合宛請求書' }
+            const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', invoice3: '請求書③', invoice4: '請求書④', invoice5: '請求書⑤', invoice6: '請求書⑥', other1: '添付資料①', other2: '添付資料②', kumiai_invoice: '管理組合宛請求書' }
             return `<div class="flex items-center gap-2">
               <span class="text-xs text-gray-400 w-16 shrink-0">${labels[att.file_type] || att.file_type}</span>
               <span class="text-sm text-gray-700 flex-1 truncate">${att.file_name}</span>
@@ -1775,7 +1865,7 @@ applications.get('/:id/review/:stepId', async (c) => {
             <p class="text-xs text-gray-400 mb-2">添付ファイル</p>
             <div class="flex flex-wrap gap-2">
               ${(attachments.results as any[]).filter((a: any) => a.file_type !== 'kumiai_invoice').map(att => {
-                const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', other1: '添付①', other2: '添付②' }
+                const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', invoice3: '請求書③', invoice4: '請求書④', invoice5: '請求書⑤', invoice6: '請求書⑥', other1: '添付①', other2: '添付②' }
                 return `<button type="button" onclick="openSavedFilePreview('/files/${att.id}', '${att.file_name.replace(/'/g, "\\'")}')"
                   class="inline-flex items-center gap-1 text-xs text-[#396999] bg-[#EEF4FA] hover:bg-[#D5E5F2] px-2 py-1 rounded">
                   👁 ${labels[att.file_type]}: ${att.file_name}
