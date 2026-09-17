@@ -2076,7 +2076,14 @@ applications.get('/:id', async (c) => {
       </div>
 
       <!-- 添付ファイル -->
-      ${(attachments.results as any[]).length > 0 ? `
+      ${(() => {
+        // 元請セット申請A の場合、管理組合宛請求書PDFは上部バナーで既に大きく表示済みのため
+        // 添付ファイル欄からは除外する（重複表示の解消）
+        const isMotoukeA = app.payment_target === 'td' && app.td_type === 'motouke' && !motoukeSourceA
+        const visibleAttachments = (attachments.results as any[]).filter((att: any) =>
+          isMotoukeA ? att.file_type !== 'kumiai_invoice' : true
+        )
+        return visibleAttachments.length > 0 ? `
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div class="flex items-center gap-2 mb-4">
           <svg class="w-5 h-5 text-[#396999]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2086,7 +2093,7 @@ applications.get('/:id', async (c) => {
           <span class="text-xs text-gray-500">（クリックで内容を確認）</span>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          ${(attachments.results as any[]).map(att => {
+          ${visibleAttachments.map(att => {
             const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', invoice3: '請求書③', invoice4: '請求書④', invoice5: '請求書⑤', invoice6: '請求書⑥', other1: '添付資料①', other2: '添付資料②', kumiai_invoice: '管理組合宛請求書' }
             const ext = (att.file_name.split('.').pop() || '').toLowerCase()
             const isPdf = ext === 'pdf'
@@ -2123,7 +2130,8 @@ applications.get('/:id', async (c) => {
           }).join('')}
         </div>
       </div>
-      ` : ''}
+      ` : ''
+      })()}
 
       <!-- 差し戻し情報（差し戻し中または差し戻し再申請の場合） -->
       ${(app.status === 'returned' || app.returned_reason) ? `
