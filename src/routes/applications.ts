@@ -97,6 +97,7 @@ applications.get('/', async (c) => {
   const status = c.req.query('status') || ''
   const from = c.req.query('from') || ''
   const to = c.req.query('to') || ''
+  const createdAppNumber = c.req.query('created') || ''  // 新規申請直後のトースト表示用
 
   let sql = `SELECT a.*, m.name as mansion_name, u.name as applicant_name,
       (SELECT COUNT(*) FROM applications a2 WHERE a2.original_application_id = a.id) as successor_count
@@ -118,7 +119,49 @@ applications.get('/', async (c) => {
   const holdCountRow = await db.prepare("SELECT COUNT(*) as c FROM applications WHERE status = 'on_hold'").first() as any
   const hasHoldApps = (holdCountRow?.c || 0) > 0
 
+  // 申請直後のトースト表示（HTMLエスケープ）
+  const safeCreatedNum = createdAppNumber.replace(/[<>&"']/g, (ch) =>
+    ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[ch] as string)
+  )
+
   const content = `
+    ${createdAppNumber ? `
+    <!-- 申請完了トースト（数秒後に自動で消える） -->
+    <div id="createdToast"
+      class="fixed top-20 left-1/2 -translate-x-1/2 z-[70] bg-white border-2 border-emerald-400 shadow-xl rounded-xl px-5 py-3 flex items-center gap-3 max-w-md w-[92%] sm:w-auto transition-opacity duration-500">
+      <div class="w-9 h-9 bg-emerald-500 rounded-full flex items-center justify-center flex-shrink-0">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+        </svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-bold text-gray-800">申請を送信しました</p>
+        <p class="text-xs text-gray-500 truncate">申請番号：${safeCreatedNum}（承認者への通知は数秒以内に送信されます）</p>
+      </div>
+      <button type="button" onclick="document.getElementById('createdToast')?.remove()"
+        class="text-gray-400 hover:text-gray-600 text-xl leading-none px-1">×</button>
+    </div>
+    <script>
+      // 5秒後にフェードアウト、5.5秒後にDOM削除 + URLからパラメータ除去
+      (function(){
+        setTimeout(function(){
+          const t = document.getElementById('createdToast')
+          if (t) t.style.opacity = '0'
+        }, 5000)
+        setTimeout(function(){
+          const t = document.getElementById('createdToast')
+          if (t) t.remove()
+          // クエリからcreatedを除去して履歴を綺麗に（リロードしても再度表示されない）
+          try {
+            const url = new URL(window.location.href)
+            url.searchParams.delete('created')
+            window.history.replaceState({}, '', url.toString())
+          } catch(e){}
+        }, 5500)
+      })()
+    </script>
+    ` : ''}
+
     <!-- 検索フォーム -->
     <form method="GET" action="/applications" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -2007,20 +2050,7 @@ applications.post('/', async (c) => {
     'SELECT cs.*, u.email, u.name FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.application_id = ? AND cs.step_number = 1'
   ).bind(appId).first() as any
 
-  if (firstStep) {
-    const appUrl = `${new URL(c.req.url).origin}/applications/${appId}`
-    await sendNotification(db, 'review_request', firstStep.reviewer_id, {
-      appNumber, title: body.title, applicantName: user.name, appUrl,
-      isTest: isTestFlag === 1
-    })
-    await db.prepare(
-      'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
-      (isTestFlag === 1 ? '[TEST] ' : '') + buildMailSubject('review_request', appNumber), 'sent'
-    ).run()
-  }
-
-  // inbox引き継ぎの場合、invoice_inboxのstatusをappliedに更新
+  // inbox引き継ぎの場合、invoice_inboxのstatusをappliedに更新（DB更新なのでawaitで確実に）
   const inboxIdFromBody = body.inbox_id ? parseInt(body.inbox_id) : null
   if (inboxIdFromBody) {
     const now = new Date().toISOString()
@@ -2029,7 +2059,43 @@ applications.post('/', async (c) => {
     ).bind('applied', appId, now, inboxIdFromBody, 'pending').run()
   }
 
-  return c.redirect(`/applications/${appId}`)
+  // === 承認者への通知はバックグラウンドで送信（外部API待ちで画面遷移が遅くならないようにするため）===
+  // waitUntil: レスポンスを返した後もWorkerの処理を継続実行させるCloudflare Workers API
+  if (firstStep) {
+    const appUrl = `${new URL(c.req.url).origin}/applications/${appId}`
+    const bgTask = (async () => {
+      try {
+        await sendNotification(db, 'review_request', firstStep.reviewer_id, {
+          appNumber, title: body.title, applicantName: user.name, appUrl,
+          isTest: isTestFlag === 1
+        })
+        await db.prepare(
+          'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
+          (isTestFlag === 1 ? '[TEST] ' : '') + buildMailSubject('review_request', appNumber), 'sent'
+        ).run()
+      } catch (e) {
+        console.error('[BG] 新規申請の通知送信エラー:', e)
+        try {
+          await db.prepare(
+            'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status, error_message) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
+            (isTestFlag === 1 ? '[TEST] ' : '') + buildMailSubject('review_request', appNumber), 'failed',
+            String((e as any)?.message || e).slice(0, 500)
+          ).run()
+        } catch {}
+      }
+    })()
+    // executionCtxが存在する場合はwaitUntilで登録（ローカル開発用にフォールバック）
+    try {
+      c.executionCtx.waitUntil(bgTask)
+    } catch {
+      // ローカルwrangler devなど executionCtx 未対応環境: 通常のPromiseとして流す（未await）
+    }
+  }
+
+  // 一覧画面へリダイレクト + 成功トースト用パラメータ付与
+  return c.redirect(`/applications?created=${encodeURIComponent(appNumber)}`)
 })
 
 // 回覧ステップ作成関数
