@@ -13,6 +13,9 @@ const app = new Hono<{ Bindings: Bindings }>()
 // 静的ファイル
 app.use('/static/*', serveStatic({ root: './' }))
 
+// ファビコン（/favicon.ico への自動リクエスト対応：SVGへリダイレクト）
+app.get('/favicon.ico', (c) => c.redirect('/static/favicon.svg', 301))
+
 // 認証ルート（/login, /logout, /change-password）
 app.route('/', auth)
 
@@ -227,6 +230,9 @@ app.get('/', async (c) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ダッシュボード - 請求書回覧システム</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.svg">
+  <meta name="theme-color" content="#396999">
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 min-h-screen">

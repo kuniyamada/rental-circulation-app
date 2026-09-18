@@ -18,6 +18,9 @@ export function layout(title: string, content: string, user: any): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} - 請求書回覧システム</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.svg">
+  <meta name="theme-color" content="#396999">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .sidebar-item { @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition cursor-pointer; }

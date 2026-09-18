@@ -104,6 +104,9 @@ function loginPage(error?: string | null) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ログイン - 請求書回覧システム</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.svg">
+  <meta name="theme-color" content="#396999">
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gradient-to-br from-[#EEF4FA] to-[#D5E5F2] min-h-screen flex items-center justify-center">
@@ -149,6 +152,9 @@ function changePasswordPage(error?: string) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>パスワード変更 - 請求書回覧システム</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.svg">
+  <meta name="theme-color" content="#396999">
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gradient-to-br from-[#EEF4FA] to-[#D5E5F2] min-h-screen flex items-center justify-center">
