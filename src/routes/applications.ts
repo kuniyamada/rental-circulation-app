@@ -845,28 +845,29 @@ applications.get('/new', async (c) => {
                 回覧・承認先（最終） <span class="text-red-500">*</span>
                 ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
               </label>
-              <!-- 役割選択 -->
-              <!-- 注意: 役割 → 支払先 の自動連携は撤廃済み (支払先 → 役割 の一方向連動に変更)
-                   支払先ラジオで管理組合/会社(TD) を選ぶと、役割が自動セットされる仕様 -->
-              <div class="flex gap-4">
-                <label class="flex items-center gap-2 cursor-pointer">
+              <!-- 役割選択（hidden化）
+                   支払先プルダウンから支払先を選ぶと、syncStep3FromPaymentTarget() が
+                   自動でこのラジオをチェックし、updateStep3Users() でプルダウン再構築する仕組み。
+                   ユーザーがこのラジオを直接触ることは無いため hidden にしている。
+                   （役割の内部状態管理と、updateStep3Users() の切り替えロジックはそのまま使うため
+                    DOMは残す）-->
+              <div class="hidden">
+                <label>
                   <input type="radio" name="reviewer_step3_role" value="accounting" required
-                    onchange="updateStep3Users(); applyMansionDefaultsFromInput(); updateReviewerPreview()"
-                    class="w-4 h-4 text-purple-600">
-                  <span class="text-sm">マンション会計課</span>
+                    onchange="updateStep3Users(); applyMansionDefaultsFromInput(); updateReviewerPreview()">
+                  マンション会計課
                 </label>
-                <label class="flex items-center gap-2 cursor-pointer">
+                <label>
                   <input type="radio" name="reviewer_step3_role" value="honsha"
-                    onchange="updateStep3Users(); applyMansionDefaultsFromInput(); updateReviewerPreview()"
-                    class="w-4 h-4 text-purple-600">
-                  <span class="text-sm">本社経理</span>
+                    onchange="updateStep3Users(); applyMansionDefaultsFromInput(); updateReviewerPreview()">
+                  本社経理
                 </label>
               </div>
               <!-- 担当者プルダウン -->
               <select name="reviewer_step3" id="step3UserSelect" required
                 onchange="updateReviewerPreview()"
                 class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
-                <option value="">先に役割を選択してください</option>
+                <option value="">先に支払先を選択してください</option>
               </select>
               <!-- マンション選択時、会計担当がマスタ未設定/候補外だと表示される警告（マンション会計課選択時のみ） -->
               <p id="step3MansionWarn" class="hidden mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5"></p>
@@ -1220,7 +1221,7 @@ applications.get('/new', async (c) => {
         const sel = document.getElementById('step3UserSelect')
         const users = role === 'accounting' ? ACCOUNTING_USERS : role === 'honsha' ? HONSHA_USERS : []
         sel.innerHTML = users.length === 0
-          ? '<option value="">先に役割を選択してください</option>'
+          ? '<option value="">先に支払先を選択してください</option>'
           : '<option value="">担当者を選択してください</option>' +
             users.map(u => '<option value="' + u.id + '">' + u.name + '</option>').join('')
         // 本社経理を選択した場合、デフォルトで山崎 修を自動選択
@@ -1788,7 +1789,7 @@ applications.get('/new', async (c) => {
         const step3Label = step3Role === 'honsha' ? '本社経理' : 'マンション会計課'
         reviewers.push({
           step: 3, label: step3Label,
-          name: (step3Select?.value && step3Name !== '先に役割を選択してください' && step3Name !== '担当者を選択してください') ? step3Name : '未選択',
+          name: (step3Select?.value && step3Name !== '先に支払先を選択してください' && step3Name !== '担当者を選択してください') ? step3Name : '未選択',
           unset: !step3Select?.value
         })
 
