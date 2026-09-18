@@ -874,16 +874,14 @@ applications.get('/new', async (c) => {
             </div>
           </div>
 
-          <!-- 送信先（承認者）プレビュー -->
-          <div id="reviewerPreview" class="border border-indigo-200 bg-indigo-50 rounded-lg p-4">
-            <div class="flex items-center gap-2 mb-3">
-              <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-              </svg>
-              <span class="text-sm font-semibold text-indigo-700">送信先（承認順）</span>
-            </div>
-            <div id="reviewerList" class="space-y-2"></div>
-          </div>
+          <!--
+            【削除】送信先（承認順）プレビューブロック
+              - 上部の Step1〜Step3 プルダウンで既に担当者名が見えているため冗長
+              - 支払先→Step3自動連動で確認欲求も減った
+              - 削除して縦スクロールを短縮
+              - updateReviewerPreview() 関数は他所からの呼び出しが多いため
+                中身を no-op 化した形で残置（下部 script 参照）
+          -->
 
           <!-- 備考 -->
           <div>
@@ -1757,51 +1755,13 @@ applications.get('/new', async (c) => {
         return true
       }
 
-      async function updateReviewerPreview() {
-        const previewEl = document.getElementById('reviewerPreview')
-        const listEl = document.getElementById('reviewerList')
-
-        // フォームで選択中の値を直接参照してプレビューを構築（常時表示）
-        const reviewers = []
-
-        // Step1: 上長プルダウンの選択値
-        const step1Select = document.querySelector('select[name="reviewer_step1"]')
-        const step1Name = step1Select?.options[step1Select.selectedIndex]?.text || ''
-        reviewers.push({
-          step: 1, label: '上長',
-          name: (step1Select?.value && step1Name !== '選択してください') ? step1Name : '未選択',
-          unset: !step1Select?.value
-        })
-
-        // Step2: 業務管理課プルダウンの選択値
-        const step2Select = document.querySelector('select[name="reviewer_step2"]')
-        const step2Name = step2Select?.options[step2Select.selectedIndex]?.text || ''
-        reviewers.push({
-          step: 2, label: '業務管理課',
-          name: (step2Select?.value && step2Name !== '選択してください') ? step2Name : '未選択',
-          unset: !step2Select?.value
-        })
-
-        // Step3: 最終承認者プルダウンの選択値
-        const step3Role = document.querySelector('input[name="reviewer_step3_role"]:checked')?.value
-        const step3Select = document.getElementById('step3UserSelect')
-        const step3Name = step3Select?.options[step3Select.selectedIndex]?.text || ''
-        const step3Label = step3Role === 'honsha' ? '本社経理' : 'マンション会計課'
-        reviewers.push({
-          step: 3, label: step3Label,
-          name: (step3Select?.value && step3Name !== '先に支払先を選択してください' && step3Name !== '担当者を選択してください') ? step3Name : '未選択',
-          unset: !step3Select?.value
-        })
-
-        const stepColors = ['bg-[#D5E5F2] text-[#2E5580]', 'bg-orange-100 text-orange-700', 'bg-green-100 text-green-700']
-        listEl.innerHTML = reviewers.map((r, i) => {
-          return '<div class="flex items-center gap-3">' +
-            '<span class="text-xs font-bold text-indigo-400 w-5 text-center">Step ' + r.step + '</span>' +
-            '<svg class="w-3 h-3 text-indigo-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
-            '<span class="text-xs px-2 py-0.5 rounded-full font-medium ' + stepColors[i] + '">' + r.label + '</span>' +
-            '<span class="text-sm font-medium ' + (r.unset ? 'text-red-400 italic' : 'text-gray-800') + '">' + r.name + '</span>' +
-          '</div>'
-        }).join('')
+      // 【no-op化】送信先（承認順）プレビューブロック削除に伴い、
+      //   updateReviewerPreview() は何もしない関数として残置
+      //   （togglePaymentFields/updateStep3Users/onchange 等 多数の呼び出し元の
+      //    互換維持のため関数定義自体は残す）
+      //   将来プレビュー復活が必要になった場合はここに実装を戻す
+      function updateReviewerPreview() {
+        // no-op
       }
     </script>
   `
