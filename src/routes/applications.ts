@@ -3,8 +3,9 @@ import { getSessionUser, getSessionIdFromCookie, generateApplicationNumber } fro
 import { layout, statusBadge, paymentLabel } from './layout'
 import { buildMailSubject, buildMailBody, sendMail } from '../lib/mail'
 import { sendLineWorksMessage, buildLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
+import { syncApplicationToDrive, type SyncEnv } from '../lib/drive-sync'
 
-type Bindings = { DB: D1Database; R2: R2Bucket }
+type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const applications = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
@@ -3666,6 +3667,27 @@ applications.post('/:id/review/:stepId', async (c) => {
           isTest: isTestApp
         })
       })
+    }
+
+    // === Google Drive 自動保存: 業務管理課(Step2)承認時に全添付ファイルを共有ドライブへ保存 ===
+    // 業務を止めないよう waitUntil でバックグラウンド実行。失敗時は drive_uploads に記録される
+    // (管理者メニュー「Drive自動保存」から失敗一覧確認・再試行可能)
+    if (step.step_number === 2) {
+      const driveEnv = c.env as SyncEnv
+      // Secret未設定の環境ではスキップ (初期セットアップ前)
+      if (driveEnv.GOOGLE_OAUTH_CLIENT_ID && driveEnv.DRIVE_ROOT_FOLDER_ID) {
+        const appId = Number(id)
+        runInBackground(c, async () => {
+          try {
+            const r = await syncApplicationToDrive(driveEnv, appId)
+            console.log(`[drive-sync] app=${appId} success=${r.success} failed=${r.failed} skipped=${r.skipped}`)
+          } catch (e) {
+            console.error(`[drive-sync] app=${appId} 全体エラー:`, (e as any)?.message || e)
+          }
+        })
+      } else {
+        console.log('[drive-sync] Secret未設定のためスキップ (GOOGLE_OAUTH_CLIENT_ID / DRIVE_ROOT_FOLDER_ID)')
+      }
     }
 
     // === 元請セット申請: 本橋(step2)承認時に、管理組合宛PDFがアップロードされていれば申請者に後続申請通知 ===

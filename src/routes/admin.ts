@@ -13,8 +13,9 @@ import {
   formatBytes,
   formatJstDateTime,
 } from '../lib/backup'
+import driveRoutes from './drive'
 
-type Bindings = { DB: D1Database; R2: R2Bucket }
+type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const admin = new Hono<{ Bindings: Bindings }>()
 
 // 管理者チェックミドルウェア
@@ -40,6 +41,9 @@ admin.use('*', async (c, next) => {
 
 // /admin トップ → /admin/users へリダイレクト
 admin.get('/', (c) => c.redirect('/admin/users'))
+
+// Google Drive 自動保存 サブルート (/admin/drive/*)
+admin.route('/drive', driveRoutes)
 
 // ============================================================
 // テストモード設定
