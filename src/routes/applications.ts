@@ -859,16 +859,18 @@ applications.get('/new', async (c) => {
                 ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
               </label>
               <!-- 役割選択 -->
+              <!-- 注意: 役割 → 支払先 の自動連携は撤廃済み (支払先 → 役割 の一方向連動に変更)
+                   支払先ラジオで管理組合/会社(TD) を選ぶと、役割が自動セットされる仕様 -->
               <div class="flex gap-4">
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="reviewer_step3_role" value="accounting" required
-                    onchange="updateStep3Users(); applyMansionDefaultsFromInput(); setPaymentTarget('kumiai'); updateReviewerPreview()"
+                    onchange="updateStep3Users(); applyMansionDefaultsFromInput(); updateReviewerPreview()"
                     class="w-4 h-4 text-purple-600">
                   <span class="text-sm">マンション会計課</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="reviewer_step3_role" value="honsha"
-                    onchange="updateStep3Users(); applyMansionDefaultsFromInput(); setPaymentTarget('td'); updateReviewerPreview()"
+                    onchange="updateStep3Users(); applyMansionDefaultsFromInput(); updateReviewerPreview()"
                     class="w-4 h-4 text-purple-600">
                   <span class="text-sm">本社経理</span>
                 </label>
@@ -1255,8 +1257,10 @@ applications.get('/new', async (c) => {
         }
       }
 
+      // 【現在は呼ばれていません】Step3→支払先の自動連動用に残されていた関数
+      //   現在は逆方向 (支払先→Step3) の自動連動を採用しているため未使用
+      //   将来「Step3変更で支払先も追従」が必要になった場合に再利用可能
       function setPaymentTarget(val) {
-        // 支払先ラジオを自動選択
         const radio = document.querySelector('input[name="payment_target"][value="' + val + '"]')
         if (radio) { radio.checked = true; togglePaymentFields() }
       }
@@ -1458,9 +1462,41 @@ applications.get('/new', async (c) => {
           // 管理組合に切り替わったら三択UIを初期状態に整える
           if (typeof updateFeeTypeUI === 'function') updateFeeTypeUI()
         }
+        // 支払先 → Step3(最終承認先) の自動連動:
+        //   - 管理組合 → 役割「マンション会計課」を自動選択
+        //                担当者はマンション未選択なら空、選択済みなら会計担当を自動セット
+        //   - 会社(TD) → 役割「本社経理」を自動選択
+        //                担当者は山崎 修 (無効時は本社経理ロールの先頭) を自動セット
+        //   ※ この連動によりユーザーの手動選択も上書きされる (推奨案どおり)
+        if (typeof syncStep3FromPaymentTarget === 'function') {
+          syncStep3FromPaymentTarget(val)
+        }
         // 請求書追加UIの表示を更新
         updateInvoiceExtraUI()
         updateReviewerPreview()
+      }
+
+      // 支払先 → Step3 (最終承認先) の自動連動
+      //   management_organization → 'accounting' (マンション会計課)
+      //   company (TD)           → 'honsha' (本社経理)
+      function syncStep3FromPaymentTarget(paymentVal) {
+        let targetRole = null
+        if (paymentVal === 'kumiai') targetRole = 'accounting'
+        else if (paymentVal === 'td') targetRole = 'honsha'
+        else return  // 支払先未選択時は何もしない
+
+        // 役割ラジオを自動選択
+        const roleRadio = document.querySelector('input[name="reviewer_step3_role"][value="' + targetRole + '"]')
+        if (!roleRadio) return
+        if (!roleRadio.checked) {
+          roleRadio.checked = true
+        }
+        // プルダウンを役割に応じて再構築 (updateStep3Users内で本社経理選択時は山崎修自動セット)
+        if (typeof updateStep3Users === 'function') updateStep3Users()
+        // マンション会計課の場合はマンション情報から担当者を自動セット
+        if (targetRole === 'accounting') {
+          if (typeof applyMansionDefaultsFromInput === 'function') applyMansionDefaultsFromInput()
+        }
       }
       function toggleMotouke() {
         const val = document.querySelector('input[name="td_type"]:checked')?.value
