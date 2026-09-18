@@ -860,11 +860,15 @@ admin.get('/mansions', async (c) => {
   `).all()
 
   // 選択肢用ユーザーマスタ
+  //   フロント担当 = 担当者(front) or 担当者/上司(front_supervisor)
+  //   上長         = 担当者/上司(front_supervisor)
+  //   会計担当     = マンション会計課(accounting)
+  //   ※ admin / operations / honsha / manager 等は業務上の役職と一致しないため除外
   const allUsers = await db.prepare("SELECT id, name, role FROM users WHERE is_active = 1 ORDER BY name").all()
   const users = allUsers.results as any[]
-  const fronts = users.filter(u => ['front', 'front_supervisor', 'manager', 'operations', 'admin'].includes(u.role))
-  const supervisors = users.filter(u => ['front_supervisor', 'manager', 'operations', 'admin'].includes(u.role))
-  const accountings = users.filter(u => ['accounting', 'honsha', 'admin'].includes(u.role))
+  const fronts = users.filter(u => ['front', 'front_supervisor'].includes(u.role))
+  const supervisors = users.filter(u => u.role === 'front_supervisor')
+  const accountings = users.filter(u => u.role === 'accounting')
 
   // 課の enum定数
   const SECTION_OPTIONS = ['1課', '2課', '3課']
@@ -1251,10 +1255,14 @@ admin.post('/mansions/:id/inline-update', async (c) => {
   const value = rawValue === '' || rawValue === undefined || rawValue === null ? null : parseInt(String(rawValue))
 
   // 更新可能フィールドをホワイトリストで制限
+  //   ロール制限を業務用語と一致させる:
+  //     フロント担当 = front / front_supervisor
+  //     上長         = front_supervisor
+  //     会計担当     = accounting
   const allowedFields: Record<string, { role: string[]; label: string }> = {
-    front_user_id:      { role: ['front', 'front_supervisor', 'manager', 'operations', 'admin'], label: 'フロント担当' },
-    supervisor_user_id: { role: ['front_supervisor', 'manager', 'operations', 'admin'],           label: '上長' },
-    accounting_user_id: { role: ['accounting', 'honsha', 'admin'],                                label: '管理組合 会計担当者' },
+    front_user_id:      { role: ['front', 'front_supervisor'], label: 'フロント担当' },
+    supervisor_user_id: { role: ['front_supervisor'],          label: '上長' },
+    accounting_user_id: { role: ['accounting'],                label: '管理組合 会計担当者' },
   }
   const meta = allowedFields[field]
   if (!meta) {
@@ -1292,9 +1300,12 @@ admin.post('/mansions/:id/inline-update', async (c) => {
 
 function mansionForm(mansion: any, users: any[]): string {
   const isEdit = !!mansion
-  const fronts = users.filter(u => ['front', 'front_supervisor', 'manager', 'operations', 'admin'].includes(u.role))
-  const supervisors = users.filter(u => ['front_supervisor', 'manager', 'operations', 'admin'].includes(u.role))
-  const accountings = users.filter(u => ['accounting', 'honsha', 'admin'].includes(u.role))
+  // フロント担当 = 担当者(front) / 担当者/上司(front_supervisor)
+  // 上長         = 担当者/上司(front_supervisor)
+  // 会計担当     = マンション会計課(accounting)
+  const fronts = users.filter(u => ['front', 'front_supervisor'].includes(u.role))
+  const supervisors = users.filter(u => u.role === 'front_supervisor')
+  const accountings = users.filter(u => u.role === 'accounting')
   const SECTION_OPTIONS = ['1課', '2課', '3課']
 
   return `
