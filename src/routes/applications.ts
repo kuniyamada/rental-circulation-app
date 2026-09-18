@@ -2515,15 +2515,6 @@ applications.get('/:id', async (c) => {
           <p class="text-xs font-medium text-purple-600 mb-1">再申請理由・修正内容</p>
           <p class="text-sm text-purple-900 bg-white rounded-lg p-3 border border-purple-200">${app.reapply_reason}</p>
         </div>` : ''}
-        ${isApplicant && isReturned && !resubmitSuccessor ? `
-        <!-- ★案B: 差し戻し理由ボックス内の再申請ボタン（文脈上の自然な導線） -->
-        <div class="pt-2 border-t border-orange-200">
-          <a href="/applications/new?resubmit_id=${id}"
-            class="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-5 py-2.5 rounded-lg transition text-sm">
-            ✏ この理由に対応して編集・再申請する →
-          </a>
-        </div>
-        ` : ''}
         ${isReturned && resubmitSuccessor ? `
         <div class="pt-2 border-t border-orange-200">
           <p class="text-xs text-emerald-700">
