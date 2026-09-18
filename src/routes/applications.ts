@@ -655,21 +655,28 @@ applications.get('/new', async (c) => {
             </button>
           </div>
 
-          <!-- 支払先 -->
+          <!-- 支払先（プルダウン 3択：管理組合 / 会社(TD)委託内 / 会社(TD)元請） -->
+          <!--
+            内部仕様:
+              プルダウンの値は「payment_target|td_type」の合成値:
+                'kumiai|'      → payment_target='kumiai', td_type=null
+                'td|ittaku'    → payment_target='td',     td_type='ittaku'
+                'td|motouke'   → payment_target='td',     td_type='motouke'
+              サーバー送信時はhidden inputで元通り payment_target と td_type を分離送信。
+              (DB互換性・既存クエリ互換のため保存構造は変えない)
+          -->
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">支払先 <span class="text-red-500">*</span></label>
-            <div class="flex gap-4">
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input type="radio" name="payment_target" value="kumiai" required onchange="togglePaymentFields()"
-                  class="w-4 h-4 text-[#396999]">
-                <span class="text-sm">管理組合</span>
-              </label>
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input type="radio" name="payment_target" value="td" onchange="togglePaymentFields()"
-                  class="w-4 h-4 text-[#396999]">
-                <span class="text-sm">会社（TD）</span>
-              </label>
-            </div>
+            <select id="paymentTargetSelect" required onchange="onPaymentSelectChange()"
+              class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+              <option value="">選択してください</option>
+              <option value="kumiai|">管理組合</option>
+              <option value="td|ittaku">会社（TD）委託内</option>
+              <option value="td|motouke">会社（TD）元請</option>
+            </select>
+            <!-- サーバー送信用hidden: プルダウン値から自動セット -->
+            <input type="hidden" name="payment_target" id="paymentTargetHidden">
+            <input type="hidden" name="td_type" id="tdTypeHidden">
           </div>
 
           <!-- 管理組合の場合：勘定科目（手入力・20文字上限） -->
@@ -681,23 +688,8 @@ applications.get('/new', async (c) => {
             <p class="text-xs text-gray-500 mt-1">20文字以内で入力してください</p>
           </div>
 
-          <!-- TD（会社）の場合 -->
+          <!-- TD（会社）の場合: 元請時のみ金額入力を表示 (区分ラジオは削除、プルダウンから決定) -->
           <div id="tdFields" class="hidden bg-[#EEF4FA] border border-[#AECBE5] rounded-lg p-4 space-y-4">
-            <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1.5">区分 <span class="text-red-500">*</span></label>
-              <div class="flex gap-4">
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="td_type" value="ittaku" onchange="toggleMotouke()"
-                    class="w-4 h-4 text-[#396999]">
-                  <span class="text-sm">委託内</span>
-                </label>
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="td_type" value="motouke" onchange="toggleMotouke()"
-                    class="w-4 h-4 text-[#396999]">
-                  <span class="text-sm">元請</span>
-                </label>
-              </div>
-            </div>
             <!-- 元請の場合：管理組合への請求金額 + 業者への支払金額 -->
             <div id="motoukeFields" class="hidden space-y-3 border-t-2 border-[#5B8AB5] pt-4 mt-2">
               <!-- 元請専用ブロックの見出し -->
@@ -1076,25 +1068,14 @@ applications.get('/new', async (c) => {
           searchMansion('${resubmitSource.mansion_number || ''}')
         }
         setTimeout(function() {
-          // 2) 支払先
+          // 2) 支払先 (プルダウン方式: 'kumiai|' / 'td|ittaku' / 'td|motouke')
+          //    payment_target と td_type から合成値を作ってプルダウンをセット
           const payTarget = ${JSON.stringify(resubmitSource.payment_target || '')}
+          const tdType    = ${JSON.stringify(resubmitSource.td_type || '')}
           if (payTarget) {
-            const payRadio = document.querySelector('input[name="payment_target"][value="' + payTarget + '"]')
-            if (payRadio) {
-              payRadio.checked = true
-              payRadio.dispatchEvent(new Event('change'))
+            if (typeof selectPaymentTarget === 'function') {
+              selectPaymentTarget(payTarget, tdType)
             }
-          }
-          // 3) TD区分（委託内/元請）
-          const tdType = ${JSON.stringify(resubmitSource.td_type || '')}
-          if (tdType) {
-            setTimeout(function() {
-              const tdRadio = document.querySelector('input[name="td_type"][value="' + tdType + '"]')
-              if (tdRadio) {
-                tdRadio.checked = true
-                tdRadio.dispatchEvent(new Event('change'))
-              }
-            }, 50)
           }
           // 4) 勘定科目（管理組合の場合）
           const accountItem = ${JSON.stringify(resubmitSource.account_item || '')}
@@ -1206,13 +1187,12 @@ applications.get('/new', async (c) => {
         }
         // 2) 支払先 = 管理組合を選択・ロック
         setTimeout(function() {
-          const kumiaiRadio = document.querySelector('input[name="payment_target"][value="kumiai"]')
-          if (kumiaiRadio) {
-            kumiaiRadio.checked = true
-            kumiaiRadio.dispatchEvent(new Event('change'))
+          if (typeof selectPaymentTarget === 'function') {
+            selectPaymentTarget('kumiai', null)
           }
-          // 支払先ラジオを無効化（変更不可）
-          document.querySelectorAll('input[name="payment_target"]').forEach(el => el.disabled = true)
+          // 支払先プルダウンを無効化（変更不可）
+          const paySel = document.getElementById('paymentTargetSelect')
+          if (paySel) paySel.disabled = true
 
           // 3) 金額を管理組合請求金額で自動セット
           const budgetInput = document.getElementById('budgetAmountInput')
@@ -1253,12 +1233,42 @@ applications.get('/new', async (c) => {
         }
       }
 
-      // 【現在は呼ばれていません】Step3→支払先の自動連動用に残されていた関数
-      //   現在は逆方向 (支払先→Step3) の自動連動を採用しているため未使用
-      //   将来「Step3変更で支払先も追従」が必要になった場合に再利用可能
+      // 支払先プルダウン変更時のハンドラ
+      //   プルダウン値は 'kumiai|' / 'td|ittaku' / 'td|motouke' / '' (未選択)
+      //   → hidden の payment_target と td_type を更新
+      //   → togglePaymentFields() で表示切替、Step3自動連動、手数料表示切替も全部走る
+      function onPaymentSelectChange() {
+        const sel = document.getElementById('paymentTargetSelect')
+        const val = sel?.value || ''
+        const [payTarget, tdType] = val.split('|')
+        const payHidden = document.getElementById('paymentTargetHidden')
+        const tdHidden = document.getElementById('tdTypeHidden')
+        if (payHidden) payHidden.value = payTarget || ''
+        if (tdHidden)  tdHidden.value  = tdType || ''
+        // 表示切替＋各種連動処理
+        togglePaymentFields()
+        // 元請の場合は toggleMotouke() で金額入力エリアを表示
+        toggleMotouke()
+      }
+
+      // 支払先プルダウンに値を設定するヘルパー
+      //   (再申請 prefill や 元請セット申請B の自動セットで使用)
+      function selectPaymentTarget(payTarget, tdType) {
+        const compositeValue = payTarget === 'kumiai'
+          ? 'kumiai|'
+          : payTarget === 'td' ? ('td|' + (tdType || '')) : ''
+        const sel = document.getElementById('paymentTargetSelect')
+        if (sel) {
+          sel.value = compositeValue
+          onPaymentSelectChange()
+        }
+      }
+
+      // 【現在は呼ばれていません】旧: 支払先ラジオ切替用の関数
+      //   プルダウン化に伴い selectPaymentTarget() に置換
+      //   将来同様の用途があれば selectPaymentTarget を使用
       function setPaymentTarget(val) {
-        const radio = document.querySelector('input[name="payment_target"][value="' + val + '"]')
-        if (radio) { radio.checked = true; togglePaymentFields() }
+        selectPaymentTarget(val, null)
       }
 
       function searchMansion(val) {
@@ -1392,8 +1402,8 @@ applications.get('/new', async (c) => {
       // - 会社(TD) 元請(motouke) → 最大3枚 (①〜③)
       // - それ以外（未選択）→ 1枚のみ（①のみ、②以降の追加不可）
       function getMaxInvoiceSlots() {
-        const pay = document.querySelector('input[name="payment_target"]:checked')?.value
-        const td = document.querySelector('input[name="td_type"]:checked')?.value
+        const pay = document.getElementById('paymentTargetHidden')?.value
+        const td  = document.getElementById('tdTypeHidden')?.value
         if (pay === 'kumiai') return 4
         if (pay === 'td' && td === 'ittaku') return 6
         if (pay === 'td' && td === 'motouke') return 3
@@ -1432,7 +1442,8 @@ applications.get('/new', async (c) => {
       }
 
       function togglePaymentFields() {
-        const val = document.querySelector('input[name="payment_target"]:checked')?.value
+        // 新: プルダウン方式に伴い hidden input 経由で値を取得
+        const val = document.getElementById('paymentTargetHidden')?.value || ''
         document.getElementById('kumiaiFields').classList.toggle('hidden', val !== 'kumiai')
         document.getElementById('tdFields').classList.toggle('hidden', val !== 'td')
         if (val !== 'td') document.getElementById('motoukeFields').classList.add('hidden')
@@ -1495,7 +1506,8 @@ applications.get('/new', async (c) => {
         }
       }
       function toggleMotouke() {
-        const val = document.querySelector('input[name="td_type"]:checked')?.value
+        // 新: プルダウン方式に伴い hidden input 経由で値を取得
+        const val = document.getElementById('tdTypeHidden')?.value || ''
         document.getElementById('motoukeFields').classList.toggle('hidden', val !== 'motouke')
         // 請求書追加UIの表示を更新（委託内=5枠、元請=追加不可）
         updateInvoiceExtraUI()
