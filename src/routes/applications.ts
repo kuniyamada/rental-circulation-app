@@ -321,7 +321,7 @@ applications.get('/new', async (c) => {
   }
 
   const mansions = await db.prepare(
-    'SELECT * FROM mansions WHERE is_active = 1 ORDER BY CAST(mansion_number AS INTEGER)'
+    'SELECT * FROM mansions WHERE is_active = 1 AND is_visible = 1 ORDER BY CAST(mansion_number AS INTEGER)'
   ).all()
 
   // inboxからの引き継ぎデータ取得

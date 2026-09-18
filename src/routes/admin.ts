@@ -846,6 +846,7 @@ function userForm(user: any, supervisors: any[], opsStaff?: any, honshaStaff?: a
 admin.get('/mansions', async (c) => {
   const user = (c as any).get('user')
   const db = c.env.DB
+  // 非表示(is_visible=0)は除外。復元は /admin/mansions/hidden から。
   const mansions = await db.prepare(`
     SELECT
       m.*,
@@ -856,8 +857,15 @@ admin.get('/mansions', async (c) => {
     LEFT JOIN users uf ON m.front_user_id = uf.id
     LEFT JOIN users us ON m.supervisor_user_id = us.id
     LEFT JOIN users ua ON m.accounting_user_id = ua.id
+    WHERE m.is_visible = 1
     ORDER BY CAST(m.mansion_number AS INTEGER)
   `).all()
+
+  // 非表示マンション件数（サマリー用）
+  const hiddenCountRow = await db.prepare(
+    'SELECT COUNT(*) as cnt FROM mansions WHERE is_visible = 0'
+  ).first() as any
+  const hiddenCount = hiddenCountRow?.cnt || 0
 
   // 選択肢用ユーザーマスタ
   //   フロント担当 = 担当者(front) or 担当者/上司(front_supervisor)
@@ -906,7 +914,15 @@ admin.get('/mansions', async (c) => {
     return 'bg-gray-100 text-gray-500 border-gray-300'
   }
 
+  const hiddenFlashFlag = c.req.query('hidden') === '1'
+
   const content = `
+    ${hiddenFlashFlag ? `
+      <div class="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-2.5 rounded-lg flex items-center justify-between">
+        <span>✅ マンションを一覧から非表示にしました</span>
+        <a href="/admin/mansions/hidden" class="text-xs underline hover:text-emerald-900">非表示一覧を確認 →</a>
+      </div>
+    ` : ''}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100">
       <div class="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -927,6 +943,9 @@ admin.get('/mansions', async (c) => {
           ` : ''}
           ${missingAccounting > 0 ? `
             <span class="text-xs bg-amber-50 border border-amber-300 text-amber-800 px-2.5 py-1 rounded-full">⚠️ 会計担当未設定: ${missingAccounting}件</span>
+          ` : ''}
+          ${hiddenCount > 0 ? `
+            <a href="/admin/mansions/hidden" class="text-xs bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 px-2.5 py-1 rounded-full transition">👁‍🗨 非表示: ${hiddenCount}件</a>
           ` : ''}
           <a href="/admin/mansions/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition whitespace-nowrap">＋ マンション追加</a>
         </div>
@@ -1142,6 +1161,100 @@ admin.get('/mansions/new', async (c) => {
   return c.html(layout('マンション追加', mansionForm(null, users.results as any[]), user))
 })
 
+// 非表示マンション一覧 (is_visible=0)
+//   ⚠️ /mansions/:id/edit より前に定義しないと :id='hidden' として拾われる
+admin.get('/mansions/hidden', async (c) => {
+  const user = (c as any).get('user')
+  const db = c.env.DB
+  const rows = await db.prepare(`
+    SELECT
+      m.*,
+      uf.name as front_name,
+      us.name as supervisor_name,
+      ua.name as accounting_name
+    FROM mansions m
+    LEFT JOIN users uf ON m.front_user_id = uf.id
+    LEFT JOIN users us ON m.supervisor_user_id = us.id
+    LEFT JOIN users ua ON m.accounting_user_id = ua.id
+    WHERE m.is_visible = 0
+    ORDER BY CAST(m.mansion_number AS INTEGER)
+  `).all()
+
+  const restoredFlag = c.req.query('restored') === '1'
+  const sectionColor = (s: string | null): string => {
+    if (s === '1課') return 'bg-purple-100 text-purple-700 border-purple-300'
+    if (s === '2課') return 'bg-blue-100 text-blue-700 border-blue-300'
+    if (s === '3課') return 'bg-emerald-100 text-emerald-700 border-emerald-300'
+    return 'bg-gray-100 text-gray-500 border-gray-300'
+  }
+
+  const content = `
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+      <div class="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="font-semibold text-gray-800">👁‍🗨 非表示マンション一覧 <span class="text-slate-500">${rows.results.length}件</span></h2>
+          <p class="text-xs text-gray-500 mt-1">「表示に戻す」を押すと、通常のマンション一覧に復帰します。</p>
+        </div>
+        <a href="/admin/mansions" class="text-sm text-[#396999] hover:underline">← マンション管理マスタに戻る</a>
+      </div>
+
+      ${restoredFlag ? `
+      <div class="mx-6 mt-4 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-2.5 rounded-lg">
+        ✅ マンションを表示に戻しました
+      </div>
+      ` : ''}
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-800 text-white">
+            <tr>
+              <th class="px-3 py-3 text-left text-xs font-semibold w-20">物件№</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold">管理組合名</th>
+              <th class="px-3 py-3 text-left text-xs font-semibold w-24">課</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold w-40">フロント担当</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold w-40">上長</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold w-40">会計担当</th>
+              <th class="px-3 py-3 w-32"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            ${(rows.results as any[]).length === 0
+              ? '<tr><td colspan="7" class="px-4 py-12 text-center text-gray-400">非表示のマンションはありません</td></tr>'
+              : (rows.results as any[]).map((m: any) => {
+                const numStr = m.mansion_number != null ? String(m.mansion_number).padStart(3, '0') : '-'
+                return `
+                <tr class="hover:bg-gray-50">
+                  <td class="px-3 py-2 text-center font-mono text-xs text-gray-500 bg-gray-50 border-r border-gray-100">${numStr}</td>
+                  <td class="px-4 py-2 font-medium text-gray-800">${m.name}</td>
+                  <td class="px-3 py-2">
+                    ${m.section
+                      ? `<span class="inline-block text-xs font-semibold px-2 py-0.5 rounded-full border ${sectionColor(m.section)}">${m.section}</span>`
+                      : `<span class="text-xs text-gray-400">-</span>`
+                    }
+                  </td>
+                  <td class="px-4 py-2 text-xs text-gray-700">${m.front_name || '<span class="text-gray-400">-</span>'}</td>
+                  <td class="px-4 py-2 text-xs text-gray-700">${m.supervisor_name || '<span class="text-gray-400">-</span>'}</td>
+                  <td class="px-4 py-2 text-xs text-gray-700">${m.accounting_name || '<span class="text-gray-400">-</span>'}</td>
+                  <td class="px-3 py-2 text-center">
+                    <form method="POST" action="/admin/mansions/${m.id}/unhide"
+                          onsubmit="return confirm('『${m.name}』を通常のマンション一覧に表示に戻しますか？')">
+                      <button type="submit"
+                        class="inline-flex items-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded transition">
+                        👁 表示に戻す
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              `}).join('')
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `
+  return c.html(layout('非表示マンション一覧', content, user))
+})
+
 // マンション追加
 admin.post('/mansions', async (c) => {
   const db = c.env.DB
@@ -1180,6 +1293,26 @@ admin.post('/mansions/:id/toggle', async (c) => {
     'UPDATE mansions SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END, updated_at = datetime("now") WHERE id = ?'
   ).bind(id).run()
   return c.redirect('/admin/mansions')
+})
+
+// 一覧から非表示にする (物理削除の代替: is_visible=0)
+admin.post('/mansions/:id/hide', async (c) => {
+  const db = c.env.DB
+  const id = c.req.param('id')
+  await db.prepare(
+    'UPDATE mansions SET is_visible = 0, updated_at = datetime("now") WHERE id = ?'
+  ).bind(id).run()
+  return c.redirect('/admin/mansions?hidden=1')
+})
+
+// 一覧に表示に戻す (非表示解除)
+admin.post('/mansions/:id/unhide', async (c) => {
+  const db = c.env.DB
+  const id = c.req.param('id')
+  await db.prepare(
+    'UPDATE mansions SET is_visible = 1, updated_at = datetime("now") WHERE id = ?'
+  ).bind(id).run()
+  return c.redirect('/admin/mansions/hidden?restored=1')
 })
 
 // マンション更新
@@ -1364,6 +1497,28 @@ function mansionForm(mansion: any, users: any[]): string {
           <button type="submit" class="bg-[#396999] hover:bg-[#2E5580] text-white font-semibold px-6 py-2.5 rounded-lg transition text-sm">${isEdit ? '更新する' : '追加する'}</button>
         </div>
       </form>
+
+      ${isEdit ? `
+      <!-- 一覧から非表示にする（論理削除の代替） -->
+      <div class="mt-8 pt-6 border-t border-gray-200">
+        <h3 class="text-sm font-semibold text-slate-700 mb-2">🗂 一覧表示の管理</h3>
+        <p class="text-xs text-gray-500 mb-3">
+          ⚠️ 使わなくなった物件は「一覧から非表示」にできます。<br>
+          非表示にすると、通常のマンション一覧・新規申請フォームから表示されなくなります。<br>
+          過去の申請データには影響しません。復元は 一覧上部の「👁‍🗨 非表示: N件」から可能です。
+        </p>
+        <form method="POST" action="/admin/mansions/${mansion.id}/hide"
+              onsubmit="return confirm('『${mansion.name}』を一覧から非表示にしますか？\\n\\n・新規申請の候補から除外されます\\n・過去の申請データは影響なしで残ります\\n・復元は 一覧上部の「非表示」リンクから可能です')">
+          <button type="submit"
+            class="inline-flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold px-4 py-2 rounded-lg border border-slate-300 transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+            </svg>
+            このマンションを一覧から非表示にする
+          </button>
+        </form>
+      </div>
+      ` : ''}
     </div>
   `
 }
@@ -2578,6 +2733,7 @@ admin.get('/backup/download-legacy', async (c) => {
           FROM mansions m
           LEFT JOIN users uf ON m.front_user_id = uf.id
           LEFT JOIN users ua ON m.accounting_user_id = ua.id
+          WHERE m.is_visible = 1
           ORDER BY CAST(m.mansion_number AS INTEGER)
         `
       }

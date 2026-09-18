@@ -152,7 +152,7 @@ inbox.get('/new', async (c) => {
   if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
 
   const db = c.env.DB
-  const mansions = await db.prepare("SELECT * FROM mansions WHERE is_active = 1 ORDER BY CAST(mansion_number AS INTEGER)").all()
+  const mansions = await db.prepare("SELECT * FROM mansions WHERE is_active = 1 AND is_visible = 1 ORDER BY CAST(mansion_number AS INTEGER)").all()
   const fronts = await db.prepare("SELECT * FROM users WHERE role IN ('front', 'front_supervisor') AND is_active = 1 ORDER BY name").all()
 
   const content = `
