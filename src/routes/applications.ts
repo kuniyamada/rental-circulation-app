@@ -752,29 +752,51 @@ applications.get('/new', async (c) => {
 
           <!-- 金額 -->
           <div id="amountFields">
-            <p class="text-xs text-gray-500 mb-2">手数料（円）または手数料（％）のどちらか一方を必ず入力してください <span class="text-red-500">*</span></p>
+            <p class="text-xs text-gray-500 mb-2">手数料の種別を選択してください <span class="text-red-500">*</span></p>
+
+            <!-- 三択ラジオ（円 / ％ / なし）-->
+            <div class="flex flex-wrap gap-4 mb-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="fee_type" value="amount" onchange="updateFeeTypeUI()"
+                  class="w-4 h-4 text-[#396999]">
+                <span class="text-sm">手数料（円）</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="fee_type" value="rate" onchange="updateFeeTypeUI()"
+                  class="w-4 h-4 text-[#396999]">
+                <span class="text-sm">手数料（％）</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="fee_type" value="none" onchange="updateFeeTypeUI()"
+                  class="w-4 h-4 text-[#396999]">
+                <span class="text-sm">なし</span>
+              </label>
+            </div>
+
+            <!-- 入力欄（選ばれた種別のみ有効化） -->
             <div class="grid grid-cols-2 gap-4">
-              <div>
+              <div id="feeAmountBox" class="opacity-40">
                 <label class="block text-sm font-semibold text-gray-700 mb-1.5">手数料（円）</label>
                 <div class="relative">
-                  <input type="text" id="budgetAmountInput" inputmode="numeric"
-                    class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
+                  <input type="text" id="budgetAmountInput" inputmode="numeric" disabled
+                    class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none bg-gray-50"
                     placeholder="0" oninput="formatComma(this, 'budget_amount'); validateFeeFields()">
                   <input type="hidden" name="budget_amount" id="budgetAmountHidden">
                   <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
                 </div>
               </div>
-              <div>
+              <div id="feeRateBox" class="opacity-40">
                 <label class="block text-sm font-semibold text-gray-700 mb-1.5">手数料（％）</label>
                 <div class="relative">
-                  <input type="number" id="commissionRateInput" name="commission_rate" min="0" max="100" step="0.1"
-                    class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
+                  <input type="number" id="commissionRateInput" name="commission_rate" min="0" max="100" step="0.1" disabled
+                    class="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none bg-gray-50"
                     placeholder="0" oninput="validateFeeFields()">
                   <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
                 </div>
               </div>
             </div>
-            <p id="feeValidationMsg" class="hidden text-xs text-red-500 mt-1.5">⚠ 手数料（円）または手数料（％）のいずれかを入力してください</p>
+            <p id="feeValidationMsg" class="hidden text-xs text-red-500 mt-1.5">⚠ 手数料の種別を選択し、必要な金額/率を入力してください</p>
+            <p id="feeNoneMsg" class="hidden text-xs text-gray-600 mt-1.5 bg-gray-50 border border-gray-200 rounded px-2 py-1.5">ℹ️ 手数料なし（0円）として申請されます</p>
           </div>
 
           <!-- 回覧・承認先 -->
@@ -1099,20 +1121,40 @@ applications.get('/new', async (c) => {
             if (typeof calcProfit === 'function') calcProfit()
           }, 150)
           // 6) 手数料（管理組合の場合の budget_amount / commission_rate）
+          //    三択ラジオ (fee_type) を元申請の状態から復元:
+          //      - commission_rate が入っていた → 'rate'
+          //      - budget_amount が入っていた (>0) → 'amount'
+          //      - 両方0/null → 'none'
           const budgetAmt = ${resubmitSource.budget_amount != null ? resubmitSource.budget_amount : 'null'}
           const commissionRate = ${resubmitSource.commission_rate != null ? resubmitSource.commission_rate : 'null'}
           setTimeout(function() {
-            if (budgetAmt != null && payTarget !== 'td') {
-              const bInput = document.getElementById('budgetAmountInput')
-              const bHidden = document.getElementById('budgetAmountHidden')
-              if (bInput) bInput.value = Number(budgetAmt).toLocaleString()
-              if (bHidden) bHidden.value = String(budgetAmt)
+            if (payTarget === 'td') return  // 会社(TD)は手数料欄非表示のため何もしない
+
+            // まず種別ラジオを復元
+            let feeType = 'none'
+            if (commissionRate != null) feeType = 'rate'
+            else if (budgetAmt != null && Number(budgetAmt) > 0) feeType = 'amount'
+
+            const radio = document.querySelector('input[name="fee_type"][value="' + feeType + '"]')
+            if (radio) {
+              radio.checked = true
+              if (typeof updateFeeTypeUI === 'function') updateFeeTypeUI()
             }
-            if (commissionRate != null && payTarget !== 'td') {
-              const cInput = document.getElementById('commissionRateInput')
-              if (cInput) cInput.value = String(commissionRate)
-            }
-            if (typeof validateFeeFields === 'function') validateFeeFields()
+
+            // 次に入力値を復元（updateFeeTypeUIで欄が有効化された後）
+            setTimeout(function() {
+              if (feeType === 'amount' && budgetAmt != null) {
+                const bInput = document.getElementById('budgetAmountInput')
+                const bHidden = document.getElementById('budgetAmountHidden')
+                if (bInput) bInput.value = Number(budgetAmt).toLocaleString()
+                if (bHidden) bHidden.value = String(budgetAmt)
+              }
+              if (feeType === 'rate' && commissionRate != null) {
+                const cInput = document.getElementById('commissionRateInput')
+                if (cInput) cInput.value = String(commissionRate)
+              }
+              if (typeof validateFeeFields === 'function') validateFeeFields()
+            }, 30)
           }, 200)
           // 7) 回覧・承認先 Step1/Step2/Step3 (元申請から取得済のcirculation_stepsをJSに渡す)
           const rsSteps = ${JSON.stringify(resubmitSource._steps || [])}
@@ -1394,6 +1436,23 @@ applications.get('/new', async (c) => {
         // TD選択時はrequiredを完全解除（手数料バリデーションはcheckFeeRequired()で行う）
         const budgetInput = document.querySelector('input[name="budget_amount"]')
         if (budgetInput) budgetInput.required = false
+        // TD選択時: 手数料の種別ラジオと入力値をクリア（あとで管理組合に戻ったときに前の値が残らないよう）
+        if (val === 'td') {
+          document.querySelectorAll('input[name="fee_type"]').forEach(function(r) { r.checked = false })
+          const bi = document.getElementById('budgetAmountInput')
+          const bh = document.getElementById('budgetAmountHidden')
+          const ci = document.getElementById('commissionRateInput')
+          if (bi) bi.value = ''
+          if (bh) bh.value = ''
+          if (ci) ci.value = ''
+          const nMsg = document.getElementById('feeNoneMsg')
+          const vMsg = document.getElementById('feeValidationMsg')
+          nMsg?.classList.add('hidden')
+          vMsg?.classList.add('hidden')
+        } else {
+          // 管理組合に切り替わったら三択UIを初期状態に整える
+          if (typeof updateFeeTypeUI === 'function') updateFeeTypeUI()
+        }
         // 請求書追加UIの表示を更新
         updateInvoiceExtraUI()
         updateReviewerPreview()
@@ -1504,45 +1563,145 @@ applications.get('/new', async (c) => {
         }
       }
 
+      // 手数料の種別ラジオ (amount / rate / none) に応じて入力欄の enable/disable を切り替え
+      function updateFeeTypeUI() {
+        const feeType = document.querySelector('input[name="fee_type"]:checked')?.value
+        const amountBox = document.getElementById('feeAmountBox')
+        const rateBox = document.getElementById('feeRateBox')
+        const budgetEl = document.getElementById('budgetAmountInput')
+        const budgetHidden = document.getElementById('budgetAmountHidden')
+        const commissionEl = document.getElementById('commissionRateInput')
+        const noneMsg = document.getElementById('feeNoneMsg')
+        const validMsg = document.getElementById('feeValidationMsg')
+
+        if (!amountBox || !rateBox) return
+
+        const setEnabled = (box, input, enabled) => {
+          if (enabled) {
+            box.classList.remove('opacity-40')
+            input.disabled = false
+            input.classList.remove('bg-gray-50')
+          } else {
+            box.classList.add('opacity-40')
+            input.disabled = true
+            input.classList.add('bg-gray-50')
+            input.value = ''
+          }
+        }
+
+        if (feeType === 'amount') {
+          setEnabled(amountBox, budgetEl, true)
+          setEnabled(rateBox, commissionEl, false)
+          if (budgetHidden) budgetHidden.value = ''
+          noneMsg?.classList.add('hidden')
+          budgetEl.focus()
+        } else if (feeType === 'rate') {
+          setEnabled(amountBox, budgetEl, false)
+          setEnabled(rateBox, commissionEl, true)
+          if (budgetHidden) budgetHidden.value = ''
+          noneMsg?.classList.add('hidden')
+          commissionEl.focus()
+        } else if (feeType === 'none') {
+          setEnabled(amountBox, budgetEl, false)
+          setEnabled(rateBox, commissionEl, false)
+          if (budgetHidden) budgetHidden.value = ''
+          noneMsg?.classList.remove('hidden')
+        } else {
+          // 未選択
+          setEnabled(amountBox, budgetEl, false)
+          setEnabled(rateBox, commissionEl, false)
+          if (budgetHidden) budgetHidden.value = ''
+          noneMsg?.classList.add('hidden')
+        }
+        // 選択が変わったらエラーメッセージも消す
+        validMsg?.classList.add('hidden')
+        budgetEl?.classList.remove('border-red-400')
+        commissionEl?.classList.remove('border-red-400')
+      }
+
+      // 入力途中のバリデーション: 種別に応じて必要な入力があるかチェック
       function validateFeeFields() {
         const amountFields = document.getElementById('amountFields')
         if (amountFields.classList.contains('hidden')) return
-        // hiddenフィールドの値（カンマなし数値）で判定
-        const budget = document.getElementById('budgetAmountHidden')?.value ||
-                       document.getElementById('budgetAmountInput')?.value.replace(/,/g, '')
-        const commission = document.getElementById('commissionRateInput')?.value
+        const feeType = document.querySelector('input[name="fee_type"]:checked')?.value
         const msg = document.getElementById('feeValidationMsg')
-        // どちらか一方でも値があればOK（0も有効な値として扱う）
-        const hasValue = (budget !== '' && budget !== null && budget !== undefined) ||
-                         (commission !== '' && commission !== null && commission !== undefined)
         const budgetEl = document.getElementById('budgetAmountInput')
         const commissionEl = document.getElementById('commissionRateInput')
-        // requiredを完全に外す（ブラウザネイティブバリデーションを無効化）
+        // ブラウザネイティブrequiredは常に無効化（独自バリデーションで統一）
         budgetEl.required = false
         commissionEl.required = false
+
+        if (feeType === 'none' || !feeType) {
+          msg?.classList.add('hidden')
+          budgetEl.classList.remove('border-red-400')
+          commissionEl.classList.remove('border-red-400')
+          return
+        }
+
+        const budget = document.getElementById('budgetAmountHidden')?.value ||
+                       budgetEl?.value.replace(/,/g, '')
+        const commission = commissionEl?.value
+
+        let hasValue = false
+        if (feeType === 'amount') {
+          hasValue = budget !== '' && budget !== null && budget !== undefined
+        } else if (feeType === 'rate') {
+          hasValue = commission !== '' && commission !== null && commission !== undefined
+        }
+
         if (!hasValue) {
-          msg.classList.remove('hidden')
-          budgetEl.classList.add('border-red-400')
-          commissionEl.classList.add('border-red-400')
+          msg?.classList.remove('hidden')
+          if (feeType === 'amount') budgetEl.classList.add('border-red-400')
+          if (feeType === 'rate')   commissionEl.classList.add('border-red-400')
         } else {
-          msg.classList.add('hidden')
+          msg?.classList.add('hidden')
           budgetEl.classList.remove('border-red-400')
           commissionEl.classList.remove('border-red-400')
         }
       }
 
+      // 送信時の最終バリデーション
       function checkFeeRequired() {
         const amountFields = document.getElementById('amountFields')
         if (amountFields.classList.contains('hidden')) return true
+        const feeType = document.querySelector('input[name="fee_type"]:checked')?.value
+        const msg = document.getElementById('feeValidationMsg')
+
+        // Q1: 種別自体が未選択 → NG
+        if (!feeType) {
+          if (msg) {
+            msg.textContent = '⚠ 手数料の種別（円 / ％ / なし）を選択してください'
+            msg.classList.remove('hidden')
+          }
+          document.querySelector('input[name="fee_type"]')?.focus()
+          return false
+        }
+        // Q2: なし → OK
+        if (feeType === 'none') return true
+
+        // Q3: 円/％の場合、対応する入力欄に値があるか
         const budget = document.getElementById('budgetAmountHidden')?.value ||
                        document.getElementById('budgetAmountInput')?.value.replace(/,/g, '')
         const commission = document.getElementById('commissionRateInput')?.value
-        // どちらか一方でも値があればOK（0も有効な値）
-        const hasValue = (budget !== '' && budget !== null && budget !== undefined) ||
-                         (commission !== '' && commission !== null && commission !== undefined)
+        let hasValue = false
+        let focusEl = null
+        if (feeType === 'amount') {
+          hasValue = budget !== '' && budget !== null && budget !== undefined
+          focusEl = document.getElementById('budgetAmountInput')
+        } else if (feeType === 'rate') {
+          hasValue = commission !== '' && commission !== null && commission !== undefined
+          focusEl = document.getElementById('commissionRateInput')
+        }
+
         if (!hasValue) {
+          if (msg) {
+            msg.textContent = feeType === 'amount'
+              ? '⚠ 手数料（円）に金額を入力してください'
+              : '⚠ 手数料（％）に率を入力してください'
+            msg.classList.remove('hidden')
+          }
           validateFeeFields()
-          document.getElementById('budgetAmountInput').focus()
+          focusEl?.focus()
           return false
         }
         return true
@@ -1640,13 +1799,21 @@ applications.post('/', async (c) => {
     }
   }
 
-  // 手数料バリデーション（管理組合の場合、円か％どちらか必須。ただし元請セット申請Bは金額自動設定のためスキップ）
+  // 手数料バリデーション（管理組合の場合、種別3択(amount/rate/none)の必須チェック）
+  //   元請セット申請Bは金額自動設定のためスキップ
   if (body.payment_target !== 'td' && !fromMotoukeId) {
-    const hasBudget = body.budget_amount !== '' && body.budget_amount != null
-    const hasCommission = body.commission_rate !== '' && body.commission_rate != null
-    if (!hasBudget && !hasCommission) {
-      return c.redirect('/applications/new?error=fee_required')
+    const feeType = body.fee_type
+    if (!feeType || !['amount', 'rate', 'none'].includes(String(feeType))) {
+      return c.redirect('/applications/new?error=fee_type_required')
     }
+    if (feeType === 'amount') {
+      const hasBudget = body.budget_amount !== '' && body.budget_amount != null
+      if (!hasBudget) return c.redirect('/applications/new?error=fee_amount_required')
+    } else if (feeType === 'rate') {
+      const hasCommission = body.commission_rate !== '' && body.commission_rate != null
+      if (!hasCommission) return c.redirect('/applications/new?error=fee_rate_required')
+    }
+    // 'none' の場合はチェック不要（この後の INSERT で両方 NULL / 0 になる）
   }
 
   // ファイル保存（R2）
@@ -1681,9 +1848,37 @@ applications.post('/', async (c) => {
 
   // 元請セット申請Bの場合: 支払先・金額を元申請の情報で上書き
   const effectivePaymentTarget = fromMotoukeId ? 'kumiai' : body.payment_target
-  const effectiveBudgetAmount = fromMotoukeId
-    ? (motoukeSource?.kumiai_amount || 0)
-    : (parseInt(String(body.budget_amount || '0').replace(/,/g, '')) || 0)
+  // 手数料の三択(amount/rate/none)に応じて budget_amount / commission_rate を決定
+  //   - amount: budget_amount = 入力値, commission_rate = NULL
+  //   - rate:   budget_amount = 0,      commission_rate = 入力値
+  //   - none:   budget_amount = 0,      commission_rate = NULL
+  //   - TD/元請B: 従来ロジックで自動計算 (fee_type 無関係)
+  const feeType = body.fee_type
+  const rawBudget = parseInt(String(body.budget_amount || '0').replace(/,/g, '')) || 0
+  const rawCommission = body.commission_rate !== '' && body.commission_rate != null
+    ? parseFloat(body.commission_rate) : null
+
+  let effectiveBudgetAmount: number
+  let effectiveCommissionRate: number | null
+  if (fromMotoukeId) {
+    // 元請セット申請B: 元申請の金額をそのまま使用
+    effectiveBudgetAmount = motoukeSource?.kumiai_amount || 0
+    effectiveCommissionRate = null
+  } else if (body.payment_target === 'td') {
+    // 会社(TD): 従来通り（画面上、手数料欄は非表示）
+    effectiveBudgetAmount = rawBudget
+    effectiveCommissionRate = rawCommission
+  } else if (feeType === 'amount') {
+    effectiveBudgetAmount = rawBudget
+    effectiveCommissionRate = null
+  } else if (feeType === 'rate') {
+    effectiveBudgetAmount = 0
+    effectiveCommissionRate = rawCommission
+  } else {
+    // 'none' またはフォールバック
+    effectiveBudgetAmount = 0
+    effectiveCommissionRate = null
+  }
   const effectiveTdType = fromMotoukeId ? null : (body.td_type || null)
 
   // === テスト申請フラグ判定 ===
@@ -1715,7 +1910,7 @@ applications.post('/', async (c) => {
     body.kumiai_amount ? parseInt(String(body.kumiai_amount).replace(/,/g, '')) : null,
     body.gyosha_amount ? parseInt(String(body.gyosha_amount).replace(/,/g, '')) : null,
     effectiveBudgetAmount,
-    body.commission_rate !== '' && body.commission_rate != null ? parseFloat(body.commission_rate) : null,
+    effectiveCommissionRate,
     body.remarks || null,
     fromMotoukeId,
     isTestFlag
@@ -2152,8 +2347,19 @@ applications.get('/:id', async (c) => {
           <div><span class="text-gray-400">回覧開始日</span><p class="font-medium mt-0.5">${app.circulation_start_date}</p></div>
           <div><span class="text-gray-400">支払先</span><p class="font-medium mt-0.5">${paymentLabel(app.payment_target, app.td_type)}</p></div>
           ${app.account_item ? `<div><span class="text-gray-400">勘定科目</span><p class="font-medium mt-0.5">${app.account_item}</p></div>` : ''}
-          <div><span class="text-gray-400">手数料（円）</span><p class="font-medium mt-0.5">${Number(app.budget_amount).toLocaleString()}円</p></div>
-          ${app.commission_rate != null ? `<div><span class="text-gray-400">手数料（％）</span><p class="font-medium mt-0.5">${app.commission_rate}%</p></div>` : ''}
+          ${(() => {
+            // 手数料の表示: 三択(円/％/なし)を判定して1つだけ表示
+            //   commission_rate != null           → 手数料（％）
+            //   budget_amount > 0 (rate は null)   → 手数料（円）
+            //   両方0/null                        → 手数料: なし
+            if (app.commission_rate != null) {
+              return `<div><span class="text-gray-400">手数料（％）</span><p class="font-medium mt-0.5">${app.commission_rate}%</p></div>`
+            }
+            if (Number(app.budget_amount) > 0) {
+              return `<div><span class="text-gray-400">手数料（円）</span><p class="font-medium mt-0.5">${Number(app.budget_amount).toLocaleString()}円</p></div>`
+            }
+            return `<div><span class="text-gray-400">手数料</span><p class="font-medium mt-0.5 text-gray-500">なし</p></div>`
+          })()}
 
           ${app.kumiai_amount ? `<div><span class="text-gray-400">組合請求金額</span><p class="font-medium mt-0.5">${Number(app.kumiai_amount).toLocaleString()}円</p></div>` : ''}
           ${app.gyosha_amount != null ? `<div><span class="text-gray-400">業者支払金額</span><p class="font-medium mt-0.5">${Number(app.gyosha_amount).toLocaleString()}円</p></div>` : ''}
@@ -2448,8 +2654,15 @@ applications.get('/:id/review/:stepId', async (c) => {
           <div><span class="text-gray-400">申請者</span><p class="font-medium">${app.applicant_name}</p></div>
           <div><span class="text-gray-400">支払先</span><p class="font-medium">${paymentLabel(app.payment_target, app.td_type)}</p></div>
           ${app.account_item ? `<div><span class="text-gray-400">勘定科目</span><p class="font-medium">${app.account_item}</p></div>` : ''}
-          <div><span class="text-gray-400">手数料（円）</span><p class="font-medium">${Number(app.budget_amount).toLocaleString()}円</p></div>
-          ${app.commission_rate != null ? `<div><span class="text-gray-400">手数料（％）</span><p class="font-medium">${app.commission_rate}%</p></div>` : ''}
+          ${(() => {
+            if (app.commission_rate != null) {
+              return `<div><span class="text-gray-400">手数料（％）</span><p class="font-medium">${app.commission_rate}%</p></div>`
+            }
+            if (Number(app.budget_amount) > 0) {
+              return `<div><span class="text-gray-400">手数料（円）</span><p class="font-medium">${Number(app.budget_amount).toLocaleString()}円</p></div>`
+            }
+            return `<div><span class="text-gray-400">手数料</span><p class="font-medium text-gray-500">なし</p></div>`
+          })()}
 
           ${app.kumiai_amount ? `<div><span class="text-gray-400">組合請求金額</span><p class="font-medium">${Number(app.kumiai_amount).toLocaleString()}円</p></div>` : ''}
           ${app.gyosha_amount != null ? `<div><span class="text-gray-400">業者支払金額</span><p class="font-medium">${Number(app.gyosha_amount).toLocaleString()}円</p></div>` : ''}
@@ -3472,12 +3685,17 @@ applications.post('/:id/resubmit', async (c) => {
     : orig.commission_rate
   const editedRemarks = body.remarks !== undefined ? body.remarks : orig.remarks
 
-  // 手数料バリデーション（管理組合の場合、円か％どちらか必須）
+  // 手数料バリデーション（管理組合の場合、円/％/なし の3択いずれか）
+  //   再申請の場合、元申請の値が正しく引き継がれていれば
+  //   budget=0 かつ commission=null (=「なし」) も許容する
   if (editedPaymentTarget !== 'td') {
-    const hasBudget = editedBudgetAmount !== null && editedBudgetAmount !== undefined && editedBudgetAmount !== ''
-    const hasCommission = editedCommissionRate !== null && editedCommissionRate !== undefined && !isNaN(editedCommissionRate)
-    if (!hasBudget && !hasCommission) {
-      return c.redirect(`/applications/new?resubmit_id=${id}&error=fee_required`)
+    // 値が全く決定できなかった場合のみエラー
+    // (通常は元申請の値がフォールバックで入るため到達しないが念のため)
+    if (editedBudgetAmount === null || editedBudgetAmount === undefined || editedBudgetAmount === '') {
+      const hasCommission = editedCommissionRate !== null && editedCommissionRate !== undefined && !isNaN(editedCommissionRate)
+      if (!hasCommission) {
+        return c.redirect(`/applications/new?resubmit_id=${id}&error=fee_required`)
+      }
     }
   }
 
