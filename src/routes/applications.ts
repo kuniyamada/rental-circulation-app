@@ -739,6 +739,37 @@ applications.get('/new', async (c) => {
                   <p id="profitRate" class="text-sm font-semibold text-gray-800">－</p>
                 </div>
               </div>
+
+              <!-- 添付ファイル（見積書）※元請時のみ・任意 -->
+              <div class="border border-gray-200 bg-white rounded-lg p-4">
+                <div class="flex items-center gap-2 mb-2">
+                  <svg class="w-4 h-4 text-[#396999]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                  </svg>
+                  <h4 class="text-sm font-semibold text-gray-700">添付ファイル（見積書）</h4>
+                  <span class="text-xs text-gray-400">任意</span>
+                </div>
+                <p class="text-xs text-gray-500 mb-2">業者から受け取った見積書があれば添付してください（PDF / 画像 / Excel / Word 対応）</p>
+                ${(() => {
+                  const estAtt = resubmitAttachments.find(a => a.file_type === 'estimate')
+                  return estAtt ? `
+                <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
+                  <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${estAtt.file_name}</span>
+                  <a href="/applications/files/${estAtt.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                  <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
+                </div>` : ''
+                })()}
+                <div class="flex items-center gap-2">
+                  <input type="file" name="estimate" id="estimateInput"
+                    accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.xlsx,.xls,.docx,.doc,application/pdf,image/*,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
+                    onchange="handleFilePreview(this, 'estimatePreview')"
+                    class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
+                  <button type="button" id="estimatePreview" onclick="openFilePreview('estimateInput')"
+                    class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
+                    👁 確認
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1440,12 +1471,26 @@ applications.get('/new', async (c) => {
         }
       }
 
+      // 見積書入力欄をクリア (元請以外に切り替えたとき)
+      function clearEstimateInput() {
+        const est = document.getElementById('estimateInput')
+        if (est) est.value = ''
+        const btn = document.getElementById('estimatePreview')
+        if (btn) {
+          btn.classList.add('hidden')
+          btn.classList.remove('flex')
+        }
+      }
+
       function togglePaymentFields() {
         // 新: プルダウン方式に伴い hidden input 経由で値を取得
         const val = document.getElementById('paymentTargetHidden')?.value || ''
         document.getElementById('kumiaiFields').classList.toggle('hidden', val !== 'kumiai')
         document.getElementById('tdFields').classList.toggle('hidden', val !== 'td')
-        if (val !== 'td') document.getElementById('motoukeFields').classList.add('hidden')
+        if (val !== 'td') {
+          document.getElementById('motoukeFields').classList.add('hidden')
+          clearEstimateInput()
+        }
         // 会社（TD）選択時は手数料を非表示
         document.getElementById('amountFields').classList.toggle('hidden', val === 'td')
         // TD選択時はrequiredを完全解除（手数料バリデーションはcheckFeeRequired()で行う）
@@ -1508,6 +1553,8 @@ applications.get('/new', async (c) => {
         // 新: プルダウン方式に伴い hidden input 経由で値を取得
         const val = document.getElementById('tdTypeHidden')?.value || ''
         document.getElementById('motoukeFields').classList.toggle('hidden', val !== 'motouke')
+        // 元請以外に切り替えたら見積書入力欄をクリア
+        if (val !== 'motouke') clearEstimateInput()
         // 請求書追加UIの表示を更新（委託内=5枠、元請=追加不可）
         updateInvoiceExtraUI()
         calcProfit()
@@ -1847,7 +1894,8 @@ applications.post('/', async (c) => {
   const inboxAttachmentName = body.inbox_attachment_name || null
 
   // 委託内時に動的追加された invoice3〜invoice6 も保存対象に含める（最大5枠 invoice2〜invoice6）
-  for (const fileKey of ['invoice1', 'invoice2', 'invoice3', 'invoice4', 'invoice5', 'invoice6', 'other1', 'other2']) {
+  // estimate: 元請時のみ任意添付される見積書（1枚）
+  for (const fileKey of ['invoice1', 'invoice2', 'invoice3', 'invoice4', 'invoice5', 'invoice6', 'other1', 'other2', 'estimate']) {
     const file = body[fileKey] as File | undefined
     if (file && file.size > 0) {
       const ext = file.name.split('.').pop()
@@ -2415,7 +2463,7 @@ applications.get('/:id', async (c) => {
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
           ${visibleAttachments.map(att => {
-            const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', invoice3: '請求書③', invoice4: '請求書④', invoice5: '請求書⑤', invoice6: '請求書⑥', other1: '添付資料①', other2: '添付資料②', kumiai_invoice: '管理組合宛請求書' }
+            const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', invoice3: '請求書③', invoice4: '請求書④', invoice5: '請求書⑤', invoice6: '請求書⑥', other1: '添付資料①', other2: '添付資料②', kumiai_invoice: '管理組合宛請求書', estimate: '見積書' }
             const ext = (att.file_name.split('.').pop() || '').toLowerCase()
             const isPdf = ext === 'pdf'
             const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext)
@@ -2708,7 +2756,7 @@ applications.get('/:id/review/:stepId', async (c) => {
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               ${(attachments.results as any[]).filter((a: any) => a.file_type !== 'kumiai_invoice').map(att => {
-                const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', invoice3: '請求書③', invoice4: '請求書④', invoice5: '請求書⑤', invoice6: '請求書⑥', other1: '添付①', other2: '添付②' }
+                const labels: Record<string, string> = { invoice1: '請求書①', invoice2: '請求書②', invoice3: '請求書③', invoice4: '請求書④', invoice5: '請求書⑤', invoice6: '請求書⑥', other1: '添付①', other2: '添付②', estimate: '見積書' }
                 const ext = (att.file_name.split('.').pop() || '').toLowerCase()
                 const isPdf = ext === 'pdf'
                 const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext)
@@ -3758,8 +3806,8 @@ applications.post('/:id/resubmit', async (c) => {
     origAttMap[att.file_type] = att
   }
 
-  // invoice1〜invoice6, other1, other2 それぞれ処理
-  const fileTypes = ['invoice1', 'invoice2', 'invoice3', 'invoice4', 'invoice5', 'invoice6', 'other1', 'other2']
+  // invoice1〜invoice6, other1, other2, estimate（元請時のみ任意）それぞれ処理
+  const fileTypes = ['invoice1', 'invoice2', 'invoice3', 'invoice4', 'invoice5', 'invoice6', 'other1', 'other2', 'estimate']
   for (const fileType of fileTypes) {
     const uploaded = body[fileType] as File | undefined
     if (uploaded && uploaded.size > 0) {
