@@ -85,6 +85,28 @@ async function sendNotification(
   }
 }
 
+// ============================================================
+// バックグラウンド実行ヘルパー
+// Cloudflare Workers の waitUntil() を使い、レスポンス返却後も処理を継続実行させる。
+// これにより SMTP / LINE WORKS API 待ちで画面遷移が遅くなるのを防ぐ。
+// executionCtx 未対応環境（ローカル wrangler dev の一部モード等）ではフォールバックで
+// 単純に Promise を投げて画面遷移を優先する（未await でも処理は継続する）。
+// ============================================================
+function runInBackground(c: any, task: () => Promise<void>): void {
+  const p = (async () => {
+    try {
+      await task()
+    } catch (e) {
+      console.error('[BG] バックグラウンドタスクエラー:', e)
+    }
+  })()
+  try {
+    c.executionCtx.waitUntil(p)
+  } catch {
+    // ローカル環境等で executionCtx が使えない場合は投げっぱなし（未 await）
+  }
+}
+
 // 申請一覧・検索
 applications.get('/', async (c) => {
   const cookie = c.req.header('Cookie')
@@ -2060,38 +2082,19 @@ applications.post('/', async (c) => {
   }
 
   // === 承認者への通知はバックグラウンドで送信（外部API待ちで画面遷移が遅くならないようにするため）===
-  // waitUntil: レスポンスを返した後もWorkerの処理を継続実行させるCloudflare Workers API
   if (firstStep) {
     const appUrl = `${new URL(c.req.url).origin}/applications/${appId}`
-    const bgTask = (async () => {
-      try {
-        await sendNotification(db, 'review_request', firstStep.reviewer_id, {
-          appNumber, title: body.title, applicantName: user.name, appUrl,
-          isTest: isTestFlag === 1
-        })
-        await db.prepare(
-          'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
-        ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
-          (isTestFlag === 1 ? '[TEST] ' : '') + buildMailSubject('review_request', appNumber), 'sent'
-        ).run()
-      } catch (e) {
-        console.error('[BG] 新規申請の通知送信エラー:', e)
-        try {
-          await db.prepare(
-            'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status, error_message) VALUES (?, ?, ?, ?, ?, ?, ?)'
-          ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
-            (isTestFlag === 1 ? '[TEST] ' : '') + buildMailSubject('review_request', appNumber), 'failed',
-            String((e as any)?.message || e).slice(0, 500)
-          ).run()
-        } catch {}
-      }
-    })()
-    // executionCtxが存在する場合はwaitUntilで登録（ローカル開発用にフォールバック）
-    try {
-      c.executionCtx.waitUntil(bgTask)
-    } catch {
-      // ローカルwrangler devなど executionCtx 未対応環境: 通常のPromiseとして流す（未await）
-    }
+    runInBackground(c, async () => {
+      await sendNotification(db, 'review_request', firstStep.reviewer_id, {
+        appNumber, title: body.title, applicantName: user.name, appUrl,
+        isTest: isTestFlag === 1
+      })
+      await db.prepare(
+        'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
+        (isTestFlag === 1 ? '[TEST] ' : '') + buildMailSubject('review_request', appNumber), 'sent'
+      ).run()
+    })
   }
 
   // 一覧画面へリダイレクト + 成功トースト用パラメータ付与
@@ -3146,17 +3149,19 @@ applications.post('/:id/motouke-remind', async (c) => {
   const newAppUrl = `${origin}/applications/${id}/motouke-b/confirm`
   const isTestApp = app.is_test === 1
 
-  await sendNotification(db, 'motouke_next', app.applicant_id, {
-    appNumber: app.application_number,
-    title: app.title,
-    applicantName: app.applicant_name,
-    appUrl: newAppUrl,
-    isTest: isTestApp,
-  } as any)
+  runInBackground(c, async () => {
+    await sendNotification(db, 'motouke_next', app.applicant_id, {
+      appNumber: app.application_number,
+      title: app.title,
+      applicantName: app.applicant_name,
+      appUrl: newAppUrl,
+      isTest: isTestApp,
+    } as any)
 
-  await db.prepare(
-    'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
-  ).bind(id, app.applicant_id, 'motouke_next_remind', '', (isTestApp ? '[TEST] ' : '') + `【再送信】${app.application_number} - 管理組合宛の請求書の承認・回覧開始のお願い`, 'sent').run()
+    await db.prepare(
+      'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(id, app.applicant_id, 'motouke_next_remind', '', (isTestApp ? '[TEST] ' : '') + `【再送信】${app.application_number} - 管理組合宛の請求書の承認・回覧開始のお願い`, 'sent').run()
+  })
 
   return c.redirect(`/applications/${id}?motouke_remind=ok`)
 })
@@ -3586,18 +3591,20 @@ applications.post('/:id/motouke-b/confirm', async (c) => {
 
   if (firstStep) {
     const appUrl = `${new URL(c.req.url).origin}/applications/${appId}`
-    await sendNotification(db, 'review_request', firstStep.reviewer_id, {
-      appNumber,
-      title: sourceApp.title || sourceApp.mansion_name || '',
-      applicantName: user.name,
-      appUrl,
-      isTest: isTestFlag === 1
+    runInBackground(c, async () => {
+      await sendNotification(db, 'review_request', firstStep.reviewer_id, {
+        appNumber,
+        title: sourceApp.title || sourceApp.mansion_name || '',
+        applicantName: user.name,
+        appUrl,
+        isTest: isTestFlag === 1
+      })
+      await db.prepare(
+        'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
+        (isTestFlag === 1 ? '[TEST] ' : '') + buildMailSubject('review_request', appNumber), 'sent'
+      ).run()
     })
-    await db.prepare(
-      'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(appId, firstStep.reviewer_id, 'review_request', firstStep.email,
-      (isTestFlag === 1 ? '[TEST] ' : '') + buildMailSubject('review_request', appNumber), 'sent'
-    ).run()
   }
 
   // 完了 → 申請B詳細画面へ
@@ -3643,16 +3650,21 @@ applications.post('/:id/review/:stepId', async (c) => {
 
     if (nextStep) {
       await db.prepare('UPDATE applications SET current_step = ?, updated_at = datetime("now") WHERE id = ?').bind(step.step_number + 1, id).run()
-      await sendNotification(db, 'review_request', nextStep.reviewer_id, {
-        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl,
-        isTest: isTestApp
+      // 通知はバックグラウンドで送信
+      runInBackground(c, async () => {
+        await sendNotification(db, 'review_request', nextStep.reviewer_id, {
+          appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl,
+          isTest: isTestApp
+        })
       })
     } else {
       // 全ステップ完了
       await db.prepare('UPDATE applications SET status = "completed", updated_at = datetime("now") WHERE id = ?').bind(id).run()
-      await sendNotification(db, 'completed', app.applicant_id, {
-        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl,
-        isTest: isTestApp
+      runInBackground(c, async () => {
+        await sendNotification(db, 'completed', app.applicant_id, {
+          appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, appUrl,
+          isTest: isTestApp
+        })
       })
     }
 
@@ -3671,17 +3683,19 @@ applications.post('/:id/review/:stepId', async (c) => {
       if (!existingB && kumiaiAtt) {
         const origin = new URL(c.req.url).origin
         const newAppUrl = `${origin}/applications/${id}/motouke-b/confirm`
-        await sendNotification(db, 'motouke_next', app.applicant_id, {
-          appNumber: app.application_number,
-          title: app.title,
-          applicantName: app.applicant_name,
-          appUrl: newAppUrl,
-          isTest: isTestApp,
-        } as any)
-        await db.prepare(
-          'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
-        ).bind(id, app.applicant_id, 'motouke_next', app.applicant_email || '',
-          (isTestApp ? '[TEST] ' : '') + `【元請セット申請】${app.application_number} - 管理組合宛請求書の申請をお願いします`, 'sent').run()
+        runInBackground(c, async () => {
+          await sendNotification(db, 'motouke_next', app.applicant_id, {
+            appNumber: app.application_number,
+            title: app.title,
+            applicantName: app.applicant_name,
+            appUrl: newAppUrl,
+            isTest: isTestApp,
+          } as any)
+          await db.prepare(
+            'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
+          ).bind(id, app.applicant_id, 'motouke_next', app.applicant_email || '',
+            (isTestApp ? '[TEST] ' : '') + `【元請セット申請】${app.application_number} - 管理組合宛請求書の申請をお願いします`, 'sent').run()
+        })
       }
     }
 
@@ -3690,9 +3704,11 @@ applications.post('/:id/review/:stepId', async (c) => {
       'UPDATE circulation_steps SET status = "rejected", action_comment = ?, acted_at = datetime("now") WHERE id = ?'
     ).bind(comment, stepId).run()
     await db.prepare('UPDATE applications SET status = "rejected", updated_at = datetime("now") WHERE id = ?').bind(id).run()
-    await sendNotification(db, 'rejected', app.applicant_id, {
-      appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl,
-      isTest: isTestApp
+    runInBackground(c, async () => {
+      await sendNotification(db, 'rejected', app.applicant_id, {
+        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl,
+        isTest: isTestApp
+      })
     })
 
   } else if (action === 'hold') {
@@ -3700,9 +3716,11 @@ applications.post('/:id/review/:stepId', async (c) => {
       'UPDATE circulation_steps SET status = "on_hold", action_comment = ?, acted_at = datetime("now") WHERE id = ?'
     ).bind(comment, stepId).run()
     await db.prepare('UPDATE applications SET status = "on_hold", updated_at = datetime("now") WHERE id = ?').bind(id).run()
-    await sendNotification(db, 'on_hold', app.applicant_id, {
-      appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl,
-      isTest: isTestApp
+    runInBackground(c, async () => {
+      await sendNotification(db, 'on_hold', app.applicant_id, {
+        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name, comment, appUrl,
+        isTest: isTestApp
+      })
     })
 
   } else if (action === 'return') {
@@ -3720,16 +3738,18 @@ applications.post('/:id/review/:stepId', async (c) => {
       WHERE id = ?
     `).bind(comment, step.step_number, user.uid, id).run()
 
-    // 申請者へ統合通知（メール + LINE WORKS）
-    await sendNotification(db, 'returned', app.applicant_id, {
-      appNumber: app.application_number,
-      title: app.title,
-      applicantName: app.applicant_name,
-      returnedReason: comment,
-      returnedFromStep: step.step_number,
-      returnedByName: user.name,
-      appUrl,
-      isTest: isTestApp
+    // 申請者へ統合通知（メール + LINE WORKS）はバックグラウンドで送信
+    runInBackground(c, async () => {
+      await sendNotification(db, 'returned', app.applicant_id, {
+        appNumber: app.application_number,
+        title: app.title,
+        applicantName: app.applicant_name,
+        returnedReason: comment,
+        returnedFromStep: step.step_number,
+        returnedByName: user.name,
+        appUrl,
+        isTest: isTestApp
+      })
     })
   }
 
@@ -3759,12 +3779,14 @@ applications.post('/:id/answer/:stepId', async (c) => {
 
   if (step && app) {
     const appUrl = `${new URL(c.req.url).origin}/applications/${id}`
-    await sendNotification(db, 'answered', (step as any).reviewer_id, {
-      appNumber: (app as any).application_number,
-      title: (app as any).title,
-      applicantName: user.name,
-      comment: body.answer,
-      appUrl
+    runInBackground(c, async () => {
+      await sendNotification(db, 'answered', (step as any).reviewer_id, {
+        appNumber: (app as any).application_number,
+        title: (app as any).title,
+        applicantName: user.name,
+        comment: body.answer,
+        appUrl
+      })
     })
   }
 
@@ -3901,38 +3923,44 @@ applications.post('/:id/resubmit', async (c) => {
   const reviewerStep3 = body.reviewer_step3 ? parseInt(body.reviewer_step3) : null
   await createCirculationSteps(db, newId, user.uid, editedPaymentTarget, editedMansionId, reviewerStep1, reviewerStep2, reviewerStep3)
 
-  // === 通知送信 ===
+  // === 通知送信はバックグラウンドで実行（画面遷移を先に返す）===
   const appUrl = `${new URL(c.req.url).origin}/applications/${newId}`
   if (isReturned) {
     // 差し戻し再申請の場合、全承認者に統合通知
-    const steps = await db.prepare(
+    const stepsRes = await db.prepare(
       'SELECT cs.reviewer_id FROM circulation_steps cs WHERE cs.application_id = ?'
     ).bind(newId).all()
-    for (const step of steps.results as any[]) {
-      await sendNotification(db, 'reapplied', step.reviewer_id, {
-        appNumber: newNumber,
-        title: editedTitle,
-        applicantName: user.name,
-        returnedReason: orig.returned_reason,
-        reapplyReason,
-        appUrl,
-        isTest: orig.is_test === 1
-      })
-    }
+    const reviewerIds = (stepsRes.results as any[]).map(s => s.reviewer_id)
+    runInBackground(c, async () => {
+      for (const reviewerId of reviewerIds) {
+        await sendNotification(db, 'reapplied', reviewerId, {
+          appNumber: newNumber,
+          title: editedTitle,
+          applicantName: user.name,
+          returnedReason: orig.returned_reason,
+          reapplyReason,
+          appUrl,
+          isTest: orig.is_test === 1
+        })
+      }
+    })
   } else {
     // rejected からの再提出: 最初の承認者にのみ通知（新規申請と同じ挙動）
     const firstStep = await db.prepare(
       'SELECT cs.*, u.email, u.name FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.application_id = ? AND cs.step_number = 1'
     ).bind(newId).first() as any
     if (firstStep) {
-      await sendNotification(db, 'review_request', firstStep.reviewer_id, {
-        appNumber: newNumber, title: editedTitle, applicantName: user.name, appUrl,
-        isTest: orig.is_test === 1
+      runInBackground(c, async () => {
+        await sendNotification(db, 'review_request', firstStep.reviewer_id, {
+          appNumber: newNumber, title: editedTitle, applicantName: user.name, appUrl,
+          isTest: orig.is_test === 1
+        })
       })
     }
   }
 
-  return c.redirect(`/applications/${newId}`)
+  // 一覧画面へリダイレクト + 成功トースト用パラメータ付与（新規申請と同じ挙動）
+  return c.redirect(`/applications?created=${encodeURIComponent(newNumber)}`)
 })
 
 // ファイルダウンロード
