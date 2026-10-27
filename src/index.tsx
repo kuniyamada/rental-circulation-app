@@ -1,10 +1,11 @@
 import { Hono } from 'hono'
 import { serveStatic } from 'hono/cloudflare-workers'
-import { getSessionUser, getSessionIdFromCookie } from './lib/auth'
+import { getSessionUser, getSessionIdFromCookie, PREVIEW_ROLES } from './lib/auth'
 import auth from './routes/auth'
 import applications from './routes/applications'
 import admin from './routes/admin'
 import inbox from './routes/inbox'
+import { previewRoleSelector, previewRoleBanner } from './routes/layout'
 
 type Bindings = { DB: D1Database; R2: R2Bucket }
 
@@ -15,6 +16,50 @@ app.use('/static/*', serveStatic({ root: './' }))
 
 // ファビコン（/favicon.ico への自動リクエスト対応：SVGへリダイレクト）
 app.get('/favicon.ico', (c) => c.redirect('/static/favicon.svg', 301))
+
+// ===== 役割プレビュー（管理者専用・見るだけ） =====
+// 切替: POST /preview-role  (role= 空 で解除)
+app.post('/preview-role', async (c) => {
+  const sessionId = getSessionIdFromCookie(c.req.header('Cookie') || null)
+  const user = await getSessionUser(c.env.DB, sessionId)
+  if (!user) return c.redirect('/login')
+  if (!user.real_is_admin) return c.redirect('/')
+  const body = await c.req.parseBody() as any
+  const role = String(body.role || '')
+  const value = role && PREVIEW_ROLES[role] ? role : null
+  await c.env.DB.prepare('UPDATE sessions SET preview_role = ? WHERE id = ?').bind(value, sessionId).run()
+  // 切替後はダッシュボードへ（権限で見られない画面に留まらないように）
+  return c.redirect('/')
+})
+
+// プレビュー中は閲覧のみ: 切替・ログアウト以外の書き込み操作(GET/HEAD以外)をブロック
+app.use('*', async (c, next) => {
+  const method = c.req.method
+  if (method === 'GET' || method === 'HEAD') return next()
+  const path = new URL(c.req.url).pathname
+  if (path === '/preview-role' || path === '/logout' || path === '/login') return next()
+  const sessionId = getSessionIdFromCookie(c.req.header('Cookie') || null)
+  if (!sessionId) return next()
+  const row = await c.env.DB.prepare(
+    'SELECT s.preview_role, u.is_admin FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ?'
+  ).bind(sessionId).first() as any
+  if (row && row.is_admin && row.preview_role) {
+    return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-6">
+  <div class="bg-white border-2 border-purple-300 rounded-xl shadow p-6 max-w-md text-center">
+    <p class="text-3xl mb-2">👁</p>
+    <p class="font-bold text-gray-800 mb-2">役割プレビュー中は操作できません</p>
+    <p class="text-sm text-gray-600 mb-4">プレビューは「見るだけ」の機能です。申請・承認などの操作を行うには、プレビューを解除してください。</p>
+    <div class="flex gap-2 justify-center">
+      <button onclick="history.back()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm">戻る</button>
+      <form method="POST" action="/preview-role"><input type="hidden" name="role" value="">
+        <button class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold">プレビューを解除</button></form>
+    </div>
+  </div>
+</body></html>`, 403)
+  }
+  return next()
+})
 
 // 認証ルート（/login, /logout, /change-password）
 app.route('/', auth)
@@ -220,6 +265,7 @@ app.get('/', async (c) => {
           リマインダー設定
         </a>
         ` : ''}
+        ${previewRoleSelector(user)}
       </nav>
     </aside>
   `
@@ -260,6 +306,7 @@ app.get('/', async (c) => {
       </div>
     </div>
   </header>
+  ${previewRoleBanner(user)}
   <div class="flex pt-14">
     ${sidebar}
     <div id="overlay" onclick="document.getElementById('sidebar').classList.add('-translate-x-full');this.classList.add('hidden')" class="fixed inset-0 bg-black bg-opacity-30 z-30 hidden lg:hidden"></div>

@@ -1,3 +1,47 @@
+
+// ============================================================
+// 役割プレビュー（管理者専用・見るだけ）の共通UI
+// ============================================================
+const PREVIEW_ROLE_OPTIONS: Array<[string, string]> = [
+  ['front', '担当者'],
+  ['front_supervisor', '担当者/上司'],
+  ['operations', '業務管理課'],
+  ['accounting', '会計'],
+  ['honsha', '本社経理'],
+]
+
+/** サイドバー最下部に置く「役割プレビュー」切替ボックス（本来の管理者のみ表示） */
+export function previewRoleSelector(user: any): string {
+  if (!user || !user.real_is_admin) return ''
+  const cur = user.preview_role || ''
+  return `
+        <div class="mt-4 mx-1 p-3 rounded-lg border ${cur ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-gray-50'}">
+          <form method="POST" action="/preview-role">
+            <label class="block text-xs font-bold ${cur ? 'text-purple-700' : 'text-gray-500'} mb-1.5">👁 役割プレビュー</label>
+            <select name="role" onchange="this.form.submit()"
+              class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-purple-400 outline-none">
+              <option value="">（通常表示）</option>
+              ${PREVIEW_ROLE_OPTIONS.map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+            <p class="text-[10px] text-gray-400 mt-1 leading-snug">選んだ役割から見た画面を確認できます（見るだけ）</p>
+          </form>
+        </div>`
+}
+
+/** プレビュー中に画面上部に出す帯 */
+export function previewRoleBanner(user: any): string {
+  if (!user || !user.real_is_admin || !user.preview_role) return ''
+  const label = (PREVIEW_ROLE_OPTIONS.find(([v]) => v === user.preview_role) || ['', user.preview_role])[1]
+  return `
+  <div class="fixed top-14 left-0 right-0 z-[45] bg-purple-600 text-white text-xs sm:text-sm px-4 py-1.5 flex items-center justify-center gap-3 shadow">
+    <span>👁 役割プレビュー中：<strong>${label}</strong> から見た画面です（見るだけ・操作はできません）</span>
+    <form method="POST" action="/preview-role" class="inline"><input type="hidden" name="role" value="">
+      <button class="bg-white text-purple-700 font-semibold px-2.5 py-0.5 rounded hover:bg-purple-50">解除する</button>
+    </form>
+  </div>
+  <div class="h-8"></div>`
+}
+
 export function layout(title: string, content: string, user: any): string {
   const roleLabel: Record<string, string> = {
     front: '担当者',
@@ -65,6 +109,7 @@ export function layout(title: string, content: string, user: any): string {
       </div>
     </div>
   </header>
+  ${previewRoleBanner(user)}
 
   <div class="flex pt-14">
     <!-- サイドバー（PC: 常時表示 / スマホ: ドロワー） -->
@@ -150,6 +195,7 @@ export function layout(title: string, content: string, user: any): string {
           テストモード${user.test_mode ? ' (ON)' : ''}
         </a>
         ` : ''}
+        ${previewRoleSelector(user)}
       </nav>
     </aside>
 
