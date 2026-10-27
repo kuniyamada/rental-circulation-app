@@ -131,8 +131,7 @@ function loginPage(error?: string | null) {
       <div class="mb-6">
         <label class="block text-sm font-medium text-gray-700 mb-2">パスワード</label>
         <input type="password" name="password" required
-          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#396999] focus:border-transparent outline-none transition"
-          placeholder="初期値は社員番号と同じです">
+          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#396999] focus:border-transparent outline-none transition">
       </div>
       <button type="submit"
         class="w-full bg-[#396999] hover:bg-[#2E5580] text-white font-semibold py-3 rounded-lg transition duration-200">
