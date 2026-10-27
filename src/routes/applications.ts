@@ -909,7 +909,7 @@ applications.get('/new', async (c) => {
                 class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
                 <option value="">選択してください</option>
                 ${(supervisorCandidates.results as any[]).map((u: any) => {
-                  const roleTag = isTestMode && u.role ? ` [${u.role}]` : ''
+                  const roleTag = ''  // 役職の英語表記 [role] は非表示
                   return `<option value="${u.id}">${u.name}${roleTag}</option>`
                 }).join('')}
               </select>
@@ -929,7 +929,7 @@ applications.get('/new', async (c) => {
                 class="w-full px-3 py-2.5 border ${isTestMode ? 'border-yellow-300 bg-yellow-50' : 'border-gray-300 bg-white'} rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
                 <option value="">選択してください</option>
                 ${(opStaffCandidates.results as any[]).map((u: any) => {
-                  const roleTag = isTestMode && u.role ? ` [${u.role}]` : ''
+                  const roleTag = ''  // 役職の英語表記 [role] は非表示
                   return `<option value="${u.id}"${defaultStep2User && u.id === defaultStep2User.id ? ' selected' : ''}>${u.name}${roleTag}</option>`
                 }).join('')}
               </select>
@@ -3393,7 +3393,7 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
                       class="w-full text-sm font-medium text-gray-800 px-3 py-1.5 border ${isTestMode ? 'border-yellow-400 bg-white focus:ring-yellow-500' : 'border-amber-400 bg-white focus:ring-amber-500'} rounded focus:ring-2 outline-none">
                       <option value="">▼ ${isTestMode ? 'ユーザーを選択してください' : '会計担当者を選択してください'}</option>
                       ${step3Candidates.map((u: any) => {
-                        const roleTag = isTestMode && u.role ? ` [${u.role}]` : ''
+                        const roleTag = ''  // 役職の英語表記 [role] は非表示
                         // マンションマスタで元々設定されていた人がいれば初期選択
                         const isDefault = sourceApp.accounting_user_id && u.id === sourceApp.accounting_user_id
                         return `<option value="${u.id}" ${isDefault ? 'selected' : ''}>${u.name}${roleTag}</option>`
