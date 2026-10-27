@@ -444,9 +444,10 @@ applications.get('/new', async (c) => {
   // 上長(Step1)はテストモードに関係なく、役割「担当者/上司」(front_supervisor) のみ
   const supervisorCandidates = await db.prepare("SELECT id, name, role FROM users WHERE role = 'front_supervisor' AND is_active = 1 ORDER BY name").all()
 
-  const opStaffCandidates = isTestMode
-    ? await db.prepare("SELECT id, name, role FROM users WHERE is_active = 1 ORDER BY name").all()
-    : await db.prepare("SELECT id, name FROM users WHERE role = 'operations' AND is_active = 1 ORDER BY name").all()
+  // 業務管理課(Step2)の候補: 本橋(030)・高橋(139)の2名のみ（テストモードでも同じ）。初期値は本橋
+  const opStaffCandidates = await db.prepare(
+    "SELECT id, name, role FROM users WHERE employee_number IN ('030','139') AND is_active = 1 ORDER BY CASE employee_number WHEN '030' THEN 0 ELSE 1 END"
+  ).all()
 
   // 業務管理課デフォルト：本橋 美由紀（employee_number=030）
   const defaultStep2User = await db.prepare(
@@ -2126,8 +2127,14 @@ async function createCirculationSteps(
     ).bind(appId, s1).run()
   }
 
-  // Step2: フォーム指定 → なければ業務管理課primary（=本橋 employee_number 030）
+  // Step2: 本橋(030)・高橋(139)以外が指定された場合は無効とし、本橋を採用
   let s2 = step2UserId
+  if (s2) {
+    const allowed = await db.prepare(
+      "SELECT id FROM users WHERE id = ? AND employee_number IN ('030','139') AND is_active = 1"
+    ).bind(s2).first()
+    if (!allowed) s2 = null
+  }
   if (!s2) {
     // 本橋（employee_number=030）を優先的に選択
     const motohashi = await db.prepare(
