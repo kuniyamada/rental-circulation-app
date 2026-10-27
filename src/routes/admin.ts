@@ -97,7 +97,7 @@ admin.get('/test-mode', async (c) => {
         <div class="space-y-3 text-sm text-gray-700">
           <h3 class="font-semibold text-gray-800">🧪 テストモード ON にすると</h3>
           <ul class="list-disc list-inside space-y-1.5 text-xs text-gray-600 pl-2">
-            <li>あなたの<strong>新規申請フォームで、上長・業務管理課・最終承認者を全ユーザーから自由に選択</strong>できるようになります（役割制限を解除）</li>
+            <li>あなたの新規申請フォームで、回覧・承認先（上長・業務管理課・最終）のプルダウンに、通常の候補に加えて<strong>本橋 美由紀・山崎 修</strong>も表示されます</li>
             <li>作成された申請には <span class="inline-block bg-yellow-100 text-yellow-700 text-xs font-semibold px-2 py-0.5 rounded">🧪TEST</span> バッジが表示されます</li>
             <li>メール通知の件名に <code class="bg-gray-100 text-xs px-1.5 py-0.5 rounded">[TEST]</code> が付与されます</li>
             <li>LINE WORKS 通知にも 🧪TEST プレフィックスが付きます</li>

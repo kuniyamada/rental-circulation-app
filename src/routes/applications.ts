@@ -441,13 +441,23 @@ applications.get('/new', async (c) => {
 
   // 回覧先候補取得
   // テストモード時は全アクティブユーザーを候補に、通常時は役割で絞る
-  // 上長(Step1)はテストモードに関係なく、役割「担当者/上司」(front_supervisor) のみ
-  const supervisorCandidates = await db.prepare("SELECT id, name, role FROM users WHERE role = 'front_supervisor' AND is_active = 1 ORDER BY name").all()
+  // テストモード時のみ、全ての回覧・承認先プルダウンに追加するテスト用ユーザー（本橋 030・山崎 049）
+  const testExtraUsers = isTestMode
+    ? ((await db.prepare("SELECT id, name, role FROM users WHERE employee_number IN ('030','049') AND is_active = 1 ORDER BY employee_number").all()).results as any[])
+    : []
+  const withTestExtras = (res: any) => {
+    const list = [...((res.results || []) as any[])]
+    for (const u of testExtraUsers) if (!list.some((x: any) => x.id === u.id)) list.push(u)
+    return { results: list }
+  }
+
+  // 上長(Step1)は役割「担当者/上司」(front_supervisor) のみ（テストモード時は本橋・山崎を追加）
+  const supervisorCandidates = withTestExtras(await db.prepare("SELECT id, name, role FROM users WHERE role = 'front_supervisor' AND is_active = 1 ORDER BY name").all())
 
   // 業務管理課(Step2)の候補: 本橋(030)・高橋(139)の2名のみ（テストモードでも同じ）。初期値は本橋
-  const opStaffCandidates = await db.prepare(
+  const opStaffCandidates = withTestExtras(await db.prepare(
     "SELECT id, name, role FROM users WHERE employee_number IN ('030','139') AND is_active = 1 ORDER BY CASE employee_number WHEN '030' THEN 0 ELSE 1 END"
-  ).all()
+  ).all())
 
   // 業務管理課デフォルト：本橋 美由紀（employee_number=030）
   const defaultStep2User = await db.prepare(
@@ -456,11 +466,11 @@ applications.get('/new', async (c) => {
 
   // 会計課ユーザー
   // 最終(Step3)・管理組合時: テストモードに関係なく役割「会計」のみ
-  const accountingUsers = await db.prepare("SELECT id, name FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name").all()
+  const accountingUsers = withTestExtras(await db.prepare("SELECT id, name FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name").all())
 
   // 本社経理ユーザー
   // 最終(Step3)・管理組合以外: テストモードに関係なく役割「本社経理」のみ（初期値 山崎 修）
-  const honshaUsers = await db.prepare("SELECT id, name FROM users WHERE role = 'honsha' AND is_active = 1 ORDER BY name").all()
+  const honshaUsers = withTestExtras(await db.prepare("SELECT id, name FROM users WHERE role = 'honsha' AND is_active = 1 ORDER BY name").all())
 
   // 本社経理デフォルト：山崎 修（employee_number=049）
   const defaultHonshaUser = await db.prepare(
@@ -530,7 +540,7 @@ applications.get('/new', async (c) => {
             <div class="flex-1">
               <p class="text-sm font-bold text-yellow-900">テストモード稼働中</p>
               <ul class="text-xs text-yellow-800 mt-1.5 space-y-0.5 list-disc list-inside">
-                <li>回覧・承認先を<strong>全ユーザーから自由に選択</strong>できます（役割制限なし）</li>
+                <li>回覧・承認先のプルダウンに、通常の候補に加えて<strong>本橋 美由紀・山崎 修</strong>も表示されます</li>
                 <li>この申請は <span class="inline-block bg-yellow-200 text-yellow-900 text-xs font-semibold px-1.5 py-0.5 rounded">🧪TEST</span> バッジ付きで作成されます</li>
                 <li>通知メール件名に <code class="bg-yellow-100 px-1 rounded">[TEST]</code>、LINE WORKSに <code class="bg-yellow-100 px-1 rounded">🧪TEST</code> が付きます</li>
               </ul>
@@ -2064,7 +2074,7 @@ applications.post('/', async (c) => {
   const reviewerStep1 = body.reviewer_step1 ? parseInt(body.reviewer_step1) : null
   const reviewerStep2 = body.reviewer_step2 ? parseInt(body.reviewer_step2) : null
   const reviewerStep3 = body.reviewer_step3 ? parseInt(body.reviewer_step3) : null
-  await createCirculationSteps(db, appId as number, user.uid, effectivePaymentTarget, mansionId, reviewerStep1, reviewerStep2, reviewerStep3)
+  await createCirculationSteps(db, appId as number, user.uid, effectivePaymentTarget, mansionId, reviewerStep1, reviewerStep2, reviewerStep3, isTestFlag === 1)
 
   // 最初の承認者にメール通知
   const firstStep = await db.prepare(
@@ -2109,7 +2119,8 @@ async function createCirculationSteps(
   mansionId: number | null,
   step1UserId: number | null = null,
   step2UserId: number | null = null,
-  step3UserId: number | null = null
+  step3UserId: number | null = null,
+  isTestMode: boolean = false
 ) {
   // Step1: フォーム指定 → なければ直属上長
   let s1 = step1UserId
@@ -2126,10 +2137,12 @@ async function createCirculationSteps(
   }
 
   // Step2: 本橋(030)・高橋(139)以外が指定された場合は無効とし、本橋を採用
+  //        （テストモード時のみ 山崎(049) も許可）
   let s2 = step2UserId
   if (s2) {
+    const allowedNums = isTestMode ? "('030','139','049')" : "('030','139')"
     const allowed = await db.prepare(
-      "SELECT id FROM users WHERE id = ? AND employee_number IN ('030','139') AND is_active = 1"
+      `SELECT id FROM users WHERE id = ? AND employee_number IN ${allowedNums} AND is_active = 1`
     ).bind(s2).first()
     if (!allowed) s2 = null
   }
@@ -3231,7 +3244,7 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
   //  - マンションに会計担当が未設定 → プルダウンで選択させる（accountingロールから）
   //    ※ フォールバックで勝手に誰かを選ぶのはやめる（意図しない人に承認依頼が飛ぶのを防ぐ）
   //  - テストモード（user.test_mode=1 かつ admin）→ 常にプルダウンを表示し、
-  //    全アクティブユーザーから選択可（ロール制限なし・テスト用途）
+  //    会計ロール＋本橋・山崎から選択可（テスト用途）
   const isTestMode = user.is_admin && user.test_mode === 1
   let step3User: any = null
   let step3IsFixed = false  // true: マンションマスタで確定, false: 未設定なのでユーザーが選ぶ
@@ -3252,7 +3265,7 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
     ? []
     : isTestMode
       ? ((await db.prepare(
-          "SELECT id, name, role FROM users WHERE is_active = 1 ORDER BY name"
+          "SELECT id, name, role FROM users WHERE is_active = 1 AND (role = 'accounting' OR employee_number IN ('030','049')) ORDER BY CASE WHEN role = 'accounting' THEN 0 ELSE 1 END, name"
         ).all()).results as any[])
       : ((await db.prepare(
           "SELECT id, name, role FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name"
@@ -3497,7 +3510,7 @@ applications.post('/:id/motouke-b/confirm', async (c) => {
 
   // Step3: マンションの会計担当を決定
   //   優先順位:
-  //     0) テストモード ON かつ プルダウンから選ばれた場合 → その値を優先（ロール制限なし）
+  //     0) テストモード ON かつ プルダウンから選ばれた場合 → その値を優先（会計＋本橋・山崎）
   //     1) マンションマスタに accounting_user_id が設定済み → それを使用（プルダウン非表示）
   //     2) マンションマスタ未設定 → 確認画面のプルダウンから選ばれた step3_user_id を使用
   //   ※ フォールバックで勝手に誰かを選ぶのはやめる（意図しない承認依頼を防ぐ）
@@ -3508,9 +3521,9 @@ applications.post('/:id/motouke-b/confirm', async (c) => {
   let step3Id: number | null = null
 
   if (isTestModePost && submittedStep3) {
-    // テストモード: プルダウン優先、全アクティブユーザーを許容（ロール制限なし）
+    // テストモード: プルダウン優先、会計ロール＋本橋・山崎を許容
     const target = await db.prepare(
-      "SELECT id, role, is_active FROM users WHERE id = ?"
+      "SELECT id, role, is_active FROM users WHERE id = ? AND (role = 'accounting' OR employee_number IN ('030','049'))"
     ).bind(submittedStep3).first() as any
     if (!target || !target.is_active) {
       return c.redirect(`/applications/${id}/motouke-b/confirm?err=${encodeURIComponent('選択されたユーザーが存在しないか無効化されています')}`)
@@ -3522,7 +3535,7 @@ applications.post('/:id/motouke-b/confirm', async (c) => {
   } else if (submittedStep3) {
     // 通常＋マスタ未設定: プルダウンから accountingロール限定で選択
     const target = await db.prepare(
-      "SELECT id, role, is_active FROM users WHERE id = ?"
+      "SELECT id, role, is_active FROM users WHERE id = ? AND (role = 'accounting' OR employee_number IN ('030','049'))"
     ).bind(submittedStep3).first() as any
     if (!target || !target.is_active) {
       return c.redirect(`/applications/${id}/motouke-b/confirm?err=${encodeURIComponent('選択されたユーザーが存在しないか無効化されています')}`)
@@ -3946,7 +3959,7 @@ applications.post('/:id/resubmit', async (c) => {
   const reviewerStep1 = body.reviewer_step1 ? parseInt(body.reviewer_step1) : null
   const reviewerStep2 = body.reviewer_step2 ? parseInt(body.reviewer_step2) : null
   const reviewerStep3 = body.reviewer_step3 ? parseInt(body.reviewer_step3) : null
-  await createCirculationSteps(db, newId, user.uid, editedPaymentTarget, editedMansionId, reviewerStep1, reviewerStep2, reviewerStep3)
+  await createCirculationSteps(db, newId, user.uid, editedPaymentTarget, editedMansionId, reviewerStep1, reviewerStep2, reviewerStep3, orig.is_test === 1)
 
   // === 通知送信はバックグラウンドで実行（画面遷移を先に返す）===
   const appUrl = `${new URL(c.req.url).origin}/applications/${newId}`
