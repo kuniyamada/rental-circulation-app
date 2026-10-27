@@ -901,7 +901,7 @@ applications.get('/new', async (c) => {
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1.5">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-[#D5E5F2] text-[#2E5580] rounded-full text-xs font-bold mr-1">1</span>
-                回覧・承認先（上長） <span class="text-red-500">*</span>
+                回覧・承認先（上長）
                 
               </label>
               <select name="reviewer_step1" required
@@ -921,7 +921,7 @@ applications.get('/new', async (c) => {
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1.5">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold mr-1">2</span>
-                回覧・承認先（業務管理課） <span class="text-red-500">*</span>
+                回覧・承認先（業務管理課）
                 
               </label>
               <select name="reviewer_step2" required
@@ -939,7 +939,7 @@ applications.get('/new', async (c) => {
             <div class="space-y-3">
               <label class="block text-sm font-medium text-gray-700">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-green-100 text-green-700 rounded-full text-xs font-bold mr-1">3</span>
-                回覧・承認先（最終） <span class="text-red-500">*</span>
+                回覧・承認先（最終）
                 
               </label>
               <!-- 役割選択（hidden化）
