@@ -125,8 +125,7 @@ function loginPage(error?: string | null) {
       <div class="mb-5">
         <label class="block text-sm font-medium text-gray-700 mb-2">社員番号</label>
         <input type="text" name="employee_number" required
-          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#396999] focus:border-transparent outline-none transition"
-          placeholder="例: U001">
+          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#396999] focus:border-transparent outline-none transition">
       </div>
       <div class="mb-6">
         <label class="block text-sm font-medium text-gray-700 mb-2">パスワード</label>
