@@ -441,9 +441,8 @@ applications.get('/new', async (c) => {
 
   // 回覧先候補取得
   // テストモード時は全アクティブユーザーを候補に、通常時は役割で絞る
-  const supervisorCandidates = isTestMode
-    ? await db.prepare("SELECT id, name, role FROM users WHERE is_active = 1 ORDER BY name").all()
-    : await db.prepare("SELECT id, name FROM users WHERE role = 'front_supervisor' AND is_active = 1 ORDER BY name").all()
+  // 上長(Step1)はテストモードに関係なく、役割「担当者/上司」(front_supervisor) のみ
+  const supervisorCandidates = await db.prepare("SELECT id, name, role FROM users WHERE role = 'front_supervisor' AND is_active = 1 ORDER BY name").all()
 
   const opStaffCandidates = isTestMode
     ? await db.prepare("SELECT id, name, role FROM users WHERE is_active = 1 ORDER BY name").all()
