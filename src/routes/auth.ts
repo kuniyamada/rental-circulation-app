@@ -139,7 +139,6 @@ function loginPage(error?: string | null) {
         ログイン
       </button>
     </form>
-    <p class="text-center text-xs text-gray-400 mt-6">初期パスワードは社員番号と同じです</p>
   </div>
 </body>
 </html>`
