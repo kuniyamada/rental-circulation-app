@@ -675,7 +675,7 @@ admin.post('/users', async (c) => {
   const hash = await hashPassword(body.employee_number) // 初期PW=社員番号
   await db.prepare(`
     INSERT INTO users (employee_number, name, email, department, role, is_supervisor, is_admin, supervisor_id, password_hash, must_change_password)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
   `).bind(
     body.employee_number, body.name, body.email, body.department || null,
     body.role, body.is_supervisor ? 1 : 0, body.is_admin ? 1 : 0,
@@ -720,7 +720,7 @@ admin.post('/users/:id', async (c) => {
   // パスワードリセット
   if (body.reset_password) {
     const hash = await hashPassword(body.employee_number)
-    await db.prepare('UPDATE users SET password_hash=?, must_change_password=1 WHERE id=?').bind(hash, id).run()
+    await db.prepare('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?').bind(hash, id).run()
   }
 
   // ---- 担当区分の更新（operations_staff / honsha_staff）----

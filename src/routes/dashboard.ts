@@ -10,7 +10,7 @@ dashboard.get('/', async (c) => {
   const sessionId = getSessionIdFromCookie(cookie)
   const user = await getSessionUser(c.env.DB, sessionId)
   if (!user) return c.redirect('/login')
-  if (user.must_change_password) return c.redirect('/change-password')
+  // パスワード変更は任意（強制リダイレクトなし）
 
   const db = c.env.DB
 

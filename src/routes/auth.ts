@@ -219,6 +219,7 @@ function changePasswordPage(error?: string) {
       </div>
       <button type="submit" class="w-full bg-[#396999] hover:bg-[#2E5580] text-white font-semibold py-3 rounded-lg transition">変更する</button>
     </form>
+    <a href="/" class="block text-center text-sm text-gray-500 hover:text-[#396999] mt-4">変更せずに戻る</a>
   </div>
 </body>
 </html>`
