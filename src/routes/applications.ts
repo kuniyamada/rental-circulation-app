@@ -902,7 +902,7 @@ applications.get('/new', async (c) => {
               <label class="block text-sm font-medium text-gray-700 mb-1.5">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-[#D5E5F2] text-[#2E5580] rounded-full text-xs font-bold mr-1">1</span>
                 回覧・承認先（上長） <span class="text-red-500">*</span>
-                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
+                
               </label>
               <select name="reviewer_step1" required
                 onchange="updateReviewerPreview()"
@@ -922,7 +922,7 @@ applications.get('/new', async (c) => {
               <label class="block text-sm font-medium text-gray-700 mb-1.5">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold mr-1">2</span>
                 回覧・承認先（業務管理課） <span class="text-red-500">*</span>
-                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
+                
               </label>
               <select name="reviewer_step2" required
                 onchange="updateReviewerPreview()"
@@ -940,7 +940,7 @@ applications.get('/new', async (c) => {
               <label class="block text-sm font-medium text-gray-700">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-green-100 text-green-700 rounded-full text-xs font-bold mr-1">3</span>
                 回覧・承認先（最終） <span class="text-red-500">*</span>
-                ${isTestMode ? '<span class="ml-2 text-xs text-yellow-700">🧪 全ユーザーから選択可</span>' : ''}
+                
               </label>
               <!-- 役割選択（hidden化）
                    支払先プルダウンから支払先を選ぶと、syncStep3FromPaymentTarget() が
@@ -3386,7 +3386,6 @@ applications.get('/:id/motouke-b/confirm', async (c) => {
                     ${isTestMode ? `
                       <div class="flex items-center gap-2 mb-1">
                         <span class="text-xs font-bold text-yellow-800 bg-yellow-200 px-2 py-0.5 rounded-full">🧪 テストモード</span>
-                        <span class="text-xs text-yellow-700">全ユーザーから選択可</span>
                       </div>
                     ` : ''}
                     <select name="step3_user_id" form="motoukeBForm" required
