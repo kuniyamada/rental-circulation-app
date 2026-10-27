@@ -337,7 +337,7 @@ inbox.post('/', async (c) => {
     INSERT INTO invoice_inbox
       (mansion_id, front_user_id, registered_by, attachment_key, attachment_name, note, status, notified_at, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-  `).bind(mansionId, frontUserId, user.id, attachmentKey, attachmentName, note, now, now, now).run()
+  `).bind(mansionId, frontUserId, user.uid, attachmentKey, attachmentName, note, now, now, now).run()
 
   const inboxId = result.meta.last_row_id
 
@@ -386,7 +386,7 @@ inbox.get('/:id/download', async (c) => {
   if (!item) return c.notFound()
 
   // 権限チェック（業務管理課・管理者・担当フロント本人）
-  if (!user.is_admin && user.role !== 'operations' && user.id !== item.front_user_id) {
+  if (!user.is_admin && user.role !== 'operations' && user.uid !== item.front_user_id) {
     return c.redirect('/')
   }
 

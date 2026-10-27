@@ -106,7 +106,7 @@ app.get('/', async (c) => {
     : { results: [] }
 
   // フロント向け：自分宛の未申請受付
-  const myPendingInbox = (user.role === 'front')
+  const myPendingInbox = (user.role === 'front' || user.role === 'front_supervisor')
     ? await db.prepare(`
         SELECT ii.*, m.name as mansion_name, r.name as registered_by_name
         FROM invoice_inbox ii
@@ -286,7 +286,7 @@ app.get('/', async (c) => {
                   </div>
                   <div class="flex gap-2 items-center">
                     ${item.attachment_key ? `<a href="/inbox/${item.id}/download" class="text-xs text-[#396999] hover:underline">📎請求書</a>` : ''}
-                    <a href="/applications/new" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">回覧申請する</a>
+                    <a href="/applications/new?inbox_id=${item.id}" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">回覧申請する</a>
                   </div>
                 </div>
               `).join('')}

@@ -216,7 +216,10 @@ applications.get('/', async (c) => {
     <div class="bg-white rounded-xl shadow-sm border border-gray-100">
       <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
         <h2 class="font-semibold text-gray-800">検索結果 <span class="text-[#396999]">${apps.results.length}件</span></h2>
+        <div class="flex gap-2">
+        ${(user.role === 'operations' || user.is_admin) ? `<a href="/inbox/new" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">📥 請求書を登録・担当者へ送信</a>` : ''}
         ${(['admin','front','front_supervisor'].includes(user.role)) ? `<a href="/applications/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition">＋ 新規申請</a>` : ''}
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -906,6 +909,17 @@ applications.get('/new', async (c) => {
             </div>
 
             <!-- Step1: 上長 -->
+            ${(inboxData && user.role === 'front_supervisor') ? `
+            <div>
+              <label class="block text-sm font-medium text-gray-400 mb-1.5">
+                <span class="inline-flex items-center justify-center w-5 h-5 bg-gray-100 text-gray-400 rounded-full text-xs font-bold mr-1">1</span>
+                回覧・承認先（上長）
+              </label>
+              <div class="px-3 py-2.5 border border-dashed border-gray-300 bg-gray-50 rounded-lg text-sm text-gray-500">
+                ⏭ 請求書受付からの申請（担当者/上司）のため、上長は飛ばして ② 業務管理課 から回覧します
+              </div>
+            </div>
+            ` : `
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1.5">
                 <span class="inline-flex items-center justify-center w-5 h-5 bg-[#D5E5F2] text-[#2E5580] rounded-full text-xs font-bold mr-1">1</span>
@@ -924,6 +938,7 @@ applications.get('/new', async (c) => {
               <!-- マンション選択時、上長がマスタ未設定/候補外だと表示される警告 -->
               <p id="step1MansionWarn" class="hidden mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5"></p>
             </div>
+            `}
 
             <!-- Step2: 業務管理課 -->
             <div>
@@ -2074,15 +2089,25 @@ applications.post('/', async (c) => {
   const reviewerStep1 = body.reviewer_step1 ? parseInt(body.reviewer_step1) : null
   const reviewerStep2 = body.reviewer_step2 ? parseInt(body.reviewer_step2) : null
   const reviewerStep3 = body.reviewer_step3 ? parseInt(body.reviewer_step3) : null
-  await createCirculationSteps(db, appId as number, user.uid, effectivePaymentTarget, mansionId, reviewerStep1, reviewerStep2, reviewerStep3, isTestFlag === 1)
+  // 請求書受付(本橋さん等の業務管理課から回ってきた案件)を「担当者/上司」が申請する場合は
+  // ①上長(Step1)を飛ばして ②業務管理課 から回覧開始
+  const inboxIdFromBody = body.inbox_id ? parseInt(body.inbox_id) : null
+  let skipStep1 = false
+  if (inboxIdFromBody && user.role === 'front_supervisor') {
+    const inboxRow = await db.prepare('SELECT id FROM invoice_inbox WHERE id = ?').bind(inboxIdFromBody).first()
+    skipStep1 = !!inboxRow
+  }
+  await createCirculationSteps(db, appId as number, user.uid, effectivePaymentTarget, mansionId, reviewerStep1, reviewerStep2, reviewerStep3, isTestFlag === 1, skipStep1)
 
-  // 最初の承認者にメール通知
+  // 最初の承認者（最小のステップ番号）にメール通知 + current_step を合わせる
   const firstStep = await db.prepare(
-    'SELECT cs.*, u.email, u.name FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.application_id = ? AND cs.step_number = 1'
+    'SELECT cs.*, u.email, u.name FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.application_id = ? ORDER BY cs.step_number ASC LIMIT 1'
   ).bind(appId).first() as any
+  if (firstStep && firstStep.step_number !== 1) {
+    await db.prepare('UPDATE applications SET current_step = ? WHERE id = ?').bind(firstStep.step_number, appId).run()
+  }
 
   // inbox引き継ぎの場合、invoice_inboxのstatusをappliedに更新（DB更新なのでawaitで確実に）
-  const inboxIdFromBody = body.inbox_id ? parseInt(body.inbox_id) : null
   if (inboxIdFromBody) {
     const now = new Date().toISOString()
     await db.prepare(
@@ -2120,11 +2145,12 @@ async function createCirculationSteps(
   step1UserId: number | null = null,
   step2UserId: number | null = null,
   step3UserId: number | null = null,
-  isTestMode: boolean = false
+  isTestMode: boolean = false,
+  skipStep1: boolean = false
 ) {
-  // Step1: フォーム指定 → なければ直属上長
-  let s1 = step1UserId
-  if (!s1) {
+  // Step1: フォーム指定 → なければ直属上長（skipStep1 時は作成しない）
+  let s1 = skipStep1 ? null : step1UserId
+  if (!s1 && !skipStep1) {
     const supervisor = await db.prepare(
       'SELECT supervisor_id FROM users WHERE id = ?'
     ).bind(applicantId).first() as any
@@ -3662,11 +3688,11 @@ applications.post('/:id/review/:stepId', async (c) => {
 
     // 次のステップへ
     const nextStep = await db.prepare(
-      'SELECT cs.*, u.email, u.name FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.application_id = ? AND cs.step_number = ? AND cs.status = "pending"'
-    ).bind(id, step.step_number + 1).first() as any
+      'SELECT cs.*, u.email, u.name FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.application_id = ? AND cs.step_number > ? AND cs.status = "pending" ORDER BY cs.step_number ASC LIMIT 1'
+    ).bind(id, step.step_number).first() as any
 
     if (nextStep) {
-      await db.prepare('UPDATE applications SET current_step = ?, updated_at = datetime("now") WHERE id = ?').bind(step.step_number + 1, id).run()
+      await db.prepare('UPDATE applications SET current_step = ?, updated_at = datetime("now") WHERE id = ?').bind(nextStep.step_number, id).run()
       // 通知はバックグラウンドで送信
       runInBackground(c, async () => {
         await sendNotification(db, 'review_request', nextStep.reviewer_id, {
@@ -3959,7 +3985,19 @@ applications.post('/:id/resubmit', async (c) => {
   const reviewerStep1 = body.reviewer_step1 ? parseInt(body.reviewer_step1) : null
   const reviewerStep2 = body.reviewer_step2 ? parseInt(body.reviewer_step2) : null
   const reviewerStep3 = body.reviewer_step3 ? parseInt(body.reviewer_step3) : null
-  await createCirculationSteps(db, newId, user.uid, editedPaymentTarget, editedMansionId, reviewerStep1, reviewerStep2, reviewerStep3, orig.is_test === 1)
+  // 元申請が①上長なし（請求書受付→担当者/上司 申請）だった場合は、再申請でも①を飛ばす
+  const origHasStep1 = await db.prepare(
+    'SELECT id FROM circulation_steps WHERE application_id = ? AND step_number = 1 LIMIT 1'
+  ).bind(id).first()
+  const resubmitSkipStep1 = !origHasStep1
+  await createCirculationSteps(db, newId, user.uid, editedPaymentTarget, editedMansionId, reviewerStep1, reviewerStep2, reviewerStep3, orig.is_test === 1, resubmitSkipStep1)
+  // current_step を最初のステップ番号に合わせる
+  const resFirst = await db.prepare(
+    'SELECT step_number FROM circulation_steps WHERE application_id = ? ORDER BY step_number ASC LIMIT 1'
+  ).bind(newId).first() as any
+  if (resFirst && resFirst.step_number !== 1) {
+    await db.prepare('UPDATE applications SET current_step = ? WHERE id = ?').bind(resFirst.step_number, newId).run()
+  }
 
   // === 通知送信はバックグラウンドで実行（画面遷移を先に返す）===
   const appUrl = `${new URL(c.req.url).origin}/applications/${newId}`
@@ -3985,7 +4023,7 @@ applications.post('/:id/resubmit', async (c) => {
   } else {
     // rejected からの再提出: 最初の承認者にのみ通知（新規申請と同じ挙動）
     const firstStep = await db.prepare(
-      'SELECT cs.*, u.email, u.name FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.application_id = ? AND cs.step_number = 1'
+      'SELECT cs.*, u.email, u.name FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id WHERE cs.application_id = ? ORDER BY cs.step_number ASC LIMIT 1'
     ).bind(newId).first() as any
     if (firstStep) {
       runInBackground(c, async () => {
