@@ -14,6 +14,7 @@ import {
   formatJstDateTime,
 } from '../lib/backup'
 import driveRoutes from './drive'
+import { sweepExpiredSessions } from '../lib/login-log'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const admin = new Hono<{ Bindings: Bindings }>()
@@ -3174,6 +3175,208 @@ admin.get('/lineworks/test', async (c) => {
     const msg = encodeURIComponent(String(e?.message || 'unknown').slice(0, 100))
     return c.redirect(`/admin/lineworks?test=fail&detail=${msg}`)
   }
+})
+
+// ============================================================
+// ログイン履歴
+// ============================================================
+const LOGIN_EVENT_LABEL: Record<string, { label: string; cls: string }> = {
+  login:   { label: 'ログイン',     cls: 'bg-green-50 text-green-700 border-green-200' },
+  logout:  { label: 'ログアウト',   cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  failed:  { label: 'ログイン失敗', cls: 'bg-red-50 text-red-700 border-red-200' },
+  expired: { label: '時間切れ',     cls: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+}
+
+function loginLogEsc(v: any): string {
+  return String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])
+}
+
+function jstDateStr(offsetDays = 0): string {
+  const d = new Date(Date.now() + 9 * 3600 * 1000 + offsetDays * 86400 * 1000)
+  return d.toISOString().slice(0, 10)
+}
+
+function buildLoginLogFilter(q: (k: string) => string | undefined) {
+  const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v)
+  const from = isDate(q('from')) ? q('from')! : jstDateStr(-29)
+  const to = isDate(q('to')) ? q('to')! : jstDateStr(0)
+  const type = ['login', 'logout', 'failed', 'expired'].includes(q('type') || '') ? q('type')! : ''
+  const keyword = (q('q') || '').trim()
+
+  // created_at は UTC。JST の日付範囲を UTC に変換して比較
+  const where: string[] = [
+    `created_at >= datetime(?, '-9 hours')`,
+    `created_at < datetime(?, '+1 day', '-9 hours')`,
+  ]
+  const binds: any[] = [from, to]
+  if (keyword) {
+    where.push(`(employee_number LIKE ? OR user_name LIKE ?)`)
+    binds.push(`%${keyword}%`, `%${keyword}%`)
+  }
+  return { from, to, type, keyword, where, binds }
+}
+
+admin.get('/login-logs', async (c) => {
+  const user = (c as any).get('user')
+  const db = c.env.DB
+  await sweepExpiredSessions(db)
+
+  const f = buildLoginLogFilter((k) => c.req.query(k))
+  const PAGE_SIZE = 100
+  const page = Math.max(1, parseInt(c.req.query('page') || '1', 10) || 1)
+
+  // 種別ごとの件数（種別フィルタ前）
+  const countRows = await db.prepare(
+    `SELECT event_type, COUNT(*) AS cnt FROM login_logs WHERE ${f.where.join(' AND ')} GROUP BY event_type`
+  ).bind(...f.binds).all()
+  const counts: Record<string, number> = { login: 0, logout: 0, failed: 0, expired: 0 }
+  for (const r of countRows.results as any[]) counts[r.event_type] = r.cnt
+  const totalAll = Object.values(counts).reduce((a, b) => a + b, 0)
+
+  const where = [...f.where]
+  const binds = [...f.binds]
+  if (f.type) { where.push('event_type = ?'); binds.push(f.type) }
+  const total = f.type ? (counts[f.type] || 0) : totalAll
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const curPage = Math.min(page, totalPages)
+
+  const rows = await db.prepare(
+    `SELECT *, datetime(created_at, '+9 hours') AS jst FROM login_logs
+     WHERE ${where.join(' AND ')}
+     ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
+  ).bind(...binds, PAGE_SIZE, (curPage - 1) * PAGE_SIZE).all()
+
+  const online = await db.prepare(
+    `SELECT COUNT(DISTINCT user_id) AS c FROM sessions WHERE expires_at > datetime('now')`
+  ).first() as any
+
+  const qs = (extra: Record<string, string | number>) => {
+    const p = new URLSearchParams({ from: f.from, to: f.to, type: f.type, q: f.keyword })
+    for (const [k, v] of Object.entries(extra)) p.set(k, String(v))
+    return p.toString()
+  }
+
+  const badge = (t: string) => {
+    const b = LOGIN_EVENT_LABEL[t] || { label: t, cls: 'bg-gray-50 text-gray-600 border-gray-200' }
+    return `<span class="inline-block text-xs px-2 py-0.5 rounded border ${b.cls} whitespace-nowrap">${b.label}</span>`
+  }
+
+  const tableRows = (rows.results as any[]).map((r) => `
+    <tr class="border-b border-gray-100 hover:bg-gray-50">
+      <td class="px-3 py-2 whitespace-nowrap text-gray-700">${loginLogEsc(r.jst)}</td>
+      <td class="px-3 py-2">${badge(r.event_type)}</td>
+      <td class="px-3 py-2 whitespace-nowrap">${loginLogEsc(r.employee_number) || '-'}</td>
+      <td class="px-3 py-2 whitespace-nowrap">${loginLogEsc(r.user_name) || '-'}</td>
+      <td class="px-3 py-2 whitespace-nowrap text-red-600">${loginLogEsc(r.failure_reason)}</td>
+      <td class="px-3 py-2 font-mono text-xs text-gray-600 break-all">${loginLogEsc(r.ip_address) || '-'}</td>
+      <td class="px-3 py-2 whitespace-nowrap text-gray-600">${loginLogEsc(r.device) || '-'}</td>
+    </tr>`).join('')
+
+  const typeOpt = (v: string, label: string) => `<option value="${v}" ${f.type === v ? 'selected' : ''}>${label}</option>`
+
+  const pager = totalPages > 1 ? `
+    <div class="flex items-center justify-between px-4 py-3 border-t border-gray-100 text-sm">
+      <span class="text-gray-500">${total}件中 ${(curPage - 1) * PAGE_SIZE + 1}〜${Math.min(curPage * PAGE_SIZE, total)}件</span>
+      <div class="flex gap-2">
+        ${curPage > 1 ? `<a href="/admin/login-logs?${qs({ page: curPage - 1 })}" class="px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50">← 前へ</a>` : ''}
+        <span class="px-3 py-1.5 text-gray-500">${curPage} / ${totalPages}</span>
+        ${curPage < totalPages ? `<a href="/admin/login-logs?${qs({ page: curPage + 1 })}" class="px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50">次へ →</a>` : ''}
+      </div>
+    </div>` : ''
+
+  const content = `
+    <div class="space-y-4">
+      <div class="flex items-center justify-end text-sm text-gray-600">
+        現在ログイン中：<span class="font-bold text-gray-800 ml-1">${online?.c || 0}</span>名
+      </div>
+
+      <div class="bg-blue-50 border border-blue-200 text-blue-800 text-xs px-4 py-3 rounded-lg">
+        ℹ️ ログイン／ログアウト／ログイン失敗／時間切れ を記録しています。「時間切れ」はログアウトボタンを押さずにログインから24時間が経過したもので、日時は期限が切れた時刻です。
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <form method="GET" action="/admin/login-logs" class="flex flex-wrap items-end gap-3">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">開始日</label>
+            <input type="date" name="from" value="${f.from}" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">終了日</label>
+            <input type="date" name="to" value="${f.to}" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">種別</label>
+            <select name="type" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              ${typeOpt('', 'すべて')}${typeOpt('login', 'ログイン')}${typeOpt('logout', 'ログアウト')}${typeOpt('failed', 'ログイン失敗')}${typeOpt('expired', '時間切れ')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">社員番号・氏名</label>
+            <input type="text" name="q" value="${loginLogEsc(f.keyword)}" placeholder="部分一致" class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-44">
+          </div>
+          <button type="submit" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg">🔍 検索</button>
+          <a href="/admin/login-logs" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm px-4 py-2 rounded-lg">クリア</a>
+          <a href="/admin/login-logs/export?${qs({})}" class="ml-auto bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">⬇ CSVダウンロード</a>
+        </form>
+
+        <div class="flex flex-wrap gap-2 mt-4 text-xs">
+          <span class="px-2 py-1 rounded bg-gray-100 text-gray-700">合計 ${totalAll}件</span>
+          <span class="px-2 py-1 rounded border ${LOGIN_EVENT_LABEL.login.cls}">ログイン ${counts.login}件</span>
+          <span class="px-2 py-1 rounded border ${LOGIN_EVENT_LABEL.logout.cls}">ログアウト ${counts.logout}件</span>
+          <span class="px-2 py-1 rounded border ${LOGIN_EVENT_LABEL.failed.cls}">ログイン失敗 ${counts.failed}件</span>
+          <span class="px-2 py-1 rounded border ${LOGIN_EVENT_LABEL.expired.cls}">時間切れ ${counts.expired}件</span>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-gray-600 text-xs">
+              <tr>
+                <th class="px-3 py-2 text-left font-semibold">日時（JST）</th>
+                <th class="px-3 py-2 text-left font-semibold">種別</th>
+                <th class="px-3 py-2 text-left font-semibold">社員番号</th>
+                <th class="px-3 py-2 text-left font-semibold">氏名</th>
+                <th class="px-3 py-2 text-left font-semibold">失敗理由</th>
+                <th class="px-3 py-2 text-left font-semibold">IPアドレス</th>
+                <th class="px-3 py-2 text-left font-semibold">端末</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows || `<tr><td colspan="7" class="px-3 py-10 text-center text-gray-400">該当する履歴はありません</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+        ${pager}
+      </div>
+    </div>`
+
+  return c.html(layout('ログイン履歴', content, user))
+})
+
+admin.get('/login-logs/export', async (c) => {
+  const db = c.env.DB
+  const f = buildLoginLogFilter((k) => c.req.query(k))
+  const where = [...f.where]
+  const binds = [...f.binds]
+  if (f.type) { where.push('event_type = ?'); binds.push(f.type) }
+  const rows = await db.prepare(
+    `SELECT *, datetime(created_at, '+9 hours') AS jst FROM login_logs
+     WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC`
+  ).bind(...binds).all()
+
+  const header = ['日時(JST)', '種別', '社員番号', '氏名', '失敗理由', 'IPアドレス', '端末', 'User-Agent']
+  const lines = (rows.results as any[]).map((r) => [
+    r.jst, LOGIN_EVENT_LABEL[r.event_type]?.label || r.event_type, r.employee_number || '', r.user_name || '',
+    r.failure_reason || '', r.ip_address || '', r.device || '', r.user_agent || '',
+  ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+  const csv = '\uFEFF' + [header.join(','), ...lines].join('\r\n')
+  return new Response(csv, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="login_logs_${f.from.replace(/-/g, '')}_${f.to.replace(/-/g, '')}.csv"`,
+    },
+  })
 })
 
 export default admin

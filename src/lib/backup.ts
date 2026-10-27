@@ -36,6 +36,7 @@ const BACKUP_TABLES = [
   'reminder_settings',
   'roles',
   'lineworks_config',
+  'login_logs',
   // sessions は復元時に他人のセッションを復活させてしまうのでバックアップ対象外
 ] as const
 

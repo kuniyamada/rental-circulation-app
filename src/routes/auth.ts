@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { hashPassword, generateSessionId, getSessionIdFromCookie } from '../lib/auth'
+import { writeLoginLog, getClientIp, sweepExpiredSessions } from '../lib/login-log'
 
 type Bindings = { DB: D1Database; R2: R2Bucket }
 const auth = new Hono<{ Bindings: Bindings }>()
@@ -14,12 +15,32 @@ auth.get('/login', (c) => {
 auth.post('/login', async (c) => {
   const { employee_number, password } = await c.req.parseBody() as any
   const db = c.env.DB
-  const hash = await hashPassword(password)
-  const user = await db.prepare(
-    'SELECT * FROM users WHERE employee_number = ? AND password_hash = ? AND is_active = 1'
-  ).bind(employee_number, hash).first() as any
+  const empNo = String(employee_number || '').trim()
+  const ip = getClientIp(c.req)
+  const ua = c.req.header('User-Agent') || ''
+
+  // 期限切れセッションを「時間切れ」として記録
+  await sweepExpiredSessions(db)
+
+  const hash = await hashPassword(password || '')
+  const found = await db.prepare(
+    'SELECT * FROM users WHERE employee_number = ?'
+  ).bind(empNo).first() as any
+  const user = found && found.password_hash === hash && found.is_active === 1 ? found : null
 
   if (!user) {
+    let reason = 'パスワード誤り'
+    if (!found) reason = '社員番号なし'
+    else if (found.is_active !== 1) reason = '無効なユーザー'
+    await writeLoginLog(db, {
+      event_type: 'failed',
+      user_id: found?.id ?? null,
+      employee_number: empNo,
+      user_name: found?.name ?? null,
+      failure_reason: reason,
+      ip_address: ip,
+      user_agent: ua,
+    })
     return c.redirect('/login?error=invalid')
   }
 
@@ -29,6 +50,15 @@ auth.post('/login', async (c) => {
   await db.prepare(
     'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)'
   ).bind(sessionId, user.id, expires).run()
+
+  await writeLoginLog(db, {
+    event_type: 'login',
+    user_id: user.id,
+    employee_number: user.employee_number,
+    user_name: user.name,
+    ip_address: ip,
+    user_agent: ua,
+  })
 
   // 常にダッシュボードへ（パスワード変更は任意）
   return new Response(null, {
@@ -45,7 +75,22 @@ auth.post('/logout', async (c) => {
   const cookie = c.req.header('Cookie')
   const sessionId = getSessionIdFromCookie(cookie)
   if (sessionId) {
-    await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run()
+    const db = c.env.DB
+    const s = await db.prepare(
+      `SELECT u.id, u.employee_number, u.name FROM sessions s JOIN users u ON u.id = s.user_id
+       WHERE s.id = ? AND s.expires_at > datetime('now')`
+    ).bind(sessionId).first() as any
+    if (s) {
+      await writeLoginLog(db, {
+        event_type: 'logout',
+        user_id: s.id,
+        employee_number: s.employee_number,
+        user_name: s.name,
+        ip_address: getClientIp(c.req),
+        user_agent: c.req.header('User-Agent') || '',
+      })
+    }
+    await db.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run()
   }
   return new Response(null, {
     status: 302,
