@@ -227,6 +227,11 @@ app.get('/', async (c) => {
           <span class="flex-1">請求書受付管理</span>
           <span class="text-base leading-none">📥</span>
         </a>
+        <a href="/inbox/new" class="flex items-center gap-3 mb-1 px-4 py-3 rounded-xl text-sm font-bold text-white shadow-md transition bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 ${false ? 'ring-2 ring-offset-2 ring-orange-400' : ''}">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          <span class="flex-1">請求書を登録・担当者へ送信</span>
+          <span class="text-base leading-none">📤</span>
+        </a>
         ` : ''}
         ${(user.is_admin || ['admin','front','front_supervisor'].includes(user.role)) ? `
         <a href="/applications/new" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
@@ -242,15 +247,6 @@ app.get('/', async (c) => {
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
           パスワード変更
         </a>
-        ${(user.role === 'operations' || user.is_admin) ? `
-        <div class="pt-3 pb-1">
-          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">業務管理課</p>
-        </div>
-        <a href="/inbox/new" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          請求書を登録・担当者へ送信
-        </a>
-        ` : ''}
         ${user.is_admin ? `
         <div class="pt-3 pb-1">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">管理者メニュー</p>
