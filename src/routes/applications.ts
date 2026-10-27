@@ -455,14 +455,12 @@ applications.get('/new', async (c) => {
   ).first() as any
 
   // 会計課ユーザー
-  const accountingUsers = isTestMode
-    ? await db.prepare("SELECT id, name FROM users WHERE is_active = 1 ORDER BY name").all()
-    : await db.prepare("SELECT id, name FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name").all()
+  // 最終(Step3)・管理組合時: テストモードに関係なく役割「会計」のみ
+  const accountingUsers = await db.prepare("SELECT id, name FROM users WHERE role = 'accounting' AND is_active = 1 ORDER BY name").all()
 
   // 本社経理ユーザー
-  const honshaUsers = isTestMode
-    ? await db.prepare("SELECT id, name FROM users WHERE is_active = 1 ORDER BY name").all()
-    : await db.prepare("SELECT id, name FROM users WHERE role = 'honsha' AND is_active = 1 ORDER BY name").all()
+  // 最終(Step3)・管理組合以外: テストモードに関係なく役割「本社経理」のみ（初期値 山崎 修）
+  const honshaUsers = await db.prepare("SELECT id, name FROM users WHERE role = 'honsha' AND is_active = 1 ORDER BY name").all()
 
   // 本社経理デフォルト：山崎 修（employee_number=049）
   const defaultHonshaUser = await db.prepare(
