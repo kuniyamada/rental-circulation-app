@@ -61,7 +61,7 @@ export function layout(title: string, content: string, user: any): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} - 請求書回覧システム</title>
+  <title>${title} - 建物管理部 請求回覧</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.svg">
   <meta name="theme-color" content="#396999">
