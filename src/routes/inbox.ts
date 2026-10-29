@@ -65,6 +65,11 @@ inbox.get('/', async (c) => {
         </a>
       </div>
 
+      ${c.req.query('deleted') ? `
+      <div class="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-2">✅ 受付を削除しました</div>` : ''}
+      ${c.req.query('delete_error') ? `
+      <div class="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2">⚠ ${c.req.query('delete_error') === 'applied' ? 'この受付はすでに申請済のため削除できません' : '対象の受付が見つかりませんでした'}</div>` : ''}
+
       <!-- フィルタータブ -->
       <div class="flex gap-2 border-b border-gray-200 pb-0">
         ${[['all','すべて'],['pending','未申請'],['applied','申請済'],['cancelled','キャンセル']].map(([v,l]) => `
@@ -126,8 +131,10 @@ inbox.get('/', async (c) => {
                           <form method="POST" action="/inbox/${item.id}/remind" onsubmit="return confirm('${item.front_name}さんにリマインドメールを送信しますか？')">
                             <button type="submit" class="text-xs px-2 py-1 bg-orange-50 text-orange-600 hover:bg-orange-100 rounded transition">再通知</button>
                           </form>
-                          <form method="POST" action="/inbox/${item.id}/cancel" onsubmit="return confirm('この受付をキャンセルしますか？')">
-                            <button type="submit" class="text-xs px-2 py-1 bg-gray-50 text-gray-500 hover:bg-gray-100 rounded transition">取消</button>
+                        ` : ''}
+                        ${(item.status === 'pending' || item.status === 'cancelled') ? `
+                          <form method="POST" action="/inbox/${item.id}/delete" onsubmit="return confirm('この受付を削除しますか？\\n添付PDFも削除され、元に戻せません。')">
+                            <button type="submit" class="text-xs px-2 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded transition">削除</button>
                           </form>
                         ` : ''}
                       </div>
@@ -516,6 +523,43 @@ inbox.post('/:id/cancel', async (c) => {
   `).bind(now, id).run()
 
   return c.redirect('/inbox?cancelled=1')
+})
+
+// ============================================================
+// 削除処理（未申請・キャンセルのみ。申請済は回覧申請の記録として残す）
+// ============================================================
+inbox.post('/:id/delete', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
+
+  const db = c.env.DB
+  const id = c.req.param('id')
+
+  const item = await db.prepare(
+    "SELECT id, status, attachment_key FROM invoice_inbox WHERE id = ?"
+  ).bind(id).first() as any
+  if (!item) return c.redirect('/inbox?delete_error=notfound')
+  if (item.status !== 'pending' && item.status !== 'cancelled') {
+    return c.redirect('/inbox?delete_error=applied')
+  }
+
+  // 申請処理と同時実行された場合に備え、状態を条件に含めて削除
+  const res = await db.prepare(
+    "DELETE FROM invoice_inbox WHERE id = ? AND status IN ('pending', 'cancelled')"
+  ).bind(id).run()
+  if (!res.meta.changes) return c.redirect('/inbox?delete_error=applied')
+
+  // 添付PDF（R2）を削除。念のため回覧申請の添付として使われていないか確認してから消す
+  if (item.attachment_key) {
+    const used = await db.prepare(
+      'SELECT id FROM attachments WHERE file_key = ? LIMIT 1'
+    ).bind(item.attachment_key).first()
+    if (!used) {
+      try { await c.env.R2.delete(item.attachment_key) } catch (e) { console.error('R2 delete failed', e) }
+    }
+  }
+
+  return c.redirect('/inbox?deleted=1')
 })
 
 export default inbox
