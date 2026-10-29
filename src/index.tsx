@@ -333,7 +333,7 @@ app.get('/', async (c) => {
                 <div class="bg-white rounded-lg px-4 py-3 flex items-center justify-between shadow-sm">
                   <div>
                     <p class="font-semibold text-gray-800 text-sm">${item.mansion_name || '-'}</p>
-                    <p class="text-xs text-gray-500 mt-0.5">登録：${item.registered_by_name}（業務管理課）/ ${item.created_at?.slice(0,10)}</p>
+                    <p class="text-xs text-gray-500 mt-0.5">登録：${item.registered_by_name} / ${item.created_at?.slice(0,10)}</p>
                     ${item.note ? `<p class="text-xs text-gray-400 mt-0.5">備考: ${item.note}</p>` : ''}
                   </div>
                   <div class="flex gap-2 items-center">
@@ -713,7 +713,7 @@ app.get('/api/trigger-review-reminders', async (c) => {
   <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
     <div style="background:#d97706;padding:20px 24px;">
       <h2 style="color:#fff;margin:0;font-size:18px;">⚠️ 承認リマインド（第${newCount}回）</h2>
-      <p style="color:#fde68a;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 請求書回覧システム</p>
+      <p style="color:#fde68a;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 建物管理部 請求回覧</p>
     </div>
     <div style="padding:24px;">
       <p style="color:#92400e;background:#fffbeb;border-left:4px solid #d97706;padding:8px 12px;border-radius:4px;">
@@ -746,7 +746,7 @@ app.get('/api/trigger-review-reminders', async (c) => {
     </div>
     <div style="background:#f9fafb;padding:16px 24px;border-top:1px solid #e5e7eb;">
       <p style="margin:0;font-size:11px;color:#9ca3af;">
-        このメールは請求書回覧システムから自動送信されています。返信しないでください。
+        このメールは建物管理部 請求回覧から自動送信されています。返信しないでください。
       </p>
     </div>
   </div>
@@ -813,7 +813,7 @@ app.post('/api/review-remind/:stepId', async (c) => {
   <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
     <div style="background:#d97706;padding:20px 24px;">
       <h2 style="color:#fff;margin:0;font-size:18px;">⚠️ 承認リマインド（第${newCount}回）</h2>
-      <p style="color:#fde68a;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 請求書回覧システム</p>
+      <p style="color:#fde68a;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 建物管理部 請求回覧</p>
     </div>
     <div style="padding:24px;">
       <p>${step.reviewer_name} さん、${step.mansion_name || step.title} の${stepLabel[step.step_number] || '承認'}がまだ完了していません。ご確認をお願いします。</p>

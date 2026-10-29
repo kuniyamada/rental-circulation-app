@@ -1632,7 +1632,6 @@ admin.get('/smtp', async (c) => {
         <div>
           <p class="text-sm font-semibold text-[#234166]">Gmail送信設定</p>
           <p class="text-xs text-[#396999] mt-0.5">送信元アカウント：<strong>tokyo.defense.mail@gmail.com</strong></p>
-          <p class="text-xs text-[#396999] mt-0.5">メール送信には MailChannels API を経由してGmail認証を行います。</p>
         </div>
       </div>
 
@@ -1685,7 +1684,7 @@ admin.get('/smtp', async (c) => {
             <div>
               <label class="block text-sm font-semibold text-gray-700 mb-1.5">送信者名（メールの差出人表示）</label>
               <input type="text" name="from_name"
-                value="${smtp?.from_name || '請求書回覧システム（東京ディフェンス）'}"
+                value="${smtp?.from_name || '建物管理部 請求回覧（東京ディフェンス）'}"
                 class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
             </div>
 
@@ -1694,7 +1693,7 @@ admin.get('/smtp', async (c) => {
               <p class="font-semibold text-gray-600 mb-2">📋 現在の設定</p>
               <p>SMTPサーバー：smtp.gmail.com:587（TLS有効・固定）</p>
               <p>送信元アドレス：${smtp?.from_email || 'tokyo.defense.mail@gmail.com'}</p>
-              <p>送信者名：${smtp?.from_name || '請求書回覧システム（東京ディフェンス）'}</p>
+              <p>送信者名：${smtp?.from_name || '建物管理部 請求回覧（東京ディフェンス）'}</p>
               <p>パスワード：${smtp?.password ? '設定済み ✅' : '未設定 ⚠️'}</p>
             </div>
           </div>
@@ -1721,7 +1720,6 @@ admin.get('/smtp', async (c) => {
           <li>Googleアカウントの「2段階認証」が必要です</li>
           <li>通常のパスワードではなく<strong>アプリパスワード</strong>（16桁）の使用を推奨します</li>
           <li>アプリパスワード：Googleアカウント → セキュリティ → アプリパスワード</li>
-          <li>メール送信にはMailChannels APIを経由します（Cloudflare Workers制約のため）</li>
         </ul>
       </div>
     </div>
@@ -1739,7 +1737,7 @@ admin.post('/smtp', async (c) => {
   const use_tls = 1
   const username = body.username || 'tokyo.defense.mail@gmail.com'
   const from_email = body.from_email || username
-  const from_name = body.from_name || '請求書回覧システム（東京ディフェンス）'
+  const from_name = body.from_name || '建物管理部 請求回覧（東京ディフェンス）'
   // アプリパスワードのスペースを自動除去（例: "abcd efgh ijkl mnop" → "abcdefghijklmnop"）
   const cleanPassword = body.password ? (body.password as string).replace(/\s/g, '') : null
 
@@ -3192,7 +3190,7 @@ admin.get('/lineworks/test', async (c) => {
     // まずシンプルなテキストメッセージで送信テスト
     const msg = {
       type: 'text' as const,
-      text: `【テスト通知】\n請求書回覧システムからのテストメッセージです。\n送信日時: ${new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'})}\n送信者: ${user.name}`,
+      text: `【テスト通知】\n建物管理部 請求回覧からのテストメッセージです。\n送信日時: ${new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'})}\n送信者: ${user.name}`,
     }
     const result = await sendLineWorksMessage(lwConfig, adminUser.lineworks_user_id, msg)
     const ok = result === true

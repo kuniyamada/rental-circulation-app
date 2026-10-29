@@ -42,7 +42,7 @@ async function notifyInbox(
       const lines = [
         data.isReminder ? `⚠️ リマインド（${data.remindCount}回目）` : '📥 請求書受付のお知らせ',
         `マンション: ${data.mansionName}`,
-        `登録: ${data.registeredBy}（業務管理課）`,
+        `登録: ${data.registeredBy}`,
       ]
       if (data.note) lines.push(`備考: ${data.note}`)
       lines.push('', '回覧申請をお願いします。')

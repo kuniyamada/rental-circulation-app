@@ -73,7 +73,7 @@ export function buildInboxNotificationBody(data: {
   const intro = data.isReminder
     ? `<p style="color:#92400e;background:#fffbeb;border-left:4px solid #d97706;padding:8px 12px;border-radius:4px;">
         <strong>まだ回覧申請が完了していません。</strong><br>
-        至急、請求書回覧システムから申請をお願いします。
+        至急、建物管理部 請求回覧から申請をお願いします。
       </p>`
     : `<p>${data.frontName} さん</p>
        <p>業務管理課より、担当マンションの請求書が届きました。<br>
@@ -87,7 +87,7 @@ export function buildInboxNotificationBody(data: {
   <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
     <div style="background:${headerBg};padding:20px 24px;">
       <h2 style="color:#fff;margin:0;font-size:18px;">${headerLabel}</h2>
-      <p style="color:#bfdbfe;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 請求書回覧システム</p>
+      <p style="color:#bfdbfe;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 建物管理部 請求回覧</p>
     </div>
     <div style="padding:24px;">
       ${intro}
@@ -98,7 +98,7 @@ export function buildInboxNotificationBody(data: {
         </tr>
         <tr style="border-bottom:1px solid #e5e7eb;">
           <td style="padding:8px 12px 8px 0;color:#6b7280;font-size:13px;white-space:nowrap;">登録担当者</td>
-          <td style="padding:8px 0;font-size:13px;">${data.registeredBy}（業務管理課）</td>
+          <td style="padding:8px 0;font-size:13px;">${data.registeredBy}</td>
         </tr>
         ${data.note ? `
         <tr>
@@ -113,7 +113,7 @@ export function buildInboxNotificationBody(data: {
     </div>
     <div style="background:#f9fafb;padding:16px 24px;border-top:1px solid #e5e7eb;">
       <p style="margin:0;font-size:11px;color:#9ca3af;">
-        このメールは請求書回覧システムから自動送信されています。返信しないでください。
+        このメールは建物管理部 請求回覧から自動送信されています。返信しないでください。
       </p>
     </div>
   </div>
@@ -192,7 +192,7 @@ export function buildMailBody(type: string, data: {
   <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
     <!-- ヘッダー -->
     <div style="background:#396999;padding:20px 24px;">
-      <h2 style="color:#fff;margin:0;font-size:18px;">📄 請求書回覧システム</h2>
+      <h2 style="color:#fff;margin:0;font-size:18px;">📄 建物管理部 請求回覧</h2>
       <p style="color:#bfdbfe;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社</p>
     </div>
     <!-- 本文 -->
@@ -220,7 +220,7 @@ export function buildMailBody(type: string, data: {
     <!-- フッター -->
     <div style="background:#f9fafb;padding:16px 24px;border-top:1px solid #e5e7eb;">
       <p style="margin:0;font-size:11px;color:#9ca3af;">
-        このメールは請求書回覧システムから自動送信されています。返信しないでください。<br>
+        このメールは建物管理部 請求回覧から自動送信されています。返信しないでください。<br>
         送信元：${data.appUrl.split('/applications')[0]}
       </p>
     </div>
