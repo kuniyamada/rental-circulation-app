@@ -252,7 +252,7 @@ export function layout(title: string, content: string, user: any): string {
           </a>
           <a id="savedFilePreviewNewTab" href="#" target="_blank"
             class="inline-flex items-center gap-1 text-xs px-3 py-1.5 bg-white border border-gray-300 rounded hover:bg-gray-50">
-            🗗 新タブ
+            🗗 別タブで開く
           </a>
           <button type="button" onclick="closeSavedFilePreview()"
             class="text-gray-500 hover:text-gray-700 text-2xl leading-none p-1">×</button>

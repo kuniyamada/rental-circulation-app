@@ -7,6 +7,14 @@ import { sendLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../l
 type Bindings = { DB: D1Database; R2: R2Bucket }
 const inbox = new Hono<{ Bindings: Bindings }>()
 
+// 保存済みファイルをポップアップでプレビューするボタン（新しいタブ・ダウンロードはポップアップ内から）
+function escAttr(v: any): string {
+  return String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])
+}
+function previewBtn(url: string, name: string, label = '👁 確認', cls = 'inline-flex items-center gap-1 px-2.5 py-1 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580] whitespace-nowrap'): string {
+  return `<button type="button" data-url="${escAttr(url)}" data-name="${escAttr(name)}" onclick="openSavedFilePreview(this.dataset.url, this.dataset.name)" class="${cls}">${label}</button>`
+}
+
 // ============================================================
 // 請求書受付の通知（担当フロント宛）
 //   ユーザーの通知設定(notify_method)に従い メール / LINE WORKS / 両方 で送信
@@ -175,7 +183,7 @@ inbox.get('/', async (c) => {
                     </td>
                     <td class="px-4 py-3">
                       ${item.attachment_key
-                        ? `<a href="/inbox/${item.id}/download" class="text-[#396999] hover:underline text-xs flex items-center gap-1">📎 ${item.attachment_name || 'ファイル'}</a>`
+                        ? previewBtn(`/inbox/${item.id}/download`, item.attachment_name || 'invoice.pdf', `📎 ${escAttr(item.attachment_name || 'ファイル')}`, 'text-[#396999] hover:underline text-xs flex items-center gap-1 text-left')
                         : '<span class="text-gray-300 text-xs">なし</span>'}
                     </td>
                     <td class="px-4 py-3 text-xs text-gray-500">
@@ -508,7 +516,8 @@ inbox.get('/:id/download', async (c) => {
   return new Response(obj.body, {
     headers: {
       'Content-Type': obj.httpMetadata?.contentType || 'application/pdf',
-      'Content-Disposition': `attachment; filename*=UTF-8''${fileName}`
+      // 既定はブラウザ内表示（プレビュー用）。?dl=1 のときのみダウンロード
+      'Content-Disposition': `${c.req.query('dl') ? 'attachment' : 'inline'}; filename*=UTF-8''${fileName}`
     }
   })
 })

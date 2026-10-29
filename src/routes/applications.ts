@@ -8,6 +8,14 @@ import { syncApplicationToDrive, type SyncEnv } from '../lib/drive-sync'
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const applications = new Hono<{ Bindings: Bindings }>()
 
+// 保存済みファイルをポップアップでプレビューするボタン（新しいタブ・ダウンロードはポップアップ内から）
+function escAttr(v: any): string {
+  return String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])
+}
+function previewBtn(url: string, name: string, label = '👁 確認', cls = 'inline-flex items-center gap-1 px-2.5 py-1 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580] whitespace-nowrap'): string {
+  return `<button type="button" data-url="${escAttr(url)}" data-name="${escAttr(name)}" onclick="openSavedFilePreview(this.dataset.url, this.dataset.name)" class="${cls}">${label}</button>`
+}
+
 // ============================================================
 // 統合通知ヘルパー: メール + LINE WORKS を通知設定に応じて送信
 // ============================================================
@@ -652,7 +660,7 @@ applications.get('/new', async (c) => {
                     return `
                 <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
                   <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${resubmitInv1.file_name}</span>
-                  <a href="/applications/files/${resubmitInv1.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                  ${previewBtn(`/applications/files/${resubmitInv1.id}`, resubmitInv1.file_name)}
                   <span class="text-xs text-gray-400 ml-auto">（別ファイルを選択すると上書きされます）</span>
                 </div>
                 <div class="flex items-center gap-2">
@@ -670,6 +678,7 @@ applications.get('/new', async (c) => {
                     return `
                 <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg">
                   <span class="text-[#396999] text-xs">📎 引き継ぎ：${inboxData.attachment_name || 'invoice.pdf'}</span>
+                  ${previewBtn(`/inbox/${inboxData.id}/download`, inboxData.attachment_name || 'invoice.pdf')}
                   <input type="hidden" name="inbox_attachment_key" value="${inboxData.attachment_key}">
                   <input type="hidden" name="inbox_attachment_name" value="${inboxData.attachment_name || ''}">
                   <span class="text-xs text-gray-400">（別ファイルを選択すると上書きされます）</span>
@@ -715,7 +724,7 @@ applications.get('/new', async (c) => {
                 </div>
                 <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
                   <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${att.file_name}</span>
-                  <a href="/applications/files/${att.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                  ${previewBtn(`/applications/files/${att.id}`, att.file_name)}
                   <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
                 </div>
                 <div class="flex items-center gap-2">
@@ -799,7 +808,7 @@ applications.get('/new', async (c) => {
                   return estAtt ? `
                 <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
                   <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${estAtt.file_name}</span>
-                  <a href="/applications/files/${estAtt.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                  ${previewBtn(`/applications/files/${estAtt.id}`, estAtt.file_name)}
                   <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
                 </div>` : ''
                 })()}
@@ -998,7 +1007,7 @@ applications.get('/new', async (c) => {
               ${other1Att ? `
               <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
                 <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${other1Att.file_name}</span>
-                <a href="/applications/files/${other1Att.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                ${previewBtn(`/applications/files/${other1Att.id}`, other1Att.file_name)}
                 <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
               </div>` : ''}
               <div class="flex items-center gap-2">
@@ -1016,7 +1025,7 @@ applications.get('/new', async (c) => {
               ${other2Att ? `
               <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
                 <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${other2Att.file_name}</span>
-                <a href="/applications/files/${other2Att.id}" target="_blank" class="text-xs text-[#396999] underline">確認</a>
+                ${previewBtn(`/applications/files/${other2Att.id}`, other2Att.file_name)}
                 <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
               </div>` : ''}
               <div class="flex items-center gap-2">
@@ -4094,7 +4103,7 @@ applications.get('/files/:attachId', async (c) => {
   return new Response(obj.body, {
     headers: {
       'Content-Type': obj.httpMetadata?.contentType || 'application/octet-stream',
-      'Content-Disposition': `inline; filename="${encodeURIComponent(att.file_name)}"`,
+      'Content-Disposition': `${c.req.query('dl') ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(att.file_name)}`,
     }
   })
 })

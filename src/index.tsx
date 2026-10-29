@@ -337,7 +337,7 @@ app.get('/', async (c) => {
                     ${item.note ? `<p class="text-xs text-gray-400 mt-0.5">備考: ${item.note}</p>` : ''}
                   </div>
                   <div class="flex gap-2 items-center">
-                    ${item.attachment_key ? `<a href="/inbox/${item.id}/download" class="text-xs text-[#396999] hover:underline">📎請求書</a>` : ''}
+                    ${item.attachment_key ? `<button type="button" data-url="/inbox/${item.id}/download" data-name="${String(item.attachment_name || 'invoice.pdf').replace(/[&<>"']/g, (ch: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])}" onclick="openSavedFilePreview(this.dataset.url, this.dataset.name)" class="text-xs text-[#396999] hover:underline">📎請求書</button>` : ''}
                     <a href="/applications/new?inbox_id=${item.id}" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">回覧申請する</a>
                   </div>
                 </div>
@@ -585,8 +585,11 @@ app.get('/', async (c) => {
   <div id="savedFilePreviewModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60">
     <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-4" style="height:85vh;">
       <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-        <span id="savedFilePreviewTitle" class="text-sm font-semibold text-gray-700">ファイルプレビュー</span>
-        <button onclick="closeSavedFilePreviewModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        <span id="savedFilePreviewTitle" class="text-sm font-semibold text-gray-700 truncate pr-4">ファイルプレビュー</span>
+        <div class="flex items-center gap-2 shrink-0">
+          <a id="savedFilePreviewNewTab" href="#" target="_blank" class="inline-flex items-center gap-1 text-xs px-3 py-1.5 bg-white border border-gray-300 rounded hover:bg-gray-50">🗗 別タブで開く</a>
+          <button onclick="closeSavedFilePreviewModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
       </div>
       <div class="w-full" style="height:calc(100% - 52px);">
         <iframe id="savedFilePreviewFrame" src="" class="w-full h-full rounded-b-xl border-0"></iframe>
@@ -597,6 +600,7 @@ app.get('/', async (c) => {
     function openSavedFilePreview(url, name) {
       document.getElementById('savedFilePreviewTitle').textContent = name || 'ファイルプレビュー'
       document.getElementById('savedFilePreviewFrame').src = url
+      document.getElementById('savedFilePreviewNewTab').href = url
       const modal = document.getElementById('savedFilePreviewModal')
       modal.classList.remove('hidden')
       modal.classList.add('flex')
