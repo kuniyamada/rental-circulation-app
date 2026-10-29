@@ -1160,6 +1160,13 @@ applications.get('/new', async (c) => {
           numInput.value = '${inboxData.mansion_number}'
           searchMansion('${inboxData.mansion_number}')
         }
+        // 支払先の初期値 = 管理組合（変更可）
+        setTimeout(function() {
+          const paySel = document.getElementById('paymentTargetSelect')
+          if (paySel && !paySel.value && typeof selectPaymentTarget === 'function') {
+            selectPaymentTarget('kumiai', null)
+          }
+        }, 100)
       })
       ` : ''}
 
