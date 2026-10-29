@@ -151,7 +151,9 @@ app.get('/', async (c) => {
     : { results: [] }
 
   // フロント向け：自分宛の未申請受付
-  const myPendingInbox = (user.role === 'front' || user.role === 'front_supervisor')
+  //   通常はフロントのみ担当になるが、テストモードでは本橋・山崎も担当フロントに選べるため
+  //   役割を問わず「自分が担当フロントの受付」を表示する
+  const myPendingInbox = true
     ? await db.prepare(`
         SELECT ii.*, m.name as mansion_name, r.name as registered_by_name
         FROM invoice_inbox ii

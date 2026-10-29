@@ -160,7 +160,14 @@ inbox.get('/new', async (c) => {
 
   const db = c.env.DB
   const mansions = await db.prepare("SELECT * FROM mansions WHERE is_active = 1 AND is_visible = 1 ORDER BY CAST(mansion_number AS INTEGER)").all()
-  const fronts = await db.prepare("SELECT * FROM users WHERE role IN ('front', 'front_supervisor') AND is_active = 1 ORDER BY name").all()
+  const frontsRes = await db.prepare("SELECT * FROM users WHERE role IN ('front', 'front_supervisor') AND is_active = 1 ORDER BY name").all()
+  // テストモード（管理者のみ）: 担当フロント候補に 本橋(030)・山崎(049) を追加（受信者側の画面確認用）
+  const isTestMode = user.is_admin && user.test_mode === 1
+  const testExtraFronts = isTestMode
+    ? ((await db.prepare("SELECT * FROM users WHERE employee_number IN ('030','049') AND is_active = 1 ORDER BY employee_number").all()).results as any[])
+    : []
+  const testExtraIds = new Set(testExtraFronts.map((u: any) => u.id))
+  const fronts = { results: [...testExtraFronts, ...((frontsRes.results as any[]).filter((f: any) => !testExtraIds.has(f.id)))] }
 
   const content = `
     <div class="max-w-xl mx-auto">
@@ -201,11 +208,13 @@ inbox.get('/new', async (c) => {
             <select name="front_user_id" id="frontSelect" required
               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#396999]">
               <option value="">-- 選択してください --</option>
-              ${(fronts.results as any[]).map(f =>
-                `<option value="${f.id}">${f.name}（${f.email}）</option>`
+              ${(fronts.results as any[]).map(f => testExtraIds.has(f.id)
+                ? `<option value="${f.id}" style="font-weight:bold">★ ${f.name}（${f.email}）【テスト】</option>`
+                : `<option value="${f.id}">${f.name}（${f.email}）</option>`
               ).join('')}
             </select>
             <p class="text-xs text-gray-400 mt-1">マンション番号入力時に自動セットされます（変更可）</p>
+            ${isTestMode ? `<p class="text-xs font-bold text-amber-600 mt-1">🧪 テストモード：★ 本橋・山崎 も選択できます</p>` : ''}
           </div>
 
           <!-- 請求書PDF添付 -->
