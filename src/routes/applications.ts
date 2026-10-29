@@ -816,7 +816,8 @@ applications.get('/new', async (c) => {
           </div>
 
           <!-- 金額 -->
-          <div id="amountFields">
+          <!-- 手数料欄: 支払先=管理組合 のときのみ表示（未選択・会社(TD)では非表示） -->
+          <div id="amountFields" class="hidden">
             <p class="text-xs text-gray-500 mb-2">手数料の種別を選択してください <span class="text-red-500">*</span></p>
 
             <!-- 三択ラジオ（円 / ％ / なし）-->
@@ -1554,7 +1555,8 @@ applications.get('/new', async (c) => {
           clearEstimateInput()
         }
         // 会社（TD）選択時は手数料を非表示
-        document.getElementById('amountFields').classList.toggle('hidden', val === 'td')
+        // 手数料欄は管理組合のときのみ表示（未選択・会社(TD)では非表示）
+        document.getElementById('amountFields').classList.toggle('hidden', val !== 'kumiai')
         // TD選択時はrequiredを完全解除（手数料バリデーションはcheckFeeRequired()で行う）
         const budgetInput = document.querySelector('input[name="budget_amount"]')
         if (budgetInput) budgetInput.required = false
