@@ -2,9 +2,72 @@ import { Hono } from 'hono'
 import { getSessionUser, getSessionIdFromCookie } from '../lib/auth'
 import { layout } from './layout'
 import { sendMail, buildInboxNotificationBody } from '../lib/mail'
+import { sendLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
 
 type Bindings = { DB: D1Database; R2: R2Bucket }
 const inbox = new Hono<{ Bindings: Bindings }>()
+
+// ============================================================
+// 請求書受付の通知（担当フロント宛）
+//   ユーザーの通知設定(notify_method)に従い メール / LINE WORKS / 両方 で送信
+//   ※以前はメールのみで、LINE WORKS には送っていなかった
+// ============================================================
+async function notifyInbox(
+  db: D1Database,
+  frontUserId: number | string,
+  data: { mansionName: string; registeredBy: string; note: string; appUrl: string; isReminder: boolean; remindCount: number }
+): Promise<void> {
+  const u = await db.prepare(
+    'SELECT name, email, notify_method, lineworks_user_id FROM users WHERE id = ?'
+  ).bind(frontUserId).first() as any
+  if (!u) return
+  const method = u.notify_method || 'email'
+
+  // メール
+  if (method === 'email' || method === 'both') {
+    const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
+    if (smtp && u.email) {
+      const subject = data.isReminder
+        ? `【リマインド${data.remindCount}回目】${data.mansionName} の請求書回覧申請をお願いします`
+        : `【請求書受付】${data.mansionName || 'マンション'} の請求書が届きました`
+      const html = buildInboxNotificationBody({ frontName: u.name, ...data })
+      await sendMail(smtp, { to: u.email, subject, html })
+    }
+  }
+
+  // LINE WORKS
+  if (method === 'lineworks' || method === 'both') {
+    const row = await db.prepare('SELECT * FROM lineworks_config WHERE is_active = 1 LIMIT 1').first() as LineWorksConfigRow | null
+    if (row && u.lineworks_user_id) {
+      const lines = [
+        data.isReminder ? `⚠️ リマインド（${data.remindCount}回目）` : '📥 請求書受付のお知らせ',
+        `マンション: ${data.mansionName}`,
+        `登録: ${data.registeredBy}（業務管理課）`,
+      ]
+      if (data.note) lines.push(`備考: ${data.note}`)
+      lines.push('', '回覧申請をお願いします。')
+      const full = lines.join('\n')
+      const text = full.length > 155 ? full.substring(0, 155) + '...' : full
+      const result = await sendLineWorksMessage(rowToConfig(row), u.lineworks_user_id, {
+        type: 'button_template',
+        altText: full,
+        template: { type: 'buttons', text, actions: [{ type: 'uri', label: '回覧申請を開始する', uri: data.appUrl }] },
+      }, async (tokenData) => {
+        const expiresAt = Math.floor(Date.now() / 1000) + Number(tokenData.expires_in || 86400)
+        await db.prepare(
+          'UPDATE lineworks_config SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=datetime("now") WHERE is_active=1'
+        ).bind(tokenData.access_token, tokenData.refresh_token || row.refresh_token || null, expiresAt).run()
+      })
+      if (result !== true) console.error(`[LW] 請求書受付通知の送信失敗 userId=${u.lineworks_user_id}: ${result}`)
+    }
+  }
+}
+
+// レスポンス返却後も通知処理を続ける（画面遷移を待たせない）
+function runInBackground(c: any, task: () => Promise<void>): void {
+  const p = (async () => { try { await task() } catch (e) { console.error('[BG] 請求書受付通知エラー:', e) } })()
+  try { c.executionCtx.waitUntil(p) } catch { /* ローカル等 */ }
+}
 
 // 認証ミドルウェア
 inbox.use('*', async (c, next) => {
@@ -404,34 +467,17 @@ inbox.post('/', async (c) => {
 
   const inboxId = result.meta.last_row_id
 
-  // フロント担当者の情報取得
-  const frontUser = await db.prepare('SELECT * FROM users WHERE id = ?').bind(frontUserId).first() as any
-  const mansion = await db.prepare('SELECT * FROM mansions WHERE id = ?').bind(mansionId).first() as any
-  const smtpSettings = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
-
-  // メール通知送信
-  if (frontUser && frontUser.email && smtpSettings) {
-    const appUrl = `${new URL(c.req.url).origin}/applications/new?inbox_id=${inboxId}`
-    const subject = `【請求書受付】${mansion?.name || 'マンション'} の請求書が届きました`
-    const html = buildInboxNotificationBody({
-      frontName: frontUser.name,
-      mansionName: mansion?.name || '',
-      registeredBy: user.name,
-      note: note || '',
-      appUrl,
-      isReminder: false,
-      remindCount: 0
-    })
-    try {
-      await sendMail(smtpSettings, {
-        to: frontUser.email,
-        subject,
-        html
-      })
-    } catch (e) {
-      console.error('メール送信エラー:', e)
-    }
-  }
+  // 担当フロントへ通知（メール / LINE WORKS：本人の通知設定に従う）
+  const mansion = await db.prepare('SELECT name FROM mansions WHERE id = ?').bind(mansionId).first() as any
+  const appUrl = `${new URL(c.req.url).origin}/applications/new?inbox_id=${inboxId}`
+  runInBackground(c, () => notifyInbox(db, frontUserId, {
+    mansionName: mansion?.name || '',
+    registeredBy: user.name,
+    note: note || '',
+    appUrl,
+    isReminder: false,
+    remindCount: 0,
+  }))
 
   return c.redirect('/inbox?sent=1')
 })
@@ -488,30 +534,19 @@ inbox.post('/:id/remind', async (c) => {
 
   if (!item || item.status !== 'pending') return c.redirect('/inbox')
 
-  const smtpSettings = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
-
-  if (item.front_email && smtpSettings) {
-    const newCount = (item.remind_count || 0) + 1
-    const appUrl = `${new URL(c.req.url).origin}/applications/new?inbox_id=${item.id}`
-    const subject = `【リマインド${newCount}回目】${item.mansion_name} の請求書回覧申請をお願いします`
-    const html = buildInboxNotificationBody({
-      frontName: item.front_name,
-      mansionName: item.mansion_name,
-      registeredBy: user.name,
-      note: item.note || '',
-      appUrl,
-      isReminder: true,
-      remindCount: newCount
-    })
-    try {
-      await sendMail(smtpSettings, { to: item.front_email, subject, html })
-      await db.prepare(`
-        UPDATE invoice_inbox SET remind_count = ?, last_reminded_at = ?, updated_at = ? WHERE id = ?
-      `).bind(newCount, now, now, id).run()
-    } catch (e) {
-      console.error('リマインド送信エラー:', e)
-    }
-  }
+  const newCount = (item.remind_count || 0) + 1
+  await db.prepare(`
+    UPDATE invoice_inbox SET remind_count = ?, last_reminded_at = ?, updated_at = ? WHERE id = ?
+  `).bind(newCount, now, now, id).run()
+  const appUrl = `${new URL(c.req.url).origin}/applications/new?inbox_id=${item.id}`
+  runInBackground(c, () => notifyInbox(db, item.front_user_id, {
+    mansionName: item.mansion_name || '',
+    registeredBy: user.name,
+    note: item.note || '',
+    appUrl,
+    isReminder: true,
+    remindCount: newCount,
+  }))
 
   return c.redirect('/inbox?reminded=1')
 })

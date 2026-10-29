@@ -1637,6 +1637,8 @@ admin.get('/smtp', async (c) => {
       </div>
 
       ${saved ? `<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">✅ 設定を保存しました。</div>` : ''}
+      ${c.req.query('test') === 'ok' ? `<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">✅ テストメールを送信しました（宛先: ${String(c.req.query('to') || '').replace(/[<>&"]/g, '')}）。受信箱（迷惑メールフォルダも）をご確認ください。</div>` : ''}
+      ${c.req.query('test') === 'fail' ? `<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm break-all">❌ メール送信に失敗しました<br><span class="text-xs">${String(c.req.query('detail') || '').replace(/[<>&"]/g, '')}</span></div>` : ''}
 
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <form method="POST" action="/admin/smtp">
@@ -1706,6 +1708,12 @@ admin.get('/smtp', async (c) => {
         </form>
       </div>
 
+      <!-- メール送信テスト -->
+      <form method="POST" action="/admin/smtp/test" class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between gap-3">
+        <p class="text-sm text-gray-600">ログイン中のあなたのメールアドレス宛にテストメールを送信します</p>
+        <button type="submit" class="px-4 py-2 border border-[#396999] text-[#396999] rounded-lg text-sm font-semibold hover:bg-[#EEF4FA] whitespace-nowrap">📧 テスト送信</button>
+      </form>
+
       <!-- 注意事項 -->
       <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
         <p class="font-semibold mb-2">⚠️ Gmailご利用の注意事項</p>
@@ -1749,6 +1757,26 @@ admin.post('/smtp', async (c) => {
     ).bind(host, port, username, cleanPassword, from_email, from_name, use_tls).run()
   }
   return c.redirect('/admin/smtp?saved=1')
+})
+
+// ============================================================
+// メール送信テスト（ログイン中の管理者自身のアドレスへ送信し、失敗時はエラー内容を表示）
+// ============================================================
+admin.post('/smtp/test', async (c) => {
+  const user = (c as any).get('user')
+  const db = c.env.DB
+  const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
+  if (!smtp) return c.redirect('/admin/smtp?test=fail&detail=' + encodeURIComponent('メール設定が未登録です'))
+  const me = await db.prepare('SELECT email FROM users WHERE id = ?').bind(user.uid).first() as any
+  if (!me?.email) return c.redirect('/admin/smtp?test=fail&detail=' + encodeURIComponent('ログイン中ユーザーのメールアドレスが未設定です'))
+  const { sendMailDetailed } = await import('../lib/mail')
+  const r = await sendMailDetailed(smtp, {
+    to: me.email,
+    subject: '【テスト】建物管理部 請求回覧 メール送信テスト',
+    html: `<p>メール送信テストです。</p><p>送信日時: ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</p><p>このメールが届いていれば、メール設定は正常です。</p>`,
+  })
+  if (r.ok) return c.redirect('/admin/smtp?test=ok&to=' + encodeURIComponent(me.email))
+  return c.redirect('/admin/smtp?test=fail&detail=' + encodeURIComponent(String(r.error || 'unknown').slice(0, 200)))
 })
 
 // ============================================================

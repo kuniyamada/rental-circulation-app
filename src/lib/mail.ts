@@ -21,6 +21,12 @@ export interface MailOptions {
 
 // nodemailer 経由で SMTP 送信
 export async function sendMail(config: SmtpConfig, options: MailOptions): Promise<boolean> {
+  const r = await sendMailDetailed(config, options)
+  return r.ok
+}
+
+// 送信結果とエラー内容を返す版（送信テスト・原因調査用）
+export async function sendMailDetailed(config: SmtpConfig, options: MailOptions): Promise<{ ok: boolean; error?: string }> {
   try {
     const transporter = nodemailer.createTransport({
       host: config.host || 'smtp.gmail.com',
@@ -40,10 +46,11 @@ export async function sendMail(config: SmtpConfig, options: MailOptions): Promis
     })
 
     console.log(`[MAIL] ✅ 送信成功: To=${options.to}, Subject=${options.subject}, messageId=${info.messageId}`)
-    return true
+    return { ok: true }
   } catch (err: any) {
-    console.error(`[MAIL] ❌ 送信エラー: To=${options.to}, Subject=${options.subject}, Error=${err?.message || err}`)
-    return false
+    const msg = String(err?.message || err)
+    console.error(`[MAIL] ❌ 送信エラー: To=${options.to}, Subject=${options.subject}, Error=${msg}`)
+    return { ok: false, error: msg }
   }
 }
 
