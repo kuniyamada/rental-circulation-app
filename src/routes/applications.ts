@@ -761,13 +761,13 @@ applications.get('/new', async (c) => {
             <input type="hidden" name="td_type" id="tdTypeHidden">
           </div>
 
-          <!-- 管理組合の場合：勘定科目（手入力・20文字上限） -->
+          <!-- 管理組合の場合：勘定科目（手入力・10文字上限） -->
           <div id="kumiaiFields" class="hidden bg-green-50 border border-green-200 rounded-lg p-4">
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">勘定科目 <span class="text-red-500">*</span></label>
-            <input type="text" name="account_item" maxlength="20"
+            <input type="text" name="account_item" maxlength="10"
               placeholder="例: 予備費、小修繕費、修繕費、保険修繕費 など"
               class="w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
-            <p class="text-xs text-gray-500 mt-1">20文字以内で入力してください</p>
+            <p class="text-xs text-gray-500 mt-1">10文字以内で入力してください</p>
           </div>
 
           <!-- TD（会社）の場合: 元請時のみ金額入力を表示 (区分ラジオは削除、プルダウンから決定) -->
@@ -1973,14 +1973,14 @@ applications.post('/', async (c) => {
     // 'none' の場合はチェック不要（この後の INSERT で両方 NULL / 0 になる）
   }
 
-  // 勘定科目バリデーション（管理組合の場合、手入力・20文字上限）
+  // 勘定科目バリデーション（管理組合の場合、手入力・10文字上限）
   //   元請セット申請Bは自動設定のためスキップ
   if (body.payment_target === 'kumiai' && !fromMotoukeId) {
     const accountItem = String(body.account_item || '').trim()
     if (!accountItem) {
       return c.redirect('/applications/new?error=account_item_required')
     }
-    if (accountItem.length > 20) {
+    if (accountItem.length > 10) {
       return c.redirect('/applications/new?error=account_item_too_long')
     }
   }
@@ -3901,13 +3901,13 @@ applications.post('/:id/resubmit', async (c) => {
   const editedMansionId = body.mansion_id ? parseInt(body.mansion_id) : orig.mansion_id
   const editedStartDate = body.circulation_start_date || orig.circulation_start_date
   const editedPaymentTarget = body.payment_target || orig.payment_target
-  // 勘定科目: 手入力・20文字上限（管理組合の場合のみ）
+  // 勘定科目: 手入力・10文字上限（管理組合の場合のみ）
   let editedAccountItem: any = body.account_item !== undefined && body.account_item !== '' ? String(body.account_item).trim() : (editedPaymentTarget === 'kumiai' ? orig.account_item : null)
   if (editedPaymentTarget === 'kumiai') {
     if (!editedAccountItem) {
       return c.redirect(`/applications/new?resubmit_id=${id}&error=account_item_required`)
     }
-    if (typeof editedAccountItem === 'string' && editedAccountItem.length > 20) {
+    if (typeof editedAccountItem === 'string' && editedAccountItem.length > 10) {
       return c.redirect(`/applications/new?resubmit_id=${id}&error=account_item_too_long`)
     }
   }
