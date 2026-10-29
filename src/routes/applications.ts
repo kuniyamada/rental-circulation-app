@@ -2850,6 +2850,54 @@ applications.get('/:id/review/:stepId', async (c) => {
 
   const attachments = await db.prepare('SELECT * FROM attachments WHERE application_id = ?').bind(id).all()
 
+  // 回覧ルート（申請者 → 上長 → 業務管理課 → 最終）
+  const routeSteps = (await db.prepare(`
+    SELECT cs.step_number, cs.status, cs.acted_at, u.name as reviewer_name
+    FROM circulation_steps cs JOIN users u ON cs.reviewer_id = u.id
+    WHERE cs.application_id = ? ORDER BY cs.step_number
+  `).bind(id).all()).results as any[]
+  const routeLabels: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終' }
+  const nextRouteStep = routeSteps.find((s: any) => s.step_number > step.step_number)
+  const routeHtml = `
+      <!-- 回覧ルート -->
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="font-semibold text-gray-800 mb-4">回覧ルート</h3>
+        <ol class="flex flex-wrap items-stretch gap-2">
+          <li class="flex items-center gap-2">
+            <div class="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 min-w-[110px]">
+              <p class="text-[11px] text-gray-400">申請者</p>
+              <p class="text-sm font-semibold text-gray-800">${app.applicant_name || '-'}</p>
+              <p class="text-[11px] text-green-600 mt-0.5">申請済</p>
+            </div>
+          </li>
+          ${routeSteps.map((rs: any) => {
+            const isMe = rs.step_number === step.step_number
+            const done = rs.status === 'approved'
+            const cardCls = isMe
+              ? 'border-2 border-orange-400 bg-orange-50'
+              : done ? 'border border-green-200 bg-green-50' : 'border border-gray-200 bg-white'
+            const stateText = isMe
+              ? '<span class="text-orange-600 font-semibold">← あなた（承認待ち）</span>'
+              : done ? '<span class="text-green-600">承認済</span>'
+              : rs === nextRouteStep ? '<span class="text-[#396999] font-semibold">次の送信先</span>'
+              : '<span class="text-gray-400">待機中</span>'
+            return `
+          <li class="flex items-center gap-2">
+            <span class="text-gray-300 text-lg">→</span>
+            <div class="${cardCls} rounded-lg px-3 py-2 min-w-[110px]">
+              <p class="text-[11px] text-gray-400">${rs.step_number}. ${routeLabels[rs.step_number] || 'レビュー'}</p>
+              <p class="text-sm font-semibold text-gray-800">${rs.reviewer_name}</p>
+              <p class="text-[11px] mt-0.5">${stateText}</p>
+            </div>
+          </li>`
+          }).join('')}
+        </ol>
+        <p class="text-xs text-gray-500 mt-3">${nextRouteStep
+          ? `承認すると、次は <strong class="text-gray-700">${routeLabels[nextRouteStep.step_number] || ''}（${nextRouteStep.reviewer_name}）</strong> に送信されます。`
+          : 'あなたが最終承認者です。承認すると回覧が完了します。'}</p>
+      </div>
+  `
+
   // 元請かつ本橋(業務管理課=step2)の承認時のみ、管理組合宛請求書PDFアップロード欄を表示
   const isMotoukeStep2 = app.payment_target === 'td' && app.td_type === 'motouke' && step.step_number === 2
   // 既にアップロード済みかチェック
@@ -3012,6 +3060,8 @@ applications.get('/:id/review/:stepId', async (c) => {
         </form>
       </div>
       ` : ''}
+
+      ${routeHtml}
 
       <!-- アクションフォーム -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
