@@ -301,6 +301,11 @@ app.get('/', async (c) => {
         </div>
       </div>
       <div class="flex items-center gap-3">
+        ${(user.test_mode && ['030', '049'].includes(String(user.employee_number))) ? `
+        <a href="/admin/test-mode" class="hidden sm:inline-flex items-center gap-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 text-xs font-semibold px-2.5 py-1 rounded-full border border-yellow-300 transition" title="テストモード稼働中（クリックで設定）">
+          🧪 テストモード ON
+        </a>
+        ` : ''}
         <div class="text-right hidden sm:block">
           <p class="text-sm font-semibold text-gray-800">${user.name}</p>
           <p class="text-xs text-gray-400">${roleLabel[user.role] || user.role} / ${user.employee_number}</p>
