@@ -826,7 +826,6 @@ applications.get('/new', async (c) => {
                   <h4 class="text-sm font-semibold text-gray-700">添付ファイル（見積書）</h4>
                   <span class="text-xs text-gray-400">任意</span>
                 </div>
-                <p class="text-xs text-gray-500 mb-2">業者から受け取った見積書があれば添付してください（PDF / 画像 / Excel / Word 対応）</p>
                 ${(() => {
                   const estAtt = resubmitAttachments.find(a => a.file_type === 'estimate')
                   return estAtt ? `
