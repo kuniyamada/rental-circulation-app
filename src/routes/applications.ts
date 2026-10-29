@@ -641,7 +641,7 @@ applications.get('/new', async (c) => {
             <div id="invoiceExtraList" class="space-y-3">
               <!-- 請求書① 必須 -->
               <div data-invoice-slot="1">
-                <label class="block text-xs text-gray-500 mb-1">添付資料（請求書）① <span class="text-red-500">*</span></label>
+                <label id="invoice1Label" class="block text-xs text-gray-500 mb-1">添付資料（請求書）① <span class="text-red-500">*</span></label>
                 ${(() => {
                   const resubmitInv1 = resubmitAttachments.find(a => a.file_type === 'invoice1')
                   if (resubmitInv1) {
@@ -1610,6 +1610,8 @@ applications.get('/new', async (c) => {
         const home = document.getElementById('invoiceSectionHome')
         const slot = document.getElementById('motoukeInvoiceSlot')
         if (!sec || !home || !slot) return
+        // 元請時は「添付資料（請求書）① *」ラベルを非表示
+        document.getElementById('invoice1Label')?.classList.toggle('hidden', !!toMotouke)
         if (toMotouke) {
           if (sec.parentNode !== slot) slot.appendChild(sec)
         } else if (sec.previousElementSibling !== home) {
