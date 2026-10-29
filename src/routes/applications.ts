@@ -448,6 +448,10 @@ applications.get('/new', async (c) => {
   const testExtraUsers = isTestMode
     ? ((await db.prepare("SELECT id, name, role FROM users WHERE employee_number IN ('030','049') AND is_active = 1 ORDER BY employee_number").all()).results as any[])
     : []
+  // テストモード時に太字・★表示する本橋・山崎のID
+  const testExtraIds = new Set<number>(testExtraUsers.map((u: any) => u.id))
+  const testOptLabel = (u: any) => testExtraIds.has(u.id) ? `★ ${u.name}【テスト】` : u.name
+  const testOptStyle = (u: any) => testExtraIds.has(u.id) ? ' style="font-weight:bold"' : ''
   const withTestExtras = (res: any) => {
     const list = [...((res.results || []) as any[])]
     for (const u of testExtraUsers) if (!list.some((x: any) => x.id === u.id)) list.push(u)
@@ -903,7 +907,7 @@ applications.get('/new', async (c) => {
                 <option value="">選択してください</option>
                 ${(supervisorCandidates.results as any[]).map((u: any) => {
                   const roleTag = ''  // 役職の英語表記 [role] は非表示
-                  return `<option value="${u.id}">${u.name}${roleTag}</option>`
+                  return `<option value="${u.id}"${testOptStyle(u)}>${testOptLabel(u)}${roleTag}</option>`
                 }).join('')}
               </select>
               <!-- マンション選択時、上長がマスタ未設定/候補外だと表示される警告 -->
@@ -924,7 +928,7 @@ applications.get('/new', async (c) => {
                 <option value="">選択してください</option>
                 ${(opStaffCandidates.results as any[]).map((u: any) => {
                   const roleTag = ''  // 役職の英語表記 [role] は非表示
-                  return `<option value="${u.id}"${defaultStep2User && u.id === defaultStep2User.id ? ' selected' : ''}>${u.name}${roleTag}</option>`
+                  return `<option value="${u.id}"${testOptStyle(u)}${defaultStep2User && u.id === defaultStep2User.id ? ' selected' : ''}>${testOptLabel(u)}${roleTag}</option>`
                 }).join('')}
               </select>
             </div>
@@ -1298,10 +1302,10 @@ applications.get('/new', async (c) => {
 
       // 会計課・本社経理ユーザーをJSに埋め込み
       const ACCOUNTING_USERS = ${JSON.stringify(
-        (accountingUsers.results as any[]).map((u: any) => ({ id: u.id, name: u.name }))
+        (accountingUsers.results as any[]).map((u: any) => ({ id: u.id, name: u.name, test: testExtraIds.has(u.id) }))
       )};
       const HONSHA_USERS = ${JSON.stringify(
-        (honshaUsers.results as any[]).map((u: any) => ({ id: u.id, name: u.name }))
+        (honshaUsers.results as any[]).map((u: any) => ({ id: u.id, name: u.name, test: testExtraIds.has(u.id) }))
       )};
       const DEFAULT_HONSHA_USER_ID = ${defaultHonshaUser ? defaultHonshaUser.id : 'null'};
 
@@ -1312,7 +1316,9 @@ applications.get('/new', async (c) => {
         sel.innerHTML = users.length === 0
           ? '<option value="">先に支払先を選択してください</option>'
           : '<option value="">担当者を選択してください</option>' +
-            users.map(u => '<option value="' + u.id + '">' + u.name + '</option>').join('')
+            users.map(u => u.test
+              ? '<option value="' + u.id + '" style="font-weight:bold">★ ' + u.name + '【テスト】</option>'
+              : '<option value="' + u.id + '">' + u.name + '</option>').join('')
         // 本社経理を選択した場合、デフォルトで山崎 修を自動選択
         if (role === 'honsha' && users.length > 0) {
           if (DEFAULT_HONSHA_USER_ID && users.some(u => u.id === DEFAULT_HONSHA_USER_ID)) {
