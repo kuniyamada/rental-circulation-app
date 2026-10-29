@@ -772,7 +772,7 @@ applications.get('/new', async (c) => {
               <!-- 元請専用ブロックの見出し -->
               <div class="flex items-center gap-2">
                 <span class="inline-flex items-center justify-center w-6 h-6 bg-[#2E5580] text-white rounded-full text-xs font-bold">元</span>
-                <p class="text-sm font-bold text-[#2E5580]">元請の金額入力 <span class="text-red-500 text-xs ml-1">※管理組合請求金額は必須</span></p>
+                <p class="text-sm font-bold text-[#2E5580]">元請</p>
               </div>
               <!-- 税込表示の注意書き（元請時のみ表示） -->
               <div class="bg-red-50 border border-red-300 rounded-lg px-3 py-2 flex items-center gap-2">
