@@ -1490,7 +1490,7 @@ applications.get('/new', async (c) => {
         const td  = document.getElementById('tdTypeHidden')?.value
         if (pay === 'kumiai') return 4
         if (pay === 'td' && td === 'ittaku') return 6
-        if (pay === 'td' && td === 'motouke') return 3
+        if (pay === 'td' && td === 'motouke') return 1  // 元請: 請求書は①のみ（「＋請求書を追加」非表示）
         return 1
       }
 
