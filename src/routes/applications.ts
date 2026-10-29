@@ -1545,7 +1545,9 @@ applications.get('/new', async (c) => {
         // 新: プルダウン方式に伴い hidden input 経由で値を取得
         const val = document.getElementById('paymentTargetHidden')?.value || ''
         document.getElementById('kumiaiFields').classList.toggle('hidden', val !== 'kumiai')
-        document.getElementById('tdFields').classList.toggle('hidden', val !== 'td')
+        // 会社(TD)の枠は中身が元請ブロックのみのため、元請のときだけ表示（委託内では空枠になるので非表示）
+        const tdTypeVal = document.getElementById('tdTypeHidden')?.value || ''
+        document.getElementById('tdFields').classList.toggle('hidden', !(val === 'td' && tdTypeVal === 'motouke'))
         if (val !== 'td') {
           document.getElementById('motoukeFields').classList.add('hidden')
           moveInvoiceSection(false)
@@ -1627,6 +1629,9 @@ applications.get('/new', async (c) => {
         // 新: プルダウン方式に伴い hidden input 経由で値を取得
         const val = document.getElementById('tdTypeHidden')?.value || ''
         document.getElementById('motoukeFields').classList.toggle('hidden', val !== 'motouke')
+        // 委託内では空の水色枠になるため、外枠(tdFields)も元請時のみ表示
+        const isTd = document.getElementById('paymentTargetHidden')?.value === 'td'
+        document.getElementById('tdFields').classList.toggle('hidden', !(isTd && val === 'motouke'))
         moveInvoiceSection(val === 'motouke')
         // 元請以外に切り替えたら見積書入力欄をクリア
         if (val !== 'motouke') clearEstimateInput()
