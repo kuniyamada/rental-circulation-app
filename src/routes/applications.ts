@@ -656,6 +656,16 @@ applications.get('/new', async (c) => {
                 <label id="invoice1Label" class="block text-xs text-gray-500 mb-1">添付資料（請求書）① <span class="text-red-500">*</span></label>
                 ${(() => {
                   const resubmitInv1 = resubmitAttachments.find(a => a.file_type === 'invoice1')
+                  if (resubmitInv1 && String(resubmitInv1.file_key || '').startsWith('inbox/')) {
+                    // 受付（業務管理課が登録）由来の請求書は差し替え不可・追加不可
+                    return `
+                <input type="hidden" id="invoiceLocked" value="1">
+                <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg">
+                  <span class="text-[#396999] text-xs">📎 引き継ぎ：${resubmitInv1.file_name}</span>
+                  ${previewBtn(`/applications/files/${resubmitInv1.id}`, resubmitInv1.file_name)}
+                </div>
+                    `
+                  }
                   if (resubmitInv1) {
                     return `
                 <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
@@ -675,22 +685,14 @@ applications.get('/new', async (c) => {
                     `
                   }
                   if (inboxData?.attachment_key) {
+                    // 受付（業務管理課が登録）の請求書は差し替え不可・追加不可（閲覧のみ）
                     return `
+                <input type="hidden" id="invoiceLocked" value="1">
                 <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg">
                   <span class="text-[#396999] text-xs">📎 引き継ぎ：${inboxData.attachment_name || 'invoice.pdf'}</span>
                   ${previewBtn(`/inbox/${inboxData.id}/download`, inboxData.attachment_name || 'invoice.pdf')}
                   <input type="hidden" name="inbox_attachment_key" value="${inboxData.attachment_key}">
                   <input type="hidden" name="inbox_attachment_name" value="${inboxData.attachment_name || ''}">
-                  <span class="text-xs text-gray-400">（別ファイルを選択すると上書きされます）</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <input type="file" name="invoice1" accept=".pdf,.jpg,.jpeg,.png" id="invoice1Input"
-                    onchange="handleFilePreview(this, 'invoice1Preview')"
-                    class="flex-1 text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-[#EEF4FA] file:text-[#396999] hover:file:bg-[#D5E5F2]">
-                  <button type="button" id="invoice1Preview" onclick="openFilePreview('invoice1Input')"
-                    class="hidden items-center gap-1 px-3 py-1.5 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580]">
-                    👁 確認
-                  </button>
                 </div>
                     `
                   }
@@ -1507,6 +1509,8 @@ applications.get('/new', async (c) => {
       // - 会社(TD) 元請(motouke) → 最大3枚 (①〜③)
       // - それ以外（未選択）→ 1枚のみ（①のみ、②以降の追加不可）
       function getMaxInvoiceSlots() {
+        // 受付（業務管理課が登録）由来の請求書は①のみ（「＋請求書を追加」非表示）
+        if (document.getElementById('invoiceLocked')) return 1
         const pay = document.getElementById('paymentTargetHidden')?.value
         const td  = document.getElementById('tdTypeHidden')?.value
         if (pay === 'kumiai') return 4
@@ -2012,15 +2016,22 @@ applications.post('/', async (c) => {
   const fileKeys: Record<string, string> = {}
   const fileNames: Record<string, string> = {}
 
-  // inbox引き継ぎファイルがあり、新規ファイル未選択の場合はinboxのファイルをそのまま使用
-  const inboxAttachmentKey = body.inbox_attachment_key || null
-  const inboxAttachmentName = body.inbox_attachment_name || null
+  // inbox引き継ぎ: 受付ID から DB の添付を取得（画面から送られた値は信用しない）
+  //   受付由来の請求書は差し替え不可・追加不可 → 請求書(invoice1〜6)のアップロードは無視する
+  const inboxIdForFiles = body.inbox_id ? parseInt(body.inbox_id) : null
+  const inboxRowForFiles = inboxIdForFiles
+    ? await db.prepare('SELECT attachment_key, attachment_name FROM invoice_inbox WHERE id = ?').bind(inboxIdForFiles).first() as any
+    : null
+  const inboxAttachmentKey = inboxRowForFiles?.attachment_key || null
+  const inboxAttachmentName = inboxRowForFiles?.attachment_name || null
+  const invoiceLocked = !!inboxAttachmentKey
 
   // 委託内時に動的追加された invoice3〜invoice6 も保存対象に含める（最大5枠 invoice2〜invoice6）
   // estimate: 元請時のみ任意添付される見積書（1枚）
   for (const fileKey of ['invoice1', 'invoice2', 'invoice3', 'invoice4', 'invoice5', 'invoice6', 'other1', 'other2', 'estimate']) {
     const file = body[fileKey] as File | undefined
-    if (file && file.size > 0) {
+    const skipUpload = invoiceLocked && fileKey.startsWith('invoice')
+    if (file && typeof file === 'object' && file.size > 0 && !skipUpload) {
       const ext = file.name.split('.').pop()
       const key = `attachments/${appNumber}/${fileKey}.${ext}`
       await c.env.R2.put(key, await file.arrayBuffer(), {
@@ -3999,9 +4010,12 @@ applications.post('/:id/resubmit', async (c) => {
 
   // invoice1〜invoice6, other1, other2, estimate（元請時のみ必須）それぞれ処理
   const fileTypes = ['invoice1', 'invoice2', 'invoice3', 'invoice4', 'invoice5', 'invoice6', 'other1', 'other2', 'estimate']
+  // 受付（業務管理課が登録）由来の請求書は再申請でも差し替え不可 → 請求書のアップロードは無視し元申請を引き継ぐ
+  const resubmitInvoiceLocked = String(origAttMap['invoice1']?.file_key || '').startsWith('inbox/')
   for (const fileType of fileTypes) {
     const uploaded = body[fileType] as File | undefined
-    if (uploaded && uploaded.size > 0) {
+    const skipUpload = resubmitInvoiceLocked && fileType.startsWith('invoice')
+    if (uploaded && typeof uploaded === 'object' && uploaded.size > 0 && !skipUpload) {
       // 新規アップロード: R2に保存
       const ext = uploaded.name.split('.').pop()
       const key = `attachments/${newNumber}/${fileType}.${ext}`
