@@ -206,9 +206,9 @@ inbox.get('/new', async (c) => {
             <label class="block text-sm font-semibold text-gray-700 mb-1">
               請求書PDF <span class="text-red-500">*</span>
             </label>
-            <div class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-[#5B8AB5] transition cursor-pointer" onclick="document.getElementById('pdfFile').click()">
+            <div id="pdfDropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-[#5B8AB5] transition cursor-pointer" onclick="document.getElementById('pdfFile').click()">
               <div class="text-3xl mb-1">📄</div>
-              <p class="text-sm text-gray-500">クリックしてPDFを選択</p>
+              <p class="text-sm text-gray-500">クリックしてPDFを選択、またはここにドラッグ＆ドロップ</p>
               <p class="text-xs text-gray-400 mt-1">PDF形式（最大10MB）</p>
               <input type="file" id="pdfFile" name="pdf_file" accept=".pdf,application/pdf"
                 class="hidden" onchange="showFileName(this)">
@@ -286,12 +286,59 @@ inbox.get('/new', async (c) => {
         }
       }
 
+      // PDFかどうか・サイズ（最大10MB）をチェック
+      function isValidPdf(file) {
+        if (!file) return false;
+        const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+        if (!isPdf) { alert('PDFファイルを選択してください'); return false; }
+        if (file.size > 10 * 1024 * 1024) { alert('ファイルサイズが10MBを超えています'); return false; }
+        return true;
+      }
+
       function showFileName(input) {
         const p = document.getElementById('fileName');
         if (input.files && input.files[0]) {
+          if (!isValidPdf(input.files[0])) {
+            input.value = '';
+            p.textContent = '';
+            return;
+          }
           p.textContent = '✅ ' + input.files[0].name;
+        } else {
+          p.textContent = '';
         }
       }
+
+      // ドラッグ＆ドロップ対応
+      (function() {
+        const zone = document.getElementById('pdfDropZone');
+        const input = document.getElementById('pdfFile');
+        if (!zone || !input) return;
+        const on = () => zone.classList.add('border-[#396999]', 'bg-[#EEF4FA]');
+        const off = () => zone.classList.remove('border-[#396999]', 'bg-[#EEF4FA]');
+        ['dragenter', 'dragover'].forEach(function(ev) {
+          zone.addEventListener(ev, function(e) { e.preventDefault(); e.stopPropagation(); on(); });
+        });
+        zone.addEventListener('dragleave', function(e) {
+          e.preventDefault();
+          if (!zone.contains(e.relatedTarget)) off();
+        });
+        zone.addEventListener('drop', function(e) {
+          e.preventDefault(); e.stopPropagation(); off();
+          const files = e.dataTransfer && e.dataTransfer.files;
+          if (!files || files.length === 0) return;
+          const file = files[0];
+          if (!isValidPdf(file)) return;
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          input.files = dt.files;
+          showFileName(input);
+        });
+        // 枠の外にドロップしたときにブラウザがPDFを開いて画面遷移しないようにする
+        ['dragover', 'drop'].forEach(function(ev) {
+          window.addEventListener(ev, function(e) { e.preventDefault(); });
+        });
+      })();
     </script>
   `
   return c.html(layout('請求書登録', content, user))
