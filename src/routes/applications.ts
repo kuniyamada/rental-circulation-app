@@ -767,56 +767,13 @@ applications.get('/new', async (c) => {
 
           <!-- TD（会社）の場合: 元請時のみ金額入力を表示 (区分ラジオは削除、プルダウンから決定) -->
           <div id="tdFields" class="hidden bg-[#EEF4FA] border border-[#AECBE5] rounded-lg p-4 space-y-4">
-            <!-- 元請の場合：管理組合への請求金額 + 業者への支払金額 -->
+            <!-- 元請の場合：見積書添付 -->
             <div id="motoukeFields" class="hidden space-y-3 border-t-2 border-[#5B8AB5] pt-4 mt-2">
               <!-- 元請専用ブロックの見出し -->
               <div class="flex items-center gap-2">
                 <span class="inline-flex items-center justify-center w-6 h-6 bg-[#2E5580] text-white rounded-full text-xs font-bold">元</span>
                 <p class="text-sm font-bold text-[#2E5580]">元請</p>
               </div>
-              <!-- 税込表示の注意書き（元請時のみ表示） -->
-              <div class="bg-red-50 border border-red-300 rounded-lg px-3 py-2 flex items-center gap-2">
-                <span class="text-lg">⚠️</span>
-                <p class="text-sm font-bold text-red-600">管理組合への請求金額は<span class="underline">税込</span>で入力してください</p>
-              </div>
-              <!-- 金額入力（横並び） -->
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-sm font-semibold text-gray-700 mb-1.5">
-                    管理組合への請求金額 <span class="text-red-500">*</span>
-                    <span class="text-xs font-bold text-red-600 ml-1">※税込</span>
-                  </label>
-                  <div class="relative">
-                    <input type="text" id="kumiaiAmountDisplay" inputmode="numeric"
-                      class="w-full px-3 py-2.5 pr-8 border-2 border-red-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-red-400 outline-none"
-                      placeholder="0" oninput="formatComma(this, 'kumiaiAmount'); calcProfit()">
-                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
-                  </div>
-                  <input type="hidden" name="kumiai_amount" id="kumiaiAmountHidden">
-                </div>
-                <div>
-                  <label class="block text-sm font-semibold text-gray-700 mb-1.5">業者への支払金額</label>
-                  <div class="relative">
-                    <input type="text" id="gyoshaAmountDisplay" inputmode="numeric"
-                      class="w-full px-3 py-2.5 pr-8 border-2 border-gray-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none"
-                      placeholder="0" oninput="formatComma(this, 'gyoshaAmount'); calcProfit()">
-                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">円</span>
-                  </div>
-                  <input type="hidden" name="gyosha_amount" id="gyoshaAmountHidden">
-                </div>
-              </div>
-              <!-- 利益額・利益率（自動計算） -->
-              <div id="profitDisplay" class="hidden grid grid-cols-2 gap-3">
-                <div class="bg-white border border-gray-200 rounded-lg px-3 py-2.5">
-                  <p class="text-xs text-gray-400 mb-0.5">利益額</p>
-                  <p id="profitAmount" class="text-sm font-semibold text-gray-800">－</p>
-                </div>
-                <div class="bg-white border border-gray-200 rounded-lg px-3 py-2.5">
-                  <p class="text-xs text-gray-400 mb-0.5">利益率</p>
-                  <p id="profitRate" class="text-sm font-semibold text-gray-800">－</p>
-                </div>
-              </div>
-
               <!-- 添付ファイル（見積書）※元請時のみ・任意 -->
               <div class="border border-gray-200 bg-white rounded-lg p-4">
                 <div class="flex items-center gap-2 mb-2">
@@ -1718,6 +1675,7 @@ applications.get('/new', async (c) => {
 
       function calcProfit() {
         const profitDisplay = document.getElementById('profitDisplay')
+        if (!profitDisplay) return  // 金額入力欄は削除済み（B案）
         const profitAmountEl = document.getElementById('profitAmount')
         const profitRateEl = document.getElementById('profitRate')
 
