@@ -627,9 +627,14 @@ applications.get('/new', async (c) => {
           <input type="hidden" name="circulation_start_date" value="${today}">
 
           <!-- 添付ファイル（請求書）① ※必須（②以降は「＋請求書を追加」から動的に追加） -->
-          <div class="border border-gray-200 rounded-lg p-4">
+          <!-- 元請選択時はこのブロックを元請ブロック内（見積書の上）へ移動する。戻す位置の目印 -->
+          <div id="invoiceSectionHome" class="hidden"></div>
+          <div id="invoiceSection" class="border border-gray-200 bg-white rounded-lg p-4">
             <div class="flex items-center justify-between mb-3">
-              <h3 class="text-sm font-semibold text-gray-700">添付ファイル（請求書）</h3>
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-semibold text-gray-700">添付ファイル（請求書）</h3>
+                <span class="text-xs font-semibold text-red-500">必須</span>
+              </div>
               <span id="invoiceExtraHint" class="hidden text-xs text-gray-400"></span>
             </div>
             <!-- ①（必須）＋ ②〜（追加分）を1つのコンテナ内に統一表示 -->
@@ -774,14 +779,16 @@ applications.get('/new', async (c) => {
                 <span class="inline-flex items-center justify-center w-6 h-6 bg-[#2E5580] text-white rounded-full text-xs font-bold">元</span>
                 <p class="text-sm font-bold text-[#2E5580]">元請</p>
               </div>
-              <!-- 添付ファイル（見積書）※元請時のみ・任意 -->
+              <!-- 元請時: 添付ファイル（請求書）をここへ移動して表示 -->
+              <div id="motoukeInvoiceSlot"></div>
+              <!-- 添付ファイル（見積書）※元請時のみ・必須 -->
               <div class="border border-gray-200 bg-white rounded-lg p-4">
                 <div class="flex items-center gap-2 mb-2">
                   <svg class="w-4 h-4 text-[#396999]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
                   </svg>
                   <h4 class="text-sm font-semibold text-gray-700">添付ファイル（見積書）</h4>
-                  <span class="text-xs text-gray-400">任意</span>
+                  <span class="text-xs font-semibold text-red-500">必須</span>
                 </div>
                 ${(() => {
                   const estAtt = resubmitAttachments.find(a => a.file_type === 'estimate')
@@ -792,6 +799,8 @@ applications.get('/new', async (c) => {
                   <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
                 </div>` : ''
                 })()}
+                <input type="hidden" id="estimateInherited" value="${resubmitAttachments.find(a => a.file_type === 'estimate') ? '1' : ''}">
+                <p id="estimateValidationMsg" class="hidden text-xs font-semibold text-red-600 mb-2">⚠ 見積書を添付してください</p>
                 <div class="flex items-center gap-2">
                   <input type="file" name="estimate" id="estimateInput"
                     accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.xlsx,.xls,.docx,.doc,application/pdf,image/*,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
@@ -1534,6 +1543,7 @@ applications.get('/new', async (c) => {
         document.getElementById('tdFields').classList.toggle('hidden', val !== 'td')
         if (val !== 'td') {
           document.getElementById('motoukeFields').classList.add('hidden')
+          moveInvoiceSection(false)
           clearEstimateInput()
         }
         // 会社（TD）選択時は手数料を非表示
@@ -1594,10 +1604,23 @@ applications.get('/new', async (c) => {
           if (typeof applyMansionDefaultsFromInput === 'function') applyMansionDefaultsFromInput()
         }
       }
+      // 元請時は「添付ファイル（請求書）」を元請ブロック内（見積書の上）へ移動、それ以外は元の位置へ戻す
+      function moveInvoiceSection(toMotouke) {
+        const sec = document.getElementById('invoiceSection')
+        const home = document.getElementById('invoiceSectionHome')
+        const slot = document.getElementById('motoukeInvoiceSlot')
+        if (!sec || !home || !slot) return
+        if (toMotouke) {
+          if (sec.parentNode !== slot) slot.appendChild(sec)
+        } else if (sec.previousElementSibling !== home) {
+          home.parentNode.insertBefore(sec, home.nextSibling)
+        }
+      }
       function toggleMotouke() {
         // 新: プルダウン方式に伴い hidden input 経由で値を取得
         const val = document.getElementById('tdTypeHidden')?.value || ''
         document.getElementById('motoukeFields').classList.toggle('hidden', val !== 'motouke')
+        moveInvoiceSection(val === 'motouke')
         // 元請以外に切り替えたら見積書入力欄をクリア
         if (val !== 'motouke') clearEstimateInput()
         // 請求書追加UIの表示を更新（委託内=5枠、元請=追加不可）
@@ -1803,6 +1826,23 @@ applications.get('/new', async (c) => {
 
       // 送信時の最終バリデーション
       function checkFeeRequired() {
+        // 元請: 見積書は必須（再申請で元申請から引き継いでいる場合はOK）
+        const estMsg = document.getElementById('estimateValidationMsg')
+        if (estMsg) estMsg.classList.add('hidden')
+        const isMotouke = document.getElementById('paymentTargetHidden')?.value === 'td'
+          && document.getElementById('tdTypeHidden')?.value === 'motouke'
+        if (isMotouke) {
+          const estInput = document.getElementById('estimateInput')
+          const hasFile = estInput && estInput.files && estInput.files.length > 0
+          const inherited = document.getElementById('estimateInherited')?.value === '1'
+          if (!hasFile && !inherited) {
+            if (estMsg) estMsg.classList.remove('hidden')
+            estInput?.focus()
+            estInput?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            alert('見積書を添付してください（元請の場合は必須です）')
+            return false
+          }
+        }
         const amountFields = document.getElementById('amountFields')
         if (amountFields.classList.contains('hidden')) return true
         const feeType = document.querySelector('input[name="fee_type"]:checked')?.value
@@ -1928,6 +1968,14 @@ applications.post('/', async (c) => {
     }
     if (accountItem.length > 20) {
       return c.redirect('/applications/new?error=account_item_too_long')
+    }
+  }
+
+  // 元請: 見積書必須チェック
+  if (!fromMotoukeId && body.payment_target === 'td' && body.td_type === 'motouke') {
+    const est = body.estimate as File | undefined
+    if (!(est && typeof est === 'object' && est.size > 0)) {
+      return c.redirect('/applications/new?error=estimate_required')
     }
   }
 
@@ -3878,6 +3926,20 @@ applications.post('/:id/resubmit', async (c) => {
     }
   }
 
+  // 元請: 見積書必須チェック（新規アップロード or 元申請からの引き継ぎがあればOK）
+  if (editedPaymentTarget === 'td' && editedTdType === 'motouke') {
+    const est = body.estimate as File | undefined
+    const hasNewEst = !!(est && typeof est === 'object' && est.size > 0)
+    if (!hasNewEst) {
+      const origEst = await db.prepare(
+        "SELECT id FROM attachments WHERE application_id = ? AND file_type = 'estimate' LIMIT 1"
+      ).bind(id).first()
+      if (!origEst) {
+        return c.redirect(`/applications/new?resubmit_id=${id}&error=estimate_required`)
+      }
+    }
+  }
+
   const newNumber = generateApplicationNumber()
   const result = await db.prepare(`
     INSERT INTO applications (
@@ -3906,7 +3968,7 @@ applications.post('/:id/resubmit', async (c) => {
     origAttMap[att.file_type] = att
   }
 
-  // invoice1〜invoice6, other1, other2, estimate（元請時のみ任意）それぞれ処理
+  // invoice1〜invoice6, other1, other2, estimate（元請時のみ必須）それぞれ処理
   const fileTypes = ['invoice1', 'invoice2', 'invoice3', 'invoice4', 'invoice5', 'invoice6', 'other1', 'other2', 'estimate']
   for (const fileType of fileTypes) {
     const uploaded = body[fileType] as File | undefined
