@@ -773,7 +773,7 @@ applications.get('/new', async (c) => {
           <!-- TD（会社）の場合: 元請時のみ金額入力を表示 (区分ラジオは削除、プルダウンから決定) -->
           <div id="tdFields" class="hidden bg-[#EEF4FA] border border-[#AECBE5] rounded-lg p-4 space-y-4">
             <!-- 元請の場合：見積書添付 -->
-            <div id="motoukeFields" class="hidden space-y-3 border-t-2 border-[#5B8AB5] pt-4 mt-2">
+            <div id="motoukeFields" class="hidden space-y-3">
               <!-- 元請専用ブロックの見出し -->
               <div class="flex items-center gap-2">
                 <span class="inline-flex items-center justify-center w-6 h-6 bg-[#2E5580] text-white rounded-full text-xs font-bold">元</span>
