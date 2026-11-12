@@ -5,7 +5,7 @@ import auth from './routes/auth'
 import applications from './routes/applications'
 import admin from './routes/admin'
 import inbox from './routes/inbox'
-import { previewRoleSelector, previewRoleBanner } from './routes/layout'
+import { previewRoleSelector, previewRoleBanner, sidebarNav, SIDEBAR_CSS } from './routes/layout'
 import { findBudget, openBudgetFile, BudgetError } from './lib/budget'
 
 type Bindings = {
@@ -228,60 +228,7 @@ app.get('/', async (c) => {
 
   const sidebar = `
     <aside id="sidebar" class="w-60 bg-white border-r border-gray-200 fixed left-0 top-14 bottom-0 overflow-y-auto z-40 transform -translate-x-full lg:translate-x-0 transition-transform duration-200">
-      <nav class="p-3 space-y-1">
-        <a href="/" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm bg-[#EEF4FA] text-[#396999] font-semibold">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-          ダッシュボード
-        </a>
-        ${(user.role === 'operations' || user.is_admin) ? `
-        <a href="/inbox" class="flex items-center gap-3 mt-2 mb-1 px-4 py-3 rounded-xl text-sm font-bold text-white shadow-md transition bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 ${false ? 'ring-2 ring-offset-2 ring-orange-400' : ''}">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
-          <span class="flex-1">請求書受付管理</span>
-          <span class="text-base leading-none">📥</span>
-        </a>
-        <a href="/inbox/new" class="flex items-center gap-3 mb-1 px-4 py-3 rounded-xl text-sm font-bold text-white shadow-md transition bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 ${false ? 'ring-2 ring-offset-2 ring-orange-400' : ''}">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          <span class="flex-1">請求書を登録・担当者へ送信</span>
-          <span class="text-base leading-none">📤</span>
-        </a>
-        ` : ''}
-        ${(user.is_admin || ['admin','front','front_supervisor'].includes(user.role)) ? `
-        <a href="/applications/new" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          新規申請
-        </a>
-        ` : ''}
-        <a href="/applications" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-          申請一覧・検索
-        </a>
-        <a href="/change-password" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
-          パスワード変更
-        </a>
-        ${user.is_admin ? `
-        <div class="pt-3 pb-1">
-          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">管理者メニュー</p>
-        </div>
-        <a href="/admin/users" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-          ユーザー管理
-        </a>
-        <a href="/admin/mansions" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
-          マンション管理マスタ
-        </a>
-        <a href="/admin/smtp" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-          メール設定
-        </a>
-        <a href="/admin/reminder" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-          リマインダー設定
-        </a>
-        ` : ''}
-        ${previewRoleSelector(user)}
-      </nav>
+      ${sidebarNav(user, 'ダッシュボード')}
     </aside>
   `
 
@@ -291,6 +238,7 @@ app.get('/', async (c) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ダッシュボード - 建物管理部 請求回覧</title>
+  ${SIDEBAR_CSS}
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.svg">
   <meta name="theme-color" content="#396999">

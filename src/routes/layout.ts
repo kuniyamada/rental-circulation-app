@@ -42,78 +42,25 @@ export function previewRoleBanner(user: any): string {
   <div class="h-8"></div>`
 }
 
-export function layout(title: string, content: string, user: any): string {
-  const roleLabel: Record<string, string> = {
-    front: '担当者',
-    front_supervisor: '担当者/上司',
-    manager: '業務管理課',
-    operations: '業務管理課',
-    accounting: '会計課',
-    honsha: '本社経理',
-    admin: '管理者',
-  }
 
-  const showNewApp = ['admin','front','front_supervisor'].includes(user.role)
+/** 左メニュー・スマホ下部メニューの見た目（Tailwind CDN では <style> 内の @apply が効かないため素のCSS） */
+export const SIDEBAR_CSS = `<style>
+    .sidebar-item { display: flex; align-items: center; gap: .75rem; padding: .625rem 1rem; border-radius: .5rem; font-size: .875rem; line-height: 1.25rem; color: #4b5563; transition: background-color .15s, color .15s; cursor: pointer; }
+    .sidebar-item:hover { background-color: #EEF4FA; color: #396999; }
+    .sidebar-item.active { background-color: #EEF4FA; color: #396999; font-weight: 600; }
+    .sidebar-item svg { flex-shrink: 0; }
+    .bottom-nav-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .125rem; color: #6b7280; padding: .5rem .75rem; border-radius: .5rem; transition: color .15s; }
+    .bottom-nav-item.active { color: #396999; }
+    .bottom-nav-item svg { width: 1.25rem; height: 1.25rem; }
+    .bottom-nav-item span { font-size: 10px; font-weight: 500; line-height: 1; }
+  </style>`
+
+/** 左メニュー（全画面共通。ダッシュボードもこれを使う） */
+export function sidebarNav(user: any, title: string): string {
+  // 新規申請: 申請画面に入れる人（担当者・担当者/上司・管理者）
+  const showNewApp = user.is_admin || ['admin', 'front', 'front_supervisor'].includes(user.role)
   const showInbox  = user.role === 'operations' || user.is_admin
-
-  return `<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} - 建物管理部 請求回覧</title>
-  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="apple-touch-icon" href="/static/apple-touch-icon.svg">
-  <meta name="theme-color" content="#396999">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    .sidebar-item { @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-[#EEF4FA] hover:text-[#396999] transition cursor-pointer; }
-    .sidebar-item.active { @apply bg-[#EEF4FA] text-[#396999] font-semibold; }
-    /* スマホ用ボトムナビ */
-    .bottom-nav-item { @apply flex flex-col items-center justify-center gap-0.5 text-gray-500 py-2 px-3 rounded-lg transition; }
-    .bottom-nav-item.active { @apply text-[#396999]; }
-    .bottom-nav-item svg { @apply w-5 h-5; }
-    .bottom-nav-item span { @apply text-[10px] font-medium leading-none; }
-  </style>
-</head>
-<body class="bg-gray-50 min-h-screen">
-  <!-- ヘッダー -->
-  <header class="bg-white border-b border-gray-200 fixed top-0 left-0 right-0 z-50">
-    <div class="flex items-center justify-between px-4 h-14">
-      <div class="flex items-center gap-3">
-        <button onclick="toggleSidebar()" class="p-1.5 rounded-lg hover:bg-gray-100 transition lg:hidden">
-          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
-        </button>
-        <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-[#396999] rounded-lg flex items-center justify-center">
-            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-          </div>
-          <span class="font-bold text-gray-800 text-sm">建物管理部 請求回覧</span>
-        </div>
-      </div>
-      <div class="flex items-center gap-3">
-        ${user.test_mode ? `
-        <a href="/admin/test-mode" class="hidden sm:inline-flex items-center gap-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 text-xs font-semibold px-2.5 py-1 rounded-full border border-yellow-300 transition" title="テストモード稼働中（クリックで設定）">
-          🧪 テストモード ON
-        </a>
-        ` : ''}
-        <div class="text-right hidden sm:block">
-          <p class="text-sm font-semibold text-gray-800">${user.name}</p>
-          <p class="text-xs text-gray-400">${roleLabel[user.role] || user.role} / ${user.employee_number}</p>
-        </div>
-        <form method="POST" action="/logout">
-          <button type="submit" class="text-xs text-gray-500 hover:text-red-500 border border-gray-200 px-3 py-1.5 rounded-lg hover:border-red-200 transition">
-            ログアウト
-          </button>
-        </form>
-      </div>
-    </div>
-  </header>
-  ${previewRoleBanner(user)}
-
-  <div class="flex pt-14">
-    <!-- サイドバー（PC: 常時表示 / スマホ: ドロワー） -->
-    <aside id="sidebar" class="w-64 bg-white border-r border-gray-200 fixed left-0 top-14 bottom-0 overflow-y-auto z-40 transform -translate-x-full lg:translate-x-0 transition-transform duration-200">
+  return `
       <nav class="p-3 space-y-1">
         <a href="/" class="sidebar-item ${title === 'ダッシュボード' ? 'active' : ''}">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
@@ -200,6 +147,74 @@ export function layout(title: string, content: string, user: any): string {
         ` : ''}
         ${previewRoleSelector(user)}
       </nav>
+`
+}
+
+export function layout(title: string, content: string, user: any): string {
+  const roleLabel: Record<string, string> = {
+    front: '担当者',
+    front_supervisor: '担当者/上司',
+    manager: '業務管理課',
+    operations: '業務管理課',
+    accounting: '会計課',
+    honsha: '本社経理',
+    admin: '管理者',
+  }
+
+  const showNewApp = ['admin','front','front_supervisor'].includes(user.role)
+  const showInbox  = user.role === 'operations' || user.is_admin
+
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} - 建物管理部 請求回覧</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.svg">
+  <meta name="theme-color" content="#396999">
+  <script src="https://cdn.tailwindcss.com"></script>
+  ${SIDEBAR_CSS}
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <!-- ヘッダー -->
+  <header class="bg-white border-b border-gray-200 fixed top-0 left-0 right-0 z-50">
+    <div class="flex items-center justify-between px-4 h-14">
+      <div class="flex items-center gap-3">
+        <button onclick="toggleSidebar()" class="p-1.5 rounded-lg hover:bg-gray-100 transition lg:hidden">
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 bg-[#396999] rounded-lg flex items-center justify-center">
+            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          </div>
+          <span class="font-bold text-gray-800 text-sm">建物管理部 請求回覧</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        ${user.test_mode ? `
+        <a href="/admin/test-mode" class="hidden sm:inline-flex items-center gap-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 text-xs font-semibold px-2.5 py-1 rounded-full border border-yellow-300 transition" title="テストモード稼働中（クリックで設定）">
+          🧪 テストモード ON
+        </a>
+        ` : ''}
+        <div class="text-right hidden sm:block">
+          <p class="text-sm font-semibold text-gray-800">${user.name}</p>
+          <p class="text-xs text-gray-400">${roleLabel[user.role] || user.role} / ${user.employee_number}</p>
+        </div>
+        <form method="POST" action="/logout">
+          <button type="submit" class="text-xs text-gray-500 hover:text-red-500 border border-gray-200 px-3 py-1.5 rounded-lg hover:border-red-200 transition">
+            ログアウト
+          </button>
+        </form>
+      </div>
+    </div>
+  </header>
+  ${previewRoleBanner(user)}
+
+  <div class="flex pt-14">
+    <!-- サイドバー（PC: 常時表示 / スマホ: ドロワー） -->
+    <aside id="sidebar" class="w-64 bg-white border-r border-gray-200 fixed left-0 top-14 bottom-0 overflow-y-auto z-40 transform -translate-x-full lg:translate-x-0 transition-transform duration-200">
+      ${sidebarNav(user, title)}
     </aside>
 
     <!-- オーバーレイ（モバイル） -->
