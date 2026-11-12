@@ -4,6 +4,7 @@ import { layout, statusBadge, paymentLabel } from './layout'
 import { buildMailSubject, buildMailBody, sendMail } from '../lib/mail'
 import { sendLineWorksMessage, buildLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
 import { syncApplicationToDrive, type SyncEnv } from '../lib/drive-sync'
+import { budgetConfigured } from '../lib/budget'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const applications = new Hono<{ Bindings: Bindings }>()
@@ -400,6 +401,8 @@ applications.get('/new', async (c) => {
   const mansions = await db.prepare(
     'SELECT * FROM mansions WHERE is_active = 1 AND is_visible = 1 ORDER BY CAST(mansion_number AS INTEGER)'
   ).all()
+  // 予算書表示（請求書登録画面と同じ）: Google 接続と「物件決算書類関係」フォルダIDがそろうまでは欄ごと出さない
+  const budgetEnabled = budgetConfigured(c.env)
 
   // inboxからの引き継ぎデータ取得
   const inboxId = c.req.query('inbox_id') ? parseInt(c.req.query('inbox_id')!) : null
@@ -628,6 +631,9 @@ applications.get('/new', async (c) => {
             <!-- hidden inputs -->
             <input type="hidden" name="mansion_id" id="mansionIdInput" required>
             <input type="hidden" name="title" id="titleInput">
+            ${budgetEnabled ? `
+            <!-- 予算書（見るだけ。申請データには含めない） -->
+            <div id="budgetBox" class="hidden mt-3 border border-gray-200 rounded-lg bg-gray-50 px-3 py-2.5 text-sm"></div>` : ''}
           </div>
 
           <!--
@@ -1385,6 +1391,79 @@ applications.get('/new', async (c) => {
         selectPaymentTarget(val, null)
       }
 
+      // ===== 予算書表示（請求回覧のサーバーが Googleドライブから予算書を探す）=====
+      const BUDGET_ENABLED = ${budgetEnabled ? 'true' : 'false'};
+      let budgetTimer = null;
+      let budgetSeq = 0;
+      let budgetNo = '';
+      function escHtml(v) {
+        return String(v == null ? '' : v).replace(/[&<>"']/g, function(ch) {
+          return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+        });
+      }
+      function budgetDate(t) { return t ? String(t).slice(0, 10) : ''; }
+      function clearBudget() {
+        if (!BUDGET_ENABLED) return;
+        if (budgetTimer) { clearTimeout(budgetTimer); budgetTimer = null; }
+        budgetSeq++; budgetNo = '';
+        const box = document.getElementById('budgetBox');
+        if (box) { box.innerHTML = ''; box.classList.add('hidden'); }
+      }
+      // 番号が確定してから問い合わせる（入力途中では呼ばない）
+      function scheduleBudget(no) {
+        if (!BUDGET_ENABLED) return;
+        clearBudget();
+        budgetTimer = setTimeout(function() { loadBudget(String(no), false); }, 500);
+      }
+      function openBudgetFile(id) {
+        window.open('/api/budget-file/' + encodeURIComponent(id), '_blank', 'noopener');
+      }
+      async function loadBudget(no, refresh) {
+        const box = document.getElementById('budgetBox');
+        if (!box) return;
+        const seq = ++budgetSeq;
+        budgetNo = no;
+        box.classList.remove('hidden');
+        box.innerHTML = '<p class="text-gray-500 text-xs">予算書を確認しています…</p>';
+        let data = null;
+        try {
+          const res = await fetch('/api/budget?no=' + encodeURIComponent(no) + (refresh ? '&refresh=1' : ''), { headers: { Accept: 'application/json' } });
+          const type = res.headers.get('Content-Type') || '';
+          data = type.indexOf('application/json') > -1 ? await res.json() : { error: '予算書を取得できませんでした' };
+        } catch (e) {
+          data = { error: '予算書を取得できませんでした。時間をおいて再度お試しください' };
+        }
+        if (seq !== budgetSeq) return; // 古いリクエストの結果は表示しない
+        renderBudget(box, data);
+      }
+      function renderBudget(box, d) {
+        const refreshLink = '<button type="button" onclick="loadBudget(budgetNo, true)" class="text-xs text-[#396999] hover:underline whitespace-nowrap">最新の状態を確認</button>';
+        if (!d || d.error || d.status !== 'ok') {
+          const msg = (d && (d.error || d.message)) || '予算書を取得できませんでした';
+          box.innerHTML = '<div class="flex items-start justify-between gap-2"><p class="text-xs text-gray-500">📒 ' + escHtml(msg) + '</p>' + refreshLink + '</div>';
+          return;
+        }
+        const row = function(f) {
+          return '<div class="flex items-center gap-2 py-1">' +
+            '<span class="flex-1 min-w-0 truncate text-gray-800" title="' + escHtml(f.name) + '">' + escHtml(f.name) + '</span>' +
+            '<span class="text-xs text-gray-400 whitespace-nowrap">' + escHtml(budgetDate(f.modified_time)) + '</span>' +
+            '<button type="button" data-id="' + escHtml(f.id) + '" onclick="openBudgetFile(this.dataset.id)" class="px-2.5 py-1 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580] whitespace-nowrap">開く</button>' +
+            '</div>';
+        };
+        const folder = d.ki_folder_name ? '（' + escHtml(d.ki_folder_name) + 'フォルダ）' : '';
+        let html = '<div class="flex items-center justify-between gap-2 mb-1"><p class="text-xs font-semibold text-gray-600">📒 予算書' + folder + '</p>' + refreshLink + '</div>';
+        if (d.from_older_ki) {
+          html += '<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-1">⚠ 最新の' + escHtml(d.latest_ki_folder_name) + 'フォルダに予算書が無いため、' + escHtml(d.ki_folder_name) + 'フォルダの予算書を表示しています</p>';
+        }
+        if (d.latest) html += row(d.latest);
+        const older = Array.isArray(d.older) ? d.older : [];
+        if (older.length > 0) {
+          html += '<details class="mt-1"><summary class="text-xs text-gray-500 cursor-pointer select-none">以前の版を表示（' + older.length + '件）</summary>' +
+            '<div class="pl-3 border-l border-gray-200 mt-1">' + older.map(row).join('') + '</div></details>';
+        }
+        box.innerHTML = html;
+      }
+
       function searchMansion(val) {
         const num = parseInt(val);
         const resultEl = document.getElementById('mansionResult');
@@ -1400,6 +1479,7 @@ applications.get('/new', async (c) => {
           titleInput.value = '';
           // マンションクリア時は担当者の自動セットも解除
           applyMansionDefaults(null);
+          clearBudget();
           return;
         }
 
@@ -1413,6 +1493,7 @@ applications.get('/new', async (c) => {
           // マンションマスタから 上長 / 会計担当 を自動セット
           applyMansionDefaults(found);
           updateReviewerPreview();
+          scheduleBudget(found.number);
         } else {
           resultEl.textContent = '番号を入力するとマンション名が表示されます';
           resultEl.className = 'px-3 py-2.5 border border-dashed border-gray-300 rounded-lg text-sm text-gray-400 bg-gray-50 min-h-[42px] flex items-center';
@@ -1421,6 +1502,7 @@ applications.get('/new', async (c) => {
           titleInput.value = '';
           applyMansionDefaults(null);
           updateReviewerPreview();
+          clearBudget();
         }
       }
 
