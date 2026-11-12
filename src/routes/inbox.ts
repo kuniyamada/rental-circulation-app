@@ -3,8 +3,9 @@ import { getSessionUser, getSessionIdFromCookie } from '../lib/auth'
 import { layout } from './layout'
 import { sendMail, buildInboxNotificationBody } from '../lib/mail'
 import { sendLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
+import { budgetConfigured } from '../lib/budget'
 
-type Bindings = { DB: D1Database; R2: R2Bucket; BUDGET_VIEWER_URL?: string; BUDGET_CF_ACCESS_CLIENT_ID?: string; BUDGET_CF_ACCESS_CLIENT_SECRET?: string }
+type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const inbox = new Hono<{ Bindings: Bindings }>()
 
 // 保存済みファイルをポップアップでプレビューするボタン（新しいタブ・ダウンロードはポップアップ内から）
@@ -240,8 +241,8 @@ inbox.get('/new', async (c) => {
   const testExtraIds = new Set(testExtraFronts.map((u: any) => u.id))
   const fronts = { results: [...testExtraFronts, ...((frontsRes.results as any[]).filter((f: any) => !testExtraIds.has(f.id)))] }
 
-  // 予算書表示: 3つの設定がそろうまでは欄ごと出さない
-  const budgetEnabled = !!(c.env.BUDGET_VIEWER_URL && c.env.BUDGET_CF_ACCESS_CLIENT_ID && c.env.BUDGET_CF_ACCESS_CLIENT_SECRET)
+  // 予算書表示: Google 接続と「物件決算書類関係」フォルダIDがそろうまでは欄ごと出さない
+  const budgetEnabled = budgetConfigured(c.env)
 
   const content = `
     <div class="max-w-xl mx-auto">
@@ -382,7 +383,7 @@ inbox.get('/new', async (c) => {
         }
       }
 
-      // ===== 予算書表示（請求回覧サーバー経由で予算書ビューアに問い合わせ）=====
+      // ===== 予算書表示（請求回覧のサーバーが Googleドライブから予算書を探す）=====
       const BUDGET_ENABLED = ${budgetEnabled ? 'true' : 'false'};
       let budgetTimer = null;
       let budgetSeq = 0;

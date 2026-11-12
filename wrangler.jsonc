@@ -11,9 +11,10 @@
       "database_id": "721e8a4d-a790-4a5d-aeb0-dfc8dd09fec8"
     }
   ],
-  // 予算書ビューア（秘密ではないURLのみ。ID/SECRET は Cloudflare のシークレットに登録）
+  // 予算書表示: Googleドライブ「物件決算書類関係」フォルダのID（秘密ではない）
+  // Google への接続は Drive自動保存と同じシークレット（GOOGLE_OAUTH_*）を使う
   "vars": {
-    "BUDGET_VIEWER_URL": "https://budget-viewer.yamazaki-8cf.workers.dev"
+    "BUDGET_ROOT_FOLDER_ID": "1nYk_1jl1MeBNfQ1ooSKpbjsLQHKLr0m3"
   },
   "r2_buckets": [
     {

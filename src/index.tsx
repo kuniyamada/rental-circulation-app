@@ -6,14 +6,17 @@ import applications from './routes/applications'
 import admin from './routes/admin'
 import inbox from './routes/inbox'
 import { previewRoleSelector, previewRoleBanner } from './routes/layout'
+import { findBudget, openBudgetFile, BudgetError } from './lib/budget'
 
 type Bindings = {
   DB: D1Database
   R2: R2Bucket
-  // 予算書ビューア連携（BUDGET_VIEWER_URL は wrangler.jsonc、ID/SECRET は Cloudflare のシークレット）
-  BUDGET_VIEWER_URL?: string
-  BUDGET_CF_ACCESS_CLIENT_ID?: string
-  BUDGET_CF_ACCESS_CLIENT_SECRET?: string
+  // 予算書表示（Drive自動保存と同じ Google 接続で「物件決算書類関係」を読む）
+  BUDGET_ROOT_FOLDER_ID?: string
+  GOOGLE_OAUTH_CLIENT_ID?: string
+  GOOGLE_OAUTH_CLIENT_SECRET?: string
+  GOOGLE_OAUTH_REFRESH_TOKEN?: string
+  DRIVE_ROOT_FOLDER_ID?: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -660,64 +663,43 @@ app.get('/files/:attachId', async (c) => {
   })
 })
 
-// ===== 予算書表示（予算書ビューアへの中継。ブラウザからビューアは直接呼ばない） =====
-// 請求回覧にログインしている人だけ利用可。予算書の探し方は予算書ビューア側にのみ存在する
-async function proxyBudget(c: any, path: string, kind: 'json' | 'pdf') {
-  const base = String(c.env.BUDGET_VIEWER_URL || '').replace(/\/+$/, '')
-  const cid = c.env.BUDGET_CF_ACCESS_CLIENT_ID
-  const secret = c.env.BUDGET_CF_ACCESS_CLIENT_SECRET
-  if (!base || !cid || !secret) {
-    return c.json({ error: '予算書の表示機能が設定されていません', code: 'BUDGET_NOT_CONFIGURED' }, 500)
+// ===== 予算書表示（請求回覧が自分で Googleドライブ「物件決算書類関係」を読む。予算書ビューアには問い合わせない） =====
+// 請求回覧にログインしている人だけ利用可
+function budgetErrorResponse(c: any, e: any) {
+  if (e instanceof BudgetError) {
+    return c.json({ error: e.message, code: e.code }, e.status as any)
   }
-  let res: Response
-  try {
-    res = await fetch(base + path, {
-      headers: { 'CF-Access-Client-Id': cid, 'CF-Access-Client-Secret': secret, Accept: 'application/json' },
-      redirect: 'manual', // Access のログイン画面へのリダイレクトは追いかけない
-    })
-  } catch (e) {
-    console.error('[budget] fetch failed', e)
-    return c.json({ error: '予算書を取得できませんでした。時間をおいて再度お試しください', code: 'BUDGET_UNREACHABLE' }, 502)
-  }
-  const type = res.headers.get('Content-Type') || ''
-  if (kind === 'pdf' && res.ok && type.includes('application/pdf')) {
-    return new Response(res.body, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': res.headers.get('Content-Disposition') || 'inline',
-        'Cache-Control': 'private, no-store',
-      },
-    })
-  }
-  if (type.includes('application/json')) {
-    // 予算書ビューアの JSON（成功・エラーとも）をそのまま返す
-    if (!res.ok) console.error('[budget] viewer error', res.status, path.split('?')[0])
-    return new Response(await res.text(), {
-      status: res.status,
-      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
-    })
-  }
-  // JSON でも PDF でもない = Cloudflare Access に止められた（サービストークンの設定ミス）
-  console.error('[budget] unexpected response', res.status, type)
-  return c.json({ error: '予算書を取得できませんでした（設定エラー）', code: 'BUDGET_AUTH_FAILED' }, 502)
+  console.error('[budget] unexpected error', e)
+  return c.json({ error: '予算書を取得できませんでした。時間をおいて再度お試しください', code: 'BUDGET_FAILED' }, 502)
 }
 
 app.get('/api/budget', async (c) => {
   const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie') || null))
   if (!user) return c.json({ error: 'ログインが必要です', code: 'LOGIN_REQUIRED' }, 401)
-  const no = (c.req.query('no') || '').normalize('NFKC').trim()
-  if (!/^\d{1,5}$/.test(no)) return c.json({ error: '物件番号は数字で入力してください', code: 'BAD_NO' }, 400)
-  const refresh = c.req.query('refresh') === '1' ? '&refresh=1' : ''
-  return proxyBudget(c, `/api/budget?no=${encodeURIComponent(no)}${refresh}`, 'json')
+  try {
+    const result = await findBudget(c.env, c.req.query('no') || '', c.req.query('refresh') === '1')
+    return c.json(result, 200, { 'Cache-Control': 'no-store' })
+  } catch (e) {
+    return budgetErrorResponse(c, e)
+  }
 })
 
 app.get('/api/budget-file/:id', async (c) => {
   const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie') || null))
   if (!user) return c.redirect('/login')
-  const id = c.req.param('id')
-  if (!/^[A-Za-z0-9_-]{10,200}$/.test(id)) return c.json({ error: '不正なIDです', code: 'BAD_ID' }, 400)
-  return proxyBudget(c, `/file/${id}`, 'pdf')
+  try {
+    const { file, res } = await openBudgetFile(c.env, c.req.param('id'))
+    return new Response(res.body, {
+      headers: {
+        'Content-Type': file.mimeType || 'application/pdf',
+        'Content-Disposition': `inline; filename="budget.pdf"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    })
+  } catch (e) {
+    return budgetErrorResponse(c, e)
+  }
 })
 
 // ===== 管理画面 =====
