@@ -15,6 +15,7 @@ import {
 } from '../lib/backup'
 import driveRoutes from './drive'
 import { sweepExpiredSessions } from '../lib/login-log'
+import { assigneeSyncEnabled, getSyncState, maybeSyncAssignees, runAssigneeSync } from '../lib/assignee-sync'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const admin = new Hono<{ Bindings: Bindings }>()
@@ -851,6 +852,10 @@ function userForm(user: any, supervisors: any[], opsStaff?: any, honshaStaff?: a
 admin.get('/mansions', async (c) => {
   const user = (c as any).get('user')
   const db = c.env.DB
+  // 物件担当マスタ連携: 合言葉があれば、前回から30分以上経っていたら裏で同期
+  const syncOn = assigneeSyncEnabled(c.env)
+  if (syncOn) await maybeSyncAssignees(c)
+  const syncState = syncOn ? await getSyncState(db) : null
   // 非表示(is_visible=0)は除外。復元は /admin/mansions/hidden から。
   const mansions = await db.prepare(`
     SELECT
@@ -888,6 +893,8 @@ admin.get('/mansions', async (c) => {
 
   // 編集権限: admin または operations
   const canEdit = user.is_admin || user.role === 'operations' || user.role === 'admin'
+  // 担当者3項目は物件担当マスタで一元管理（連携中はここでは変更不可）
+  const canEditAssignee = canEdit && !syncOn
 
   // 未設定件数（サマリー用）
   const missingFront = (mansions.results as any[]).filter(m => !m.front_user_id).length
@@ -921,7 +928,53 @@ admin.get('/mansions', async (c) => {
 
   const hiddenFlashFlag = c.req.query('hidden') === '1'
 
+  const fmtJst = (iso: string | null) => {
+    if (!iso) return '-'
+    const d = new Date(Date.parse(iso) + 9 * 3600 * 1000)
+    const z = (n: number) => String(n).padStart(2, '0')
+    return `${d.getUTCFullYear()}/${z(d.getUTCMonth() + 1)}/${z(d.getUTCDate())} ${z(d.getUTCHours())}:${z(d.getUTCMinutes())}`
+  }
+  const escH = (v: any) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])
+  const syncFlash = escH(c.req.query('synced') || '')
+  let syncWarnings: string[] = []
+  try { syncWarnings = JSON.parse(syncState?.last_warnings || '[]') } catch {}
+  const recentLogs = syncOn
+    ? ((await db.prepare("SELECT * FROM assignee_sync_log ORDER BY id DESC LIMIT 20").all().catch(() => ({ results: [] }))).results as any[])
+    : []
+  const fieldLabel: Record<string, string> = { front_user_id: 'フロント', supervisor_user_id: '上長', accounting_user_id: '会計' }
+  const syncBanner = !syncOn ? '' : `
+    <div class="mb-4 rounded-lg border ${syncState?.last_status === 'error' ? 'bg-red-50 border-red-200' : 'bg-sky-50 border-sky-200'} px-4 py-3 text-sm">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="${syncState?.last_status === 'error' ? 'text-red-700' : 'text-sky-800'}">
+          🔗 担当者（フロント・上長・会計）は <b>物件担当マスタ（一元管理システム）</b> から自動反映されます（30分ごと）。
+          <div class="text-xs mt-1">
+            ${syncState?.last_status === 'error'
+              ? `⚠️ ${escH(syncState.last_message || '物件担当マスタを読み込めませんでした')}（今の値のまま表示しています）`
+              : `最終反映: ${fmtJst(syncState?.last_success_at)}　／　${escH(syncState?.last_message || '未実行')}`}
+          </div>
+        </div>
+        ${canEdit ? `
+        <form method="POST" action="/admin/mansions/sync-assignees">
+          <button type="submit" class="bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold px-3 py-1.5 rounded transition whitespace-nowrap">🔄 今すぐ反映</button>
+        </form>` : ''}
+      </div>
+      ${syncFlash ? `<div class="mt-2 text-xs text-emerald-700 font-semibold">✅ ${syncFlash}</div>` : ''}
+      ${syncWarnings.length ? `
+        <details class="mt-2 text-xs text-amber-800">
+          <summary class="cursor-pointer">⚠️ 反映できなかった担当者 ${syncWarnings.length}件</summary>
+          <ul class="list-disc ml-5 mt-1">${syncWarnings.map(w => `<li>${escH(w)}</li>`).join('')}</ul>
+        </details>` : ''}
+      ${recentLogs.length ? `
+        <details class="mt-2 text-xs text-gray-700">
+          <summary class="cursor-pointer">📝 最近の反映履歴（最新20件）</summary>
+          <table class="mt-1 text-xs"><tbody>
+            ${recentLogs.map(l => `<tr><td class="pr-3 text-gray-500">${fmtJst(String(l.synced_at).replace(' ', 'T') + 'Z')}</td><td class="pr-3 font-mono">№${String(l.mansion_number).padStart(3, '0')}</td><td class="pr-3">${fieldLabel[l.field] || l.field}</td><td>${escH(l.old_name || '（未設定）')} → <b>${escH(l.new_name || '')}</b></td></tr>`).join('')}
+          </tbody></table>
+        </details>` : ''}
+    </div>`
+
   const content = `
+    ${syncBanner}
     ${hiddenFlashFlag ? `
       <div class="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-2.5 rounded-lg flex items-center justify-between">
         <span>✅ マンションを一覧から非表示にしました</span>
@@ -933,7 +986,7 @@ admin.get('/mansions', async (c) => {
         <div>
           <h2 class="font-semibold text-gray-800">マンション一覧 <span class="text-[#396999]">${mansions.results.length}件</span></h2>
           ${canEdit ? `
-            <p class="text-xs text-gray-500 mt-1">💡 担当フロント・会計担当はプルダウンから変更するとその場で保存されます</p>
+            <p class="text-xs text-gray-500 mt-1">💡 ${syncOn ? '課はプルダウンから変更するとその場で保存されます（担当者は物件担当マスタで変更してください）' : '担当フロント・会計担当はプルダウンから変更するとその場で保存されます'}</p>
           ` : ''}
         </div>
         <div class="flex items-center gap-2 flex-wrap">
@@ -1003,7 +1056,7 @@ admin.get('/mansions', async (c) => {
                     `}
                   </td>
                   <td class="px-4 py-2">
-                    ${canEdit ? `
+                    ${canEditAssignee ? `
                       <select
                         onchange="saveMansionField(${m.id}, 'front_user_id', this.value, this)"
                         class="w-full px-2 py-1.5 border rounded text-xs focus:ring-2 focus:ring-[#396999] outline-none ${!m.front_user_id ? 'border-blue-300 bg-blue-50 text-blue-900' : 'border-gray-200'}">
@@ -1014,7 +1067,7 @@ admin.get('/mansions', async (c) => {
                     `}
                   </td>
                   <td class="px-4 py-2">
-                    ${canEdit ? `
+                    ${canEditAssignee ? `
                       <select
                         onchange="saveMansionField(${m.id}, 'supervisor_user_id', this.value, this)"
                         class="w-full px-2 py-1.5 border rounded text-xs focus:ring-2 focus:ring-[#396999] outline-none ${!m.supervisor_user_id ? 'border-indigo-300 bg-indigo-50 text-indigo-900' : 'border-gray-200'}">
@@ -1025,7 +1078,7 @@ admin.get('/mansions', async (c) => {
                     `}
                   </td>
                   <td class="px-4 py-2">
-                    ${canEdit ? `
+                    ${canEditAssignee ? `
                       <select
                         onchange="saveMansionField(${m.id}, 'accounting_user_id', this.value, this)"
                         class="w-full px-2 py-1.5 border rounded text-xs focus:ring-2 focus:ring-[#396999] outline-none ${!m.accounting_user_id ? 'border-amber-400 bg-amber-50 text-amber-900 font-semibold' : 'border-gray-200'}">
@@ -1163,7 +1216,7 @@ admin.get('/mansions/new', async (c) => {
   const user = (c as any).get('user')
   const db = c.env.DB
   const users = await db.prepare("SELECT * FROM users WHERE is_active = 1 ORDER BY name").all()
-  return c.html(layout('マンション追加', mansionForm(null, users.results as any[]), user))
+  return c.html(layout('マンション追加', mansionForm(null, users.results as any[], assigneeSyncEnabled(c.env)), user))
 })
 
 // 非表示マンション一覧 (is_visible=0)
@@ -1260,6 +1313,14 @@ admin.get('/mansions/hidden', async (c) => {
   return c.html(layout('非表示マンション一覧', content, user))
 })
 
+// 物件担当マスタから今すぐ反映
+admin.post('/mansions/sync-assignees', async (c) => {
+  const user = (c as any).get('user')
+  if (!(user.is_admin || user.role === 'operations' || user.role === 'admin')) return c.redirect('/admin/mansions')
+  const r = await runAssigneeSync(c.env)
+  return c.redirect('/admin/mansions' + (r.ok ? '?synced=' + encodeURIComponent(r.message) : ''))
+})
+
 // マンション追加
 admin.post('/mansions', async (c) => {
   const db = c.env.DB
@@ -1277,6 +1338,8 @@ admin.post('/mansions', async (c) => {
     body.supervisor_user_id || null,
     body.accounting_user_id || null
   ).run()
+  // 連携中は担当者をマスタの値で即反映
+  if (assigneeSyncEnabled(c.env)) await runAssigneeSync(c.env).catch(() => {})
   return c.redirect('/admin/mansions')
 })
 
@@ -1287,7 +1350,7 @@ admin.get('/mansions/:id/edit', async (c) => {
   const mansion = await db.prepare('SELECT * FROM mansions WHERE id = ?').bind(c.req.param('id')).first()
   const users = await db.prepare("SELECT * FROM users WHERE is_active = 1 ORDER BY name").all()
   if (!mansion) return c.redirect('/admin/mansions')
-  return c.html(layout('マンション編集', mansionForm(mansion as any, users.results as any[]), user))
+  return c.html(layout('マンション編集', mansionForm(mansion as any, users.results as any[], assigneeSyncEnabled(c.env)), user))
 })
 
 // 状態トグル
@@ -1328,6 +1391,13 @@ admin.post('/mansions/:id', async (c) => {
   const mansionNumber = body.mansion_number ? parseInt(body.mansion_number) : null
   const SECTION_OPTIONS = ['1課', '2課', '3課']
   const section = body.section && SECTION_OPTIONS.includes(body.section) ? body.section : null
+  if (assigneeSyncEnabled(c.env)) {
+    // 担当者は物件担当マスタで一元管理 → ここでは変更しない
+    await db.prepare(
+      'UPDATE mansions SET name=?, mansion_number=?, section=?, is_active=?, updated_at=datetime("now") WHERE id=?'
+    ).bind(body.name, mansionNumber, section, body.is_active ? 1 : 0, id).run()
+    return c.redirect('/admin/mansions')
+  }
   await db.prepare(
     'UPDATE mansions SET name=?, mansion_number=?, section=?, front_user_id=?, supervisor_user_id=?, accounting_user_id=?, is_active=?, updated_at=datetime("now") WHERE id=?'
   ).bind(
@@ -1403,6 +1473,9 @@ admin.post('/mansions/:id/inline-update', async (c) => {
     accounting_user_id: { role: ['accounting'],                label: '管理組合 会計担当者' },
   }
   const meta = allowedFields[field]
+  if (meta && assigneeSyncEnabled(c.env)) {
+    return c.json({ success: false, error: '担当者は物件担当マスタ（一元管理システム）で変更してください' }, 400)
+  }
   if (!meta) {
     return c.json({ success: false, error: '更新できない項目です' }, 400)
   }
@@ -1436,8 +1509,9 @@ admin.post('/mansions/:id/inline-update', async (c) => {
   })
 })
 
-function mansionForm(mansion: any, users: any[]): string {
+function mansionForm(mansion: any, users: any[], lockAssignee = false): string {
   const isEdit = !!mansion
+  const lockAttr = lockAssignee ? 'disabled' : ''
   // フロント担当 = 担当者(front) / 担当者/上司(front_supervisor)
   // 上長         = 担当者/上司(front_supervisor)
   // 会計担当     = マンション会計課(accounting)
@@ -1469,23 +1543,24 @@ function mansionForm(mansion: any, users: any[]): string {
               ${SECTION_OPTIONS.map(s => `<option value="${s}" ${mansion?.section === s ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
           </div>
+          ${lockAssignee ? `<p class="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded px-3 py-2">🔗 担当者（フロント・上長・会計）は物件担当マスタ（一元管理システム）から自動反映されます。変更は一元管理システムで行ってください。</p>` : ''}
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">フロント担当</label>
-            <select name="front_user_id" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+            <select name="front_user_id" ${lockAttr} class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
               <option value="">選択してください</option>
               ${fronts.map(u => `<option value="${u.id}" ${mansion?.front_user_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
             </select>
           </div>
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">上長</label>
-            <select name="supervisor_user_id" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+            <select name="supervisor_user_id" ${lockAttr} class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
               <option value="">選択してください</option>
               ${supervisors.map(u => `<option value="${u.id}" ${mansion?.supervisor_user_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
             </select>
           </div>
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1.5">管理組合 会計担当者</label>
-            <select name="accounting_user_id" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+            <select name="accounting_user_id" ${lockAttr} class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
               <option value="">選択してください</option>
               ${accountings.map(u => `<option value="${u.id}" ${mansion?.accounting_user_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
             </select>

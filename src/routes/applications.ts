@@ -5,6 +5,7 @@ import { buildMailSubject, buildMailBody, sendMail } from '../lib/mail'
 import { sendLineWorksMessage, buildLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
 import { syncApplicationToDrive, type SyncEnv } from '../lib/drive-sync'
 import { budgetConfigured } from '../lib/budget'
+import { maybeSyncAssignees } from '../lib/assignee-sync'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const applications = new Hono<{ Bindings: Bindings }>()
@@ -398,6 +399,7 @@ applications.get('/new', async (c) => {
     return c.html(`<p style="padding:2rem;font-family:sans-serif;color:#dc2626">⛔ この画面へのアクセス権限がありません。</p>`, 403)
   }
 
+  await maybeSyncAssignees(c)
   const mansions = await db.prepare(
     'SELECT * FROM mansions WHERE is_active = 1 AND is_visible = 1 ORDER BY CAST(mansion_number AS INTEGER)'
   ).all()

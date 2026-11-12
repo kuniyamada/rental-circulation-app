@@ -4,6 +4,7 @@ import { layout } from './layout'
 import { sendMail, buildInboxNotificationBody } from '../lib/mail'
 import { sendLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
 import { budgetConfigured } from '../lib/budget'
+import { maybeSyncAssignees } from '../lib/assignee-sync'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const inbox = new Hono<{ Bindings: Bindings }>()
@@ -231,6 +232,7 @@ inbox.get('/new', async (c) => {
   if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
 
   const db = c.env.DB
+  await maybeSyncAssignees(c)
   const mansions = await db.prepare("SELECT * FROM mansions WHERE is_active = 1 AND is_visible = 1 ORDER BY CAST(mansion_number AS INTEGER)").all()
   const frontsRes = await db.prepare("SELECT * FROM users WHERE role IN ('front', 'front_supervisor') AND is_active = 1 ORDER BY name").all()
   // テストモード（管理者のみ）: 担当フロント候補に 本橋(030)・山崎(049) を追加（受信者側の画面確認用）
