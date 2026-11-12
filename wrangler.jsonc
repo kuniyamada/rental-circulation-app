@@ -9,6 +9,12 @@
       "binding": "DB",
       "database_name": "webapp-production",
       "database_id": "721e8a4d-a790-4a5d-aeb0-dfc8dd09fec8"
+    },
+    {
+      // 物件担当マスタ（一元管理システム）: 担当者の取得に読み取り専用で使う（書き込みはしない）
+      "binding": "MASTER_DB",
+      "database_name": "assignee-master",
+      "database_id": "d65ffaf8-3201-4e3b-9982-02994a840b28"
     }
   ],
   // 予算書表示: Googleドライブ「物件決算書類関係」フォルダのID（秘密ではない）

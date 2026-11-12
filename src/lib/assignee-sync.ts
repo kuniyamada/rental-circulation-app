@@ -2,7 +2,9 @@
 //   - 読み取り専用の参照APIから取得し、mansions の front/supervisor/accounting だけを更新する
 //   - 物件名は反映しない / マスタにしか無い物件（例: 212）は追加しない
 //   - 取得失敗時は今の値のまま（何も書き換えない）
-//   - ASSIGNEE_REF_TOKEN が未登録なら同期は無効（従来どおり画面で手動編集）
+//   - 取得元: 物件担当マスタのD1（MASTER_DB, 送金依頼管理と同じ方式・読み取りのみ）
+//             MASTER_DB が無く ASSIGNEE_REF_TOKEN がある場合のみ参照APIを使う
+//   - どちらも無ければ同期は無効（従来どおり画面で手動編集）
 
 const REF_URL = 'https://assignee-ref-api.kunihiro72.workers.dev/api/v1/properties'
 export const SYNC_INTERVAL_MIN = 30
@@ -10,7 +12,7 @@ export const SYNC_INTERVAL_MIN = 30
 export const normName = (s: any) => String(s == null ? '' : s).replace(/[\s\u3000]/g, '')
 
 export function assigneeSyncEnabled(env: any): boolean {
-  return !!(env && env.ASSIGNEE_REF_TOKEN)
+  return !!(env && (env.MASTER_DB || env.ASSIGNEE_REF_TOKEN))
 }
 
 type FieldKey = 'front_user_id' | 'supervisor_user_id' | 'accounting_user_id'
@@ -35,6 +37,24 @@ export async function getSyncState(db: D1Database): Promise<any> {
   }
 }
 
+// 物件担当マスタのD1から直接読む（SELECTのみ）
+async function readMasterDb(mdb: D1Database): Promise<{ updatedAt: string | null; items: any[] }> {
+  const staff = ((await mdb.prepare('SELECT staff_id, name FROM staff').all()).results || []) as any[]
+  const nameOf = new Map<string, string>()
+  for (const st of staff) nameOf.set(String(st.staff_id), st.name)
+  const props = ((await mdb.prepare(
+    'SELECT property_no, front_id, mgr_id, acct_id, updated_at FROM properties ORDER BY property_no'
+  ).all()).results || []) as any[]
+  if (!props.length) throw new Error('物件担当マスタに物件がありません')
+  let updatedAt: string | null = null
+  const ref = (id: any) => (id ? { id, name: nameOf.get(String(id)) || null } : null)
+  const items = props.map(p => {
+    if (p.updated_at && (!updatedAt || p.updated_at > updatedAt)) updatedAt = p.updated_at
+    return { property_no: p.property_no, front: ref(p.front_id), mgr: ref(p.mgr_id), acct: ref(p.acct_id) }
+  })
+  return { updatedAt, items }
+}
+
 async function fetchMaster(token: string): Promise<{ updatedAt: string | null; items: any[] }> {
   const r = await fetch(REF_URL, { headers: { authorization: `Bearer ${token}` } })
   if (!r.ok) throw new Error(r.status === 401 ? '合言葉が一致しません（HTTP 401）' : `HTTP ${r.status}`)
@@ -47,7 +67,7 @@ export async function runAssigneeSync(env: any): Promise<SyncResult> {
   const db: D1Database = env.DB
   const now = () => new Date().toISOString()
   if (!assigneeSyncEnabled(env)) {
-    return { ok: false, message: '合言葉（ASSIGNEE_REF_TOKEN）が未登録のため同期は無効です', changed: [], warnings: [] }
+    return { ok: false, message: '物件担当マスタへの接続が設定されていないため同期は無効です', changed: [], warnings: [] }
   }
   await db.prepare(
     "INSERT OR IGNORE INTO assignee_sync_state (id) VALUES (1)"
@@ -56,7 +76,7 @@ export async function runAssigneeSync(env: any): Promise<SyncResult> {
 
   let master: { updatedAt: string | null; items: any[] }
   try {
-    master = await fetchMaster(env.ASSIGNEE_REF_TOKEN)
+    master = env.MASTER_DB ? await readMasterDb(env.MASTER_DB) : await fetchMaster(env.ASSIGNEE_REF_TOKEN)
   } catch (e: any) {
     const msg = '物件担当マスタを読み込めませんでした（' + String(e?.message || e) + '）'
     await db.prepare("UPDATE assignee_sync_state SET last_status = 'error', last_message = ? WHERE id = 1").bind(msg).run()
@@ -100,7 +120,11 @@ export async function runAssigneeSync(env: any): Promise<SyncResult> {
     if (!rows) continue // こちらに無い物件（例: 212）は追加しない
     for (const f of FIELDS) {
       const name = it?.[f.src]?.name
-      if (!name) continue // マスタ側が空なら今の値のまま
+      if (!name) {
+        // マスタ側が空なら今の値のまま（IDだけあって氏名が引けない場合は知らせる）
+        if (it?.[f.src]?.id) warnings.push(`№${String(no).padStart(3, '0')} ${f.label}（${it[f.src].id}）: 物件担当マスタに氏名がありません`)
+        continue
+      }
       const hit = findUser(name, f.roles)
       if (!hit.id) {
         warnings.push(`№${String(no).padStart(3, '0')} ${f.label}「${name}」: ${hit.err}`)
