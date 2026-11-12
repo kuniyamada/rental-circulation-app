@@ -936,6 +936,16 @@ admin.get('/mansions', async (c) => {
   }
   const escH = (v: any) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])
   const syncFlash = escH(c.req.query('synced') || '')
+  const syncFlashCount = parseInt(c.req.query('sc') || '0') || 0
+  // 直近で担当者が実際に変わった反映（自動・手動どちらも）
+  const lastChangeAt: string | null = syncState?.last_change_at || null
+  const lastChangeCount: number = syncState?.last_change_count || 0
+  const lastChangeTrigger = syncState?.last_change_trigger === 'manual' ? '今すぐ反映' : '画面表示時の自動反映'
+  const lastChangeAgeMin = lastChangeAt ? (Date.now() - Date.parse(lastChangeAt)) / 60000 : Infinity
+  const lastChangeRecent = lastChangeAgeMin < 24 * 60
+  // 「今すぐ反映」で変更0件でも、直前（10分以内）の自動反映で変わっていればそれを添える
+  const flashNote = syncFlash && syncFlashCount === 0 && lastChangeAgeMin < 10 && lastChangeCount > 0
+    ? `（直前の${lastChangeTrigger}で ${lastChangeCount}件 反映済みです）` : ''
   let syncWarnings: string[] = []
   try { syncWarnings = JSON.parse(syncState?.last_warnings || '[]') } catch {}
   const recentLogs = syncOn
@@ -958,7 +968,12 @@ admin.get('/mansions', async (c) => {
           <button type="submit" class="bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold px-3 py-1.5 rounded transition whitespace-nowrap">🔄 今すぐ反映</button>
         </form>` : ''}
       </div>
-      ${syncFlash ? `<div class="mt-2 text-xs text-emerald-700 font-semibold">✅ ${syncFlash}</div>` : ''}
+      ${syncFlash ? `<div class="mt-2 text-xs text-emerald-700 font-semibold">✅ ${syncFlash}${flashNote}</div>` : ''}
+      ${lastChangeAt && lastChangeCount > 0 ? `
+        <div class="mt-2 text-xs ${lastChangeRecent ? 'inline-block bg-amber-50 border border-amber-300 text-amber-900 font-semibold rounded px-2 py-1' : 'text-gray-600'}">
+          🆕 直近の担当者変更: ${fmtJst(lastChangeAt)} に <b>${lastChangeCount}件</b> 反映（${lastChangeTrigger}）
+          <span class="font-normal">— 内容は下の「最近の反映履歴」で確認できます</span>
+        </div>` : ''}
       ${syncWarnings.length ? `
         <details class="mt-2 text-xs text-amber-800">
           <summary class="cursor-pointer">⚠️ 反映できなかった担当者 ${syncWarnings.length}件</summary>
@@ -1317,8 +1332,8 @@ admin.get('/mansions/hidden', async (c) => {
 admin.post('/mansions/sync-assignees', async (c) => {
   const user = (c as any).get('user')
   if (!(user.is_admin || user.role === 'operations' || user.role === 'admin')) return c.redirect('/admin/mansions')
-  const r = await runAssigneeSync(c.env)
-  return c.redirect('/admin/mansions' + (r.ok ? '?synced=' + encodeURIComponent(r.message) : ''))
+  const r = await runAssigneeSync(c.env, 'manual')
+  return c.redirect('/admin/mansions' + (r.ok ? '?synced=' + encodeURIComponent(r.message) + '&sc=' + r.changed.length : ''))
 })
 
 // マンション追加

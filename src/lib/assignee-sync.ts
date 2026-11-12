@@ -63,7 +63,7 @@ async function fetchMaster(token: string): Promise<{ updatedAt: string | null; i
   return { updatedAt: data.updatedAt ?? null, items: data.items }
 }
 
-export async function runAssigneeSync(env: any): Promise<SyncResult> {
+export async function runAssigneeSync(env: any, trigger: 'auto' | 'manual' = 'auto'): Promise<SyncResult> {
   const db: D1Database = env.DB
   const now = () => new Date().toISOString()
   if (!assigneeSyncEnabled(env)) {
@@ -149,6 +149,12 @@ export async function runAssigneeSync(env: any): Promise<SyncResult> {
   await db.prepare(
     "UPDATE assignee_sync_state SET last_status = 'ok', last_success_at = ?, last_message = ?, master_updated_at = ?, last_changed_count = ?, last_warnings = ? WHERE id = 1"
   ).bind(now(), msg, master.updatedAt, changed.length, JSON.stringify(warnings)).run()
+  if (changed.length) {
+    // 実際に担当者が変わった反映だけを記録（後から「変更なし」の反映があっても消えない）
+    await db.prepare(
+      'UPDATE assignee_sync_state SET last_change_at = ?, last_change_count = ?, last_change_trigger = ? WHERE id = 1'
+    ).bind(now(), changed.length, trigger).run().catch(() => {})
+  }
   return { ok: true, message: msg, changed, warnings }
 }
 
@@ -160,7 +166,7 @@ export async function maybeSyncAssignees(c: any): Promise<void> {
     if (!st) return // マイグレーション未適用
     const last = st.last_attempt_at ? Date.parse(st.last_attempt_at) : 0
     if (Date.now() - last < SYNC_INTERVAL_MIN * 60 * 1000) return
-    const task = runAssigneeSync(c.env).catch(e => console.error('[assignee-sync]', e))
+    const task = runAssigneeSync(c.env, 'auto').catch(e => console.error('[assignee-sync]', e))
     try { c.executionCtx.waitUntil(task) } catch { await task }
   } catch (e) {
     console.error('[assignee-sync] maybe', e)
