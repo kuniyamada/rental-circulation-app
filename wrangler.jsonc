@@ -20,7 +20,9 @@
   // 予算書表示: Googleドライブ「物件決算書類関係」フォルダのID（秘密ではない）
   // Google への接続は Drive自動保存と同じシークレット（GOOGLE_OAUTH_*）を使う
   "vars": {
-    "BUDGET_ROOT_FOLDER_ID": "1nYk_1jl1MeBNfQ1ooSKpbjsLQHKLr0m3"
+    "BUDGET_ROOT_FOLDER_ID": "1nYk_1jl1MeBNfQ1ooSKpbjsLQHKLr0m3",
+    // 見積書・請求書作成 管理簿: 元請の見積書を保存するGoogleドライブのフォルダID（秘密ではない）
+    "ESTIMATE_FOLDER_ID": "1pyrXBNriWJuH1gilSGUjvoYISQfOjwgB"
   },
   "r2_buckets": [
     {

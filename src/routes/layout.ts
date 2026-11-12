@@ -130,6 +130,10 @@ export function layout(title: string, content: string, user: any): string {
           <span class="flex-1">請求書を登録・担当者へ送信</span>
           <span class="text-base leading-none">📤</span>
         </a>
+        <a href="/inbox/estimates" class="sidebar-item ${title.includes('管理簿') ? 'active' : ''}">
+          <span class="text-base leading-none">📒</span>
+          見積書・請求書作成 管理簿
+        </a>
         ` : ''}
         ${showNewApp ? `
         <a href="/applications/new" class="sidebar-item ${title === '新規申請' ? 'active' : ''}">

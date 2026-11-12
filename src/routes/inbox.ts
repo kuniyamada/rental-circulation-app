@@ -5,6 +5,8 @@ import { sendMail, buildInboxNotificationBody } from '../lib/mail'
 import { sendLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
 import { budgetConfigured } from '../lib/budget'
 import { maybeSyncAssignees } from '../lib/assignee-sync'
+import { saveLedgerToDrive, estimateFolderConfigured } from '../lib/estimate-ledger'
+import { DriveClient } from '../lib/drive-client'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const inbox = new Hono<{ Bindings: Bindings }>()
@@ -246,14 +248,30 @@ inbox.get('/new', async (c) => {
   // 予算書表示: Google 接続と「物件決算書類関係」フォルダIDがそろうまでは欄ごと出さない
   const budgetEnabled = budgetConfigured(c.env)
 
+  // 管理簿「この見積から請求書を登録」から来た場合: 物件を入力済みにし、登録時に管理簿を「登録・送信済」にする
+  const estimateId = parseInt(c.req.query('estimate_id') || '') || null
+  const estRow = estimateId
+    ? await db.prepare(`SELECT e.*, a.application_number FROM estimate_ledger e LEFT JOIN applications a ON a.id = e.application_id WHERE e.id = ?`).bind(estimateId).first().catch(() => null) as any
+    : null
+
   const content = `
     <div class="max-w-xl mx-auto">
+      ${estRow ? `
+      <div class="mb-4 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 text-sm text-amber-900">
+        <div class="font-bold mb-1">📒 管理簿の見積書から請求書を登録します</div>
+        <div class="text-xs space-y-0.5">
+          <div>物件: <b>${escAttr(estRow.mansion_number != null ? String(estRow.mansion_number).padStart(3, '0') : '-')} ${escAttr(estRow.mansion_name || '')}</b>　／　元の回覧: ${escAttr(estRow.application_number || '-')}</div>
+          <div class="flex items-center gap-2 flex-wrap">見積書: ${previewBtn(`/inbox/estimates/${estRow.id}/file`, estRow.original_file_name || '見積書', '👁 見積書を確認')}</div>
+          <div>登録すると、管理簿のこの見積書は「③ 登録・送信済」になります。</div>
+        </div>
+      </div>` : ''}
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 class="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
           📥 請求書を登録・フロントへ送信
         </h2>
 
         <form method="POST" action="/inbox" enctype="multipart/form-data" class="space-y-5">
+          ${estRow ? `<input type="hidden" name="estimate_id" value="${estRow.id}">` : ''}
 
           <!-- マンション番号入力 -->
           <div>
@@ -511,6 +529,12 @@ inbox.get('/new', async (c) => {
           window.addEventListener(ev, function(e) { e.preventDefault(); });
         });
       })();
+      ${estRow && estRow.mansion_number != null ? `
+      // 管理簿から来た場合: 物件番号を入力済みにする
+      (function() {
+        const el = document.getElementById('mansionNumberInput');
+        if (el) { el.value = '${Number(estRow.mansion_number)}'; searchMansion(el.value); }
+      })();` : ''}
     </script>
   `
   return c.html(layout('請求書登録', content, user))
@@ -559,6 +583,16 @@ inbox.post('/', async (c) => {
   `).bind(mansionId, frontUserId, user.uid, attachmentKey, attachmentName, note, now, now, now).run()
 
   const inboxId = result.meta.last_row_id
+
+  // 管理簿の見積書から登録した場合: 管理簿を「登録・送信済」にして紐付け
+  const estimateId = parseInt(String(body.estimate_id || '')) || null
+  if (estimateId) {
+    await db.prepare(`
+      UPDATE estimate_ledger SET status = 'sent', inbox_id = ?, sent_at = datetime('now'),
+        invoiced_at = COALESCE(invoiced_at, datetime('now')), invoiced_by = COALESCE(invoiced_by, ?), updated_at = datetime('now')
+      WHERE id = ?
+    `).bind(inboxId, user.uid, estimateId).run().catch((e: any) => console.error('[estimate-ledger] link', e))
+  }
 
   // 担当フロントへ通知（メール / LINE WORKS：本人の通知設定に従う）
   const mansion = await db.prepare('SELECT name FROM mansions WHERE id = ?').bind(mansionId).first() as any
@@ -687,6 +721,11 @@ inbox.post('/:id/delete', async (c) => {
   ).bind(id).run()
   if (!res.meta.changes) return c.redirect('/inbox?delete_error=applied')
 
+  // 管理簿と紐付いていれば「② 請求書作成済」に戻す
+  await db.prepare(
+    "UPDATE estimate_ledger SET status = 'invoiced', inbox_id = NULL, sent_at = NULL, updated_at = datetime('now') WHERE inbox_id = ?"
+  ).bind(id).run().catch(() => {})
+
   // 添付PDF（R2）を削除。念のため回覧申請の添付として使われていないか確認してから消す
   if (item.attachment_key) {
     const used = await db.prepare(
@@ -698,6 +737,231 @@ inbox.post('/:id/delete', async (c) => {
   }
 
   return c.redirect('/inbox?deleted=1')
+})
+
+
+// ============================================================
+// 見積書・請求書作成 管理簿（業務管理課・管理者）
+//   元請の回覧で 業務管理課(Step2)承認時に見積書をGoogleドライブへ自動保存し、ここに1行追加される
+// ============================================================
+const LEDGER_STATUS: Record<string, { label: string; cls: string }> = {
+  saved:    { label: '① 見積保存済（請求書未作成）', cls: 'bg-amber-100 text-amber-800 border-amber-300' },
+  invoiced: { label: '② 請求書作成済',               cls: 'bg-blue-100 text-blue-800 border-blue-300' },
+  sent:     { label: '③ 登録・送信済',               cls: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+}
+function fmtJstDate(v: any): string {
+  if (!v) return '-'
+  const iso = String(v).includes('T') ? String(v) : String(v).replace(' ', 'T') + 'Z'
+  const t = Date.parse(iso)
+  if (isNaN(t)) return String(v)
+  const d = new Date(t + 9 * 3600 * 1000)
+  const z = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}/${z(d.getUTCMonth() + 1)}/${z(d.getUTCDate())}`
+}
+
+inbox.get('/estimates', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
+  const db = c.env.DB
+  const filter = ['saved', 'invoiced', 'sent'].includes(c.req.query('status') || '') ? c.req.query('status')! : 'open'
+  const q = String(c.req.query('q') || '').trim()
+
+  const rows = ((await db.prepare(`
+    SELECT e.*, a.application_number, a.status AS app_status, u.name AS applicant_name, ub.name AS invoiced_by_name,
+           ii.status AS inbox_status
+    FROM estimate_ledger e
+    LEFT JOIN applications a ON a.id = e.application_id
+    LEFT JOIN users u ON u.id = e.applicant_id
+    LEFT JOIN users ub ON ub.id = e.invoiced_by
+    LEFT JOIN invoice_inbox ii ON ii.id = e.inbox_id
+    ORDER BY e.id DESC
+  `).all().catch(() => ({ results: [] }))).results || []) as any[]
+
+  const counts: Record<string, number> = { saved: 0, invoiced: 0, sent: 0 }
+  for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1
+  const list = rows.filter(r => {
+    if (filter === 'open' ? r.status === 'sent' : r.status !== filter) return false
+    if (!q) return true
+    const hay = `${r.mansion_number ?? ''} ${String(r.mansion_number ?? '').padStart(3, '0')} ${r.mansion_name || ''} ${r.application_number || ''} ${r.applicant_name || ''}`
+    return hay.includes(q)
+  })
+  const driveFails = rows.filter(r => r.drive_status === 'failed' || r.drive_status === 'skipped').length
+  const flash = c.req.query('msg') || ''
+  const flashErr = c.req.query('err') || ''
+
+  const tab = (key: string, label: string, n: number | null) => `
+    <a href="/inbox/estimates?status=${key}${q ? `&q=${encodeURIComponent(q)}` : ''}"
+       class="px-3 py-1.5 rounded-lg text-xs font-semibold border ${filter === key ? 'bg-[#396999] text-white border-[#396999]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}">
+      ${label}${n != null ? ` <span class="ml-1">${n}</span>` : ''}
+    </a>`
+
+  const driveCell = (r: any) => {
+    if (r.drive_status === 'success') {
+      return `<a href="${escAttr(r.drive_file_url)}" target="_blank" rel="noopener" class="text-[#396999] hover:underline text-xs break-all">📁 ${escAttr(r.drive_file_name || 'Googleドライブ')}</a>`
+    }
+    const label = r.drive_status === 'pending' ? '⏳ 保存中' : r.drive_status === 'skipped' ? '⚠️ 未保存（保存先未設定）' : '⚠️ 保存失敗'
+    return `<div class="text-xs text-red-600">${label}</div>
+      ${r.drive_error ? `<div class="text-[11px] text-gray-500 break-all">${escAttr(String(r.drive_error).slice(0, 120))}</div>` : ''}
+      <form method="POST" action="/inbox/estimates/${r.id}/retry-drive" class="mt-1">
+        <button class="text-[11px] px-2 py-0.5 border border-red-300 text-red-700 rounded hover:bg-red-50">🔄 再保存</button>
+      </form>`
+  }
+
+  const actionCell = (r: any) => {
+    if (r.status === 'saved') return `
+      <form method="POST" action="/inbox/estimates/${r.id}/invoiced" onsubmit="return confirm('この見積書の請求書を作成済みにしますか？')">
+        <button class="w-full text-xs px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold whitespace-nowrap">✏️ 請求書作成済にする</button>
+      </form>
+      <a href="/inbox/new?estimate_id=${r.id}" class="block mt-1 text-center text-xs px-2.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded font-semibold whitespace-nowrap">📤 この見積から請求書を登録</a>`
+    if (r.status === 'invoiced') return `
+      <a href="/inbox/new?estimate_id=${r.id}" class="block text-center text-xs px-2.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded font-semibold whitespace-nowrap">📤 この見積から請求書を登録</a>
+      <form method="POST" action="/inbox/estimates/${r.id}/undo" onsubmit="return confirm('「① 見積保存済」に戻しますか？')" class="mt-1 text-center">
+        <button class="text-[11px] text-gray-500 hover:underline">↩ 未作成に戻す</button>
+      </form>`
+    return `<div class="text-xs text-gray-600">登録日: ${fmtJstDate(r.sent_at)}</div>
+      ${r.inbox_id ? `<a href="/inbox" class="text-[11px] text-[#396999] hover:underline">請求書受付管理で確認 →</a>` : ''}`
+  }
+
+  const content = `
+    <div class="space-y-4">
+      ${flash ? `<div class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-2.5 rounded-lg">✅ ${escAttr(flash)}</div>` : ''}
+      ${flashErr ? `<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg">⚠️ ${escAttr(flashErr)}</div>` : ''}
+      ${!estimateFolderConfigured(c.env) ? `<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg">⚠️ Googleドライブの保存先が設定されていません。見積書は管理簿には載りますが、ドライブには保存されません。</div>` : ''}
+      ${driveFails ? `<div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg">⚠️ Googleドライブに保存できていない見積書が ${driveFails}件 あります。「🔄 再保存」を押してください（続く場合は保存先フォルダの権限をご確認ください）。</div>` : ''}
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+        <div class="px-6 py-4 border-b border-gray-100 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="font-semibold text-gray-800">📒 見積書・請求書作成 管理簿</h2>
+              <p class="text-xs text-gray-500 mt-1">会社（TD）元請の回覧は、業務管理課の承認時に見積書が自動でGoogleドライブへ保存され、ここに追加されます。</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <form method="POST" action="/inbox/estimates/check-folder">
+                <button class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 whitespace-nowrap">🔌 保存先の接続確認</button>
+              </form>
+              <a href="https://drive.google.com/drive/folders/${escAttr(c.env.ESTIMATE_FOLDER_ID || '')}" target="_blank" rel="noopener"
+                 class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 whitespace-nowrap">📁 保存先フォルダを開く</a>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            ${tab('open', '未完了（①＋②）', counts.saved + counts.invoiced)}
+            ${tab('saved', '① 見積保存済', counts.saved)}
+            ${tab('invoiced', '② 請求書作成済', counts.invoiced)}
+            ${tab('sent', '③ 登録・送信済', counts.sent)}
+            <form method="GET" action="/inbox/estimates" class="ml-auto flex items-center gap-1">
+              <input type="hidden" name="status" value="${filter}">
+              <input type="text" name="q" value="${escAttr(q)}" placeholder="物件№・物件名・申請番号"
+                class="px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs w-48 focus:ring-2 focus:ring-[#396999] outline-none">
+              <button class="text-xs px-3 py-1.5 bg-gray-700 text-white rounded-lg">検索</button>
+            </form>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-800 text-white">
+              <tr>
+                <th class="px-3 py-3 text-left text-xs font-semibold w-24">保存日</th>
+                <th class="px-3 py-3 text-left text-xs font-semibold">物件</th>
+                <th class="px-3 py-3 text-left text-xs font-semibold w-40">元の回覧</th>
+                <th class="px-3 py-3 text-left text-xs font-semibold w-56">見積書（Googleドライブ）</th>
+                <th class="px-3 py-3 text-left text-xs font-semibold w-48">状態</th>
+                <th class="px-3 py-3 text-left text-xs font-semibold w-52">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              ${list.length === 0 ? `<tr><td colspan="6" class="px-4 py-10 text-center text-gray-400">該当する見積書はありません</td></tr>` :
+                list.map(r => {
+                  const st = LEDGER_STATUS[r.status] || { label: r.status, cls: 'bg-gray-100 text-gray-600 border-gray-300' }
+                  const num = r.mansion_number != null ? String(r.mansion_number).padStart(3, '0') : '-'
+                  return `
+                  <tr class="hover:bg-gray-50 align-top">
+                    <td class="px-3 py-3 text-xs text-gray-600">${fmtJstDate(r.created_at)}</td>
+                    <td class="px-3 py-3">
+                      <div class="font-medium text-gray-800"><span class="font-mono text-xs text-gray-500 mr-1">${num}</span>${escAttr(r.mansion_name || '')}${r.is_test ? ' <span class="text-[10px] bg-yellow-100 text-yellow-800 px-1.5 rounded">テスト</span>' : ''}</div>
+                      <div class="text-xs text-gray-500 mt-0.5">申請者: ${escAttr(r.applicant_name || '-')}</div>
+                    </td>
+                    <td class="px-3 py-3 text-xs">
+                      ${r.application_number ? `<a href="/applications/${r.application_id}" class="text-[#396999] hover:underline font-mono">${escAttr(r.application_number)}</a>` : '-'}
+                    </td>
+                    <td class="px-3 py-3">
+                      ${driveCell(r)}
+                      <div class="mt-1">${previewBtn(`/inbox/estimates/${r.id}/file`, r.original_file_name || '見積書', '👁 見積書を確認', 'text-[11px] px-2 py-0.5 border border-[#396999] text-[#396999] rounded hover:bg-[#EEF4FA]')}</div>
+                    </td>
+                    <td class="px-3 py-3">
+                      <span class="inline-block text-xs font-semibold px-2 py-0.5 rounded-full border ${st.cls}">${st.label}</span>
+                      ${r.invoiced_at ? `<div class="text-[11px] text-gray-500 mt-1">作成: ${fmtJstDate(r.invoiced_at)}${r.invoiced_by_name ? `（${escAttr(r.invoiced_by_name)}）` : ''}</div>` : ''}
+                    </td>
+                    <td class="px-3 py-3">${actionCell(r)}</td>
+                  </tr>`
+                }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `
+  return c.html(layout('見積書・請求書作成 管理簿', content, user))
+})
+
+// 見積書ファイルの表示（R2）
+inbox.get('/estimates/:id/file', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
+  const row = await c.env.DB.prepare('SELECT r2_key, original_file_name FROM estimate_ledger WHERE id = ?').bind(c.req.param('id')).first() as any
+  if (!row) return c.notFound()
+  const obj = await c.env.R2.get(row.r2_key)
+  if (!obj) return c.notFound()
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': obj.httpMetadata?.contentType || 'application/pdf',
+      'Content-Disposition': `${c.req.query('dl') ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(row.original_file_name || 'estimate.pdf')}`,
+    }
+  })
+})
+
+// ② 請求書作成済にする
+inbox.post('/estimates/:id/invoiced', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
+  await c.env.DB.prepare(
+    "UPDATE estimate_ledger SET status = 'invoiced', invoiced_at = datetime('now'), invoiced_by = ?, updated_at = datetime('now') WHERE id = ? AND status = 'saved'"
+  ).bind(user.uid, c.req.param('id')).run()
+  return c.redirect('/inbox/estimates?msg=' + encodeURIComponent('請求書作成済にしました'))
+})
+
+// ① に戻す（② → ①）
+inbox.post('/estimates/:id/undo', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
+  await c.env.DB.prepare(
+    "UPDATE estimate_ledger SET status = 'saved', invoiced_at = NULL, invoiced_by = NULL, updated_at = datetime('now') WHERE id = ? AND status = 'invoiced'"
+  ).bind(c.req.param('id')).run()
+  return c.redirect('/inbox/estimates?msg=' + encodeURIComponent('「① 見積保存済」に戻しました'))
+})
+
+// 保存先フォルダの接続確認（読み取りのみ・ファイルは作らない）
+inbox.post('/estimates/check-folder', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
+  if (!estimateFolderConfigured(c.env)) return c.redirect('/inbox/estimates?err=' + encodeURIComponent('保存先が設定されていません'))
+  try {
+    const r = await new DriveClient({ ...(c.env as any), DRIVE_ROOT_FOLDER_ID: c.env.ESTIMATE_FOLDER_ID }).healthCheck()
+    if (r.ok) {
+      return c.redirect('/inbox/estimates?msg=' + encodeURIComponent(`保存先フォルダ「${r.folderName || ''}」に接続できました${r.driveId ? '（共有ドライブ）' : '（マイドライブのため保存できない可能性があります）'}`))
+    }
+    return c.redirect('/inbox/estimates?err=' + encodeURIComponent(`保存先フォルダに接続できません（${r.code || ''} ${r.message || ''}）。Googleドライブ自動保存で使っているアカウントを、このフォルダの「編集者」に追加してください`))
+  } catch (e: any) {
+    return c.redirect('/inbox/estimates?err=' + encodeURIComponent('接続確認に失敗しました: ' + String(e?.message || e).slice(0, 200)))
+  }
+})
+
+// Googleドライブへ再保存
+inbox.post('/estimates/:id/retry-drive', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
+  const r = await saveLedgerToDrive(c.env, Number(c.req.param('id')))
+  const msg = r === 'success' || r === 'already_saved' ? 'Googleドライブに保存しました' : 'Googleドライブに保存できませんでした（エラー内容は一覧に表示されています）'
+  return c.redirect('/inbox/estimates?status=open&msg=' + encodeURIComponent(msg))
 })
 
 export default inbox

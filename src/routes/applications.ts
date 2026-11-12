@@ -6,6 +6,7 @@ import { sendLineWorksMessage, buildLineWorksMessage, rowToConfig, type LineWork
 import { syncApplicationToDrive, type SyncEnv } from '../lib/drive-sync'
 import { budgetConfigured } from '../lib/budget'
 import { maybeSyncAssignees } from '../lib/assignee-sync'
+import { registerEstimate } from '../lib/estimate-ledger'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const applications = new Hono<{ Bindings: Bindings }>()
@@ -3916,6 +3917,15 @@ applications.post('/:id/review/:stepId', async (c) => {
       } else {
         console.log('[drive-sync] Secret未設定のためスキップ (GOOGLE_OAUTH_CLIENT_ID / DRIVE_ROOT_FOLDER_ID)')
       }
+    }
+
+    // === 見積書・請求書作成 管理簿: 元請の回覧は 業務管理課(Step2)承認時に見積書を指定フォルダへ保存し管理簿に追加 ===
+    if (step.step_number === 2 && app.payment_target === 'td' && app.td_type === 'motouke') {
+      const appIdForLedger = Number(id)
+      runInBackground(c, async () => {
+        const r = await registerEstimate(c.env, appIdForLedger)
+        console.log(`[estimate-ledger] app=${appIdForLedger} ${r.status} ledger=${r.ledgerId ?? '-'}`)
+      })
     }
 
     // === 元請セット申請: 本橋(step2)承認時に、管理組合宛PDFがアップロードされていれば申請者に後続申請通知 ===
