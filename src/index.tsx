@@ -5,7 +5,7 @@ import auth from './routes/auth'
 import applications from './routes/applications'
 import admin from './routes/admin'
 import inbox from './routes/inbox'
-import { previewRoleSelector, previewRoleBanner, sidebarNav, SIDEBAR_CSS } from './routes/layout'
+import { previewRoleBanner, previewRoleHeader, sidebarNav, SIDEBAR_CSS } from './routes/layout'
 import { findBudget, openBudgetFile, BudgetError } from './lib/budget'
 
 type Bindings = {
@@ -264,6 +264,7 @@ app.get('/', async (c) => {
           🧪 テストモード ON
         </a>
         ` : ''}
+        ${previewRoleHeader(user)}
         <div class="text-right hidden sm:block">
           <p class="text-sm font-semibold text-gray-800">${user.name}</p>
           <p class="text-xs text-gray-400">${roleLabel[user.role] || user.role} / ${user.employee_number}</p>

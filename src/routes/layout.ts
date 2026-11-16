@@ -10,20 +10,35 @@ const PREVIEW_ROLE_OPTIONS: Array<[string, string]> = [
   ['honsha', '本社経理'],
 ]
 
-/** サイドバー最下部に置く「役割プレビュー」切替ボックス（本来の管理者のみ表示） */
+/** 上部バーに置く「役割プレビュー」切替（本来の管理者のみ表示・PC用） */
+export function previewRoleHeader(user: any): string {
+  if (!user || !user.real_is_admin) return ''
+  const cur = user.preview_role || ''
+  return `
+        <form method="POST" action="/preview-role" class="hidden md:flex items-center gap-1.5 px-2 py-1 rounded-lg border ${cur ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-gray-50'}"
+              title="選んだ役割から見た画面を確認できます（見るだけ）">
+          <label class="text-xs font-bold ${cur ? 'text-purple-700' : 'text-gray-500'} whitespace-nowrap">👁 役割プレビュー</label>
+          <select name="role" onchange="this.form.submit()"
+            class="px-1.5 py-0.5 border border-gray-300 rounded text-xs bg-white focus:ring-2 focus:ring-purple-400 outline-none">
+            <option value="">（通常表示）</option>
+            ${PREVIEW_ROLE_OPTIONS.map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+        </form>`
+}
+
+/** スマホ用: 左メニューの先頭に置く「役割プレビュー」（PCでは上部バーにあるので非表示） */
 export function previewRoleSelector(user: any): string {
   if (!user || !user.real_is_admin) return ''
   const cur = user.preview_role || ''
   return `
-        <div class="mt-4 mx-1 p-3 rounded-lg border ${cur ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-gray-50'}">
+        <div class="md:hidden mb-2 mx-1 p-2.5 rounded-lg border ${cur ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-gray-50'}">
           <form method="POST" action="/preview-role">
-            <label class="block text-xs font-bold ${cur ? 'text-purple-700' : 'text-gray-500'} mb-1.5">👁 役割プレビュー</label>
+            <label class="block text-xs font-bold ${cur ? 'text-purple-700' : 'text-gray-500'} mb-1">👁 役割プレビュー（見るだけ）</label>
             <select name="role" onchange="this.form.submit()"
               class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-purple-400 outline-none">
               <option value="">（通常表示）</option>
               ${PREVIEW_ROLE_OPTIONS.map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('')}
             </select>
-            <p class="text-[10px] text-gray-400 mt-1 leading-snug">選んだ役割から見た画面を確認できます（見るだけ）</p>
           </form>
         </div>`
 }
@@ -49,103 +64,108 @@ export const SIDEBAR_CSS = `<style>
     .sidebar-item:hover { background-color: #EEF4FA; color: #396999; }
     .sidebar-item.active { background-color: #EEF4FA; color: #396999; font-weight: 600; }
     .sidebar-item svg { flex-shrink: 0; }
+    .sidebar-item.sidebar-sub { padding: .3rem .75rem; font-size: .8125rem; line-height: 1.15rem; }
+    .admin-menu > summary { list-style: none; }
+    .admin-menu > summary::-webkit-details-marker { display: none; }
+    .admin-menu[open] .admin-chevron { transform: rotate(90deg); }
     .bottom-nav-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .125rem; color: #6b7280; padding: .5rem .75rem; border-radius: .5rem; transition: color .15s; }
     .bottom-nav-item.active { color: #396999; }
     .bottom-nav-item svg { width: 1.25rem; height: 1.25rem; }
     .bottom-nav-item span { font-size: 10px; font-weight: 500; line-height: 1; }
   </style>`
 
-/** 左メニュー（全画面共通。ダッシュボードもこれを使う） */
+/** 左メニュー（全画面共通。ダッシュボードもこれを使う）
+ *  - 主要項目を「請求書」「回覧」に分けて表示
+ *  - 管理者メニューは「⚙️ 管理者設定」に折りたたみ（管理者設定の画面にいるときは自動で開く・開閉状態は記憶）
+ *  - 役割プレビューは上部バーへ移動（スマホのみメニュー先頭に表示）
+ */
 export function sidebarNav(user: any, title: string): string {
   // 新規申請: 申請画面に入れる人（担当者・担当者/上司・管理者）
   const showNewApp = user.is_admin || ['admin', 'front', 'front_supervisor'].includes(user.role)
   const showInbox  = user.role === 'operations' || user.is_admin
+  const I: Record<string, string> = {"ダッシュボード": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6\"/></svg>", "新規申請": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 4v16m8-8H4\"/></svg>", "申請一覧・検索": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2\"/></svg>", "パスワード変更": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z\"/></svg>", "ユーザー管理": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z\"/></svg>", "役割管理": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z\"/></svg>", "マンション管理マスタ": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4\"/></svg>", "担当者設定": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z\"/></svg>", "メール設定": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"/></svg>", "リマインダー設定": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9\"/></svg>", "LINE WORKS設定": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z\"/></svg>", "ログイン履歴": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1\"/></svg>", "データバックアップ": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4\"/></svg>", "Drive自動保存": "<svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z\"/></svg>"}
+
+  const item = (href: string, label: string, active: boolean, icon: string, extra = '') =>
+    `<a href="${href}" class="sidebar-item ${active ? 'active' : ''} ${extra}">${icon}<span class="truncate">${label}</span></a>`
+  const heading = (t: string) =>
+    `<p class="pt-3 pb-1 px-4 text-[11px] font-semibold text-gray-400 tracking-wider">${t}</p>`
+
+  // 管理者設定（3グループ）
+  const adminGroups: { name: string; items: { href: string; label: string; active: boolean; icon: string; extra?: string }[] }[] = [
+    { name: 'マスタ', items: [
+      { href: '/admin/users',    label: 'ユーザー管理',         active: title.includes('ユーザー'),   icon: I['ユーザー管理'] },
+      { href: '/admin/roles',    label: '役割管理',             active: title.includes('役割管理'),   icon: I['役割管理'] },
+      { href: '/admin/mansions', label: 'マンション管理マスタ', active: title.includes('マンション'), icon: I['マンション管理マスタ'] },
+      { href: '/admin/staff',    label: '担当者設定',           active: title.includes('スタッフ') || title.includes('担当者設定'), icon: I['担当者設定'] },
+    ]},
+    { name: '通知', items: [
+      { href: '/admin/smtp',      label: 'メール設定',       active: title.includes('メール'),       icon: I['メール設定'] },
+      { href: '/admin/lineworks', label: 'LINE WORKS設定',   active: title.includes('LINE WORKS'),   icon: I['LINE WORKS設定'] },
+      { href: '/admin/reminder',  label: 'リマインダー設定', active: title.includes('リマインダー'), icon: I['リマインダー設定'] },
+    ]},
+    { name: 'システム', items: [
+      { href: '/admin/login-logs', label: 'ログイン履歴',       active: title === 'ログイン履歴',        icon: I['ログイン履歴'] },
+      { href: '/admin/backup',     label: 'データバックアップ', active: title.includes('バックアップ'), icon: I['データバックアップ'] },
+      { href: '/admin/drive',      label: 'Drive自動保存',      active: title.includes('Drive'),         icon: I['Drive自動保存'] },
+      { href: '/admin/test-mode',  label: `テストモード${user.test_mode ? ' (ON)' : ''}`, active: title.includes('テストモード'),
+        icon: '<span class="w-4 text-center text-sm leading-none">🧪</span>', extra: user.test_mode ? 'text-yellow-600 font-semibold' : '' },
+    ]},
+  ]
+  const adminActive = adminGroups.some(g => g.items.some(i => i.active))
+
   return `
-      <nav class="p-3 space-y-1">
-        <a href="/" class="sidebar-item ${title === 'ダッシュボード' ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-          ダッシュボード
-        </a>
-        ${showInbox ? `
-        <a href="/inbox" class="flex items-center gap-3 mt-2 mb-1 px-4 py-3 rounded-xl text-sm font-bold text-white shadow-md transition bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 ${title.includes('請求書受付') ? 'ring-2 ring-offset-2 ring-orange-400' : ''}">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
-          <span class="flex-1">請求書受付管理</span>
-          <span class="text-base leading-none">📥</span>
-        </a>
-        <a href="/inbox/new" class="flex items-center gap-3 mb-1 px-4 py-3 rounded-xl text-sm font-bold text-white shadow-md transition bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 ${title.includes('請求書登録') ? 'ring-2 ring-offset-2 ring-orange-400' : ''}">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          <span class="flex-1">請求書を登録・担当者へ送信</span>
-          <span class="text-base leading-none">📤</span>
-        </a>
-        <a href="/inbox/estimates" class="sidebar-item ${title.includes('管理簿') ? 'active' : ''}">
-          <span class="text-base leading-none">📒</span>
-          見積書・請求書作成 管理簿
-        </a>
-        ` : ''}
-        ${showNewApp ? `
-        <a href="/applications/new" class="sidebar-item ${title === '新規申請' ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          新規申請
-        </a>
-        ` : ''}
-        <a href="/applications" class="sidebar-item ${title === '申請一覧' ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-          申請一覧・検索
-        </a>
-        <a href="/change-password" class="sidebar-item ${title === 'パスワード変更' ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
-          パスワード変更
-        </a>
-        ${user.is_admin ? `
-        <div class="pt-3 pb-1">
-          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">管理者メニュー</p>
-        </div>
-        <a href="/admin/users" class="sidebar-item ${title.includes('ユーザー') ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-          ユーザー管理
-        </a>
-        <a href="/admin/roles" class="sidebar-item ${title.includes('役割') ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
-          役割管理
-        </a>
-        <a href="/admin/mansions" class="sidebar-item ${title.includes('マンション') ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
-          マンション管理マスタ
-        </a>
-        <a href="/admin/staff" class="sidebar-item ${title.includes('スタッフ') ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-          担当者設定
-        </a>
-        <a href="/admin/smtp" class="sidebar-item ${title.includes('メール') ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-          メール設定
-        </a>
-        <a href="/admin/reminder" class="sidebar-item ${title.includes('リマインダー') ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-          リマインダー設定
-        </a>
-        <a href="/admin/lineworks" class="sidebar-item ${title.includes('LINE WORKS') ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-          LINE WORKS設定
-        </a>
-        <a href="/admin/login-logs" class="sidebar-item ${title === 'ログイン履歴' ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/></svg>
-          ログイン履歴
-        </a>
-        <a href="/admin/backup" class="sidebar-item ${title.includes('バックアップ') ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-          データバックアップ
-        </a>
-        <a href="/admin/drive" class="sidebar-item ${title.includes('Drive') ? 'active' : ''}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
-          Drive自動保存
-        </a>
-        <a href="/admin/test-mode" class="sidebar-item ${title.includes('テストモード') ? 'active' : ''} ${user.test_mode ? 'text-yellow-600 font-semibold' : ''}">
-          <span class="text-base leading-none">🧪</span>
-          テストモード${user.test_mode ? ' (ON)' : ''}
-        </a>
-        ` : ''}
+      <nav class="p-3 space-y-0.5">
         ${previewRoleSelector(user)}
+        ${item('/', 'ダッシュボード', title === 'ダッシュボード', I['ダッシュボード'])}
+
+        ${showInbox ? `
+        ${heading('請求書')}
+        <a href="/inbox" class="flex items-center gap-3 mb-1 px-4 py-2 rounded-lg text-sm font-bold text-white shadow-sm transition bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 ${title.includes('請求書受付') ? 'ring-2 ring-offset-1 ring-orange-400' : ''}">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+          <span class="flex-1 truncate">請求書受付管理</span>
+          <span class="text-sm leading-none">📥</span>
+        </a>
+        <a href="/inbox/new" class="flex items-center gap-3 mb-1 px-4 py-2 rounded-lg text-sm font-bold text-white shadow-sm transition bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 ${title.includes('請求書登録') ? 'ring-2 ring-offset-1 ring-orange-400' : ''}">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          <span class="flex-1 leading-tight">請求書を登録・担当者へ送信</span>
+          <span class="text-sm leading-none">📤</span>
+        </a>
+        ${item('/inbox/estimates', '見積書・請求書作成 管理簿', title.includes('管理簿'), '<span class="w-4 text-center text-sm leading-none">📒</span>')}
+        ` : ''}
+
+        ${heading('回覧')}
+        ${showNewApp ? item('/applications/new', '新規申請', title === '新規申請', I['新規申請']) : ''}
+        ${item('/applications', '申請一覧・検索', title === '申請一覧', I['申請一覧・検索'])}
+
+        <div class="my-2 border-t border-gray-100"></div>
+        ${item('/change-password', 'パスワード変更', title === 'パスワード変更', I['パスワード変更'])}
+
+        ${user.is_admin ? `
+        <details id="adminMenu" class="admin-menu" ${adminActive ? 'open data-forced="1"' : ''}>
+          <summary class="sidebar-item select-none ${adminActive ? 'text-[#396999] font-semibold' : ''}">
+            <span class="w-4 text-center text-sm leading-none">⚙️</span>
+            <span class="flex-1">管理者設定</span>
+            ${user.test_mode ? '<span class="text-[10px] bg-yellow-100 text-yellow-800 border border-yellow-300 px-1.5 rounded-full">🧪ON</span>' : ''}
+            <svg class="admin-chevron w-3.5 h-3.5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          </summary>
+          <div class="ml-3 pl-2 border-l border-gray-200 pb-1">
+            ${adminGroups.map(g => `
+              <p class="pt-1.5 px-3 text-[10px] font-semibold text-gray-400 tracking-wider">${g.name}</p>
+              ${g.items.map(i => item(i.href, i.label, i.active, i.icon, (i.extra || '') + ' sidebar-sub')).join('')}
+            `).join('')}
+          </div>
+        </details>
+        <script>
+          (function () {
+            var d = document.getElementById('adminMenu');
+            if (!d) return;
+            try {
+              if (!d.dataset.forced && localStorage.getItem('adminMenuOpen') === '1') d.open = true;
+              d.addEventListener('toggle', function () { localStorage.setItem('adminMenuOpen', d.open ? '1' : '0'); });
+            } catch (e) {}
+          })();
+        </script>
+        ` : ''}
       </nav>
 `
 }
@@ -197,6 +217,7 @@ export function layout(title: string, content: string, user: any): string {
           🧪 テストモード ON
         </a>
         ` : ''}
+        ${previewRoleHeader(user)}
         <div class="text-right hidden sm:block">
           <p class="text-sm font-semibold text-gray-800">${user.name}</p>
           <p class="text-xs text-gray-400">${roleLabel[user.role] || user.role} / ${user.employee_number}</p>
