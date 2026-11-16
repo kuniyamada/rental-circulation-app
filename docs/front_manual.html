@@ -2,125 +2,93 @@
 <html lang="ja"><head><meta charset="UTF-8">
 <title>フロント向け かんたんマニュアル</title>
 <style>
-  @page { size: A4; margin: 8mm 10mm; }
+  @page { size: A4; margin: 8mm 9mm; }
   * { box-sizing: border-box; }
-  body { font-family: "Noto Sans CJK JP", "Hiragino Sans", "Yu Gothic", sans-serif; color: #1f2937; margin: 0; font-size: 11pt; line-height: 1.45; }
-  .head { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #396999; padding-bottom: 5px; margin-bottom: 8px; }
-  .head h1 { margin: 0; font-size: 17pt; color: #396999; }
-  .head .sub { font-size: 9pt; color: #4b5563; text-align: right; }
-  .url { display: inline-block; background: #EEF4FA; border: 1px solid #b6cde3; border-radius: 6px; padding: 1px 8px; font-weight: bold; color: #2E5580; }
-  .flow { display: flex; align-items: center; gap: 4px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; font-size: 10pt; flex-wrap: wrap; }
-  .flow .f { background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
+  body { font-family: "Noto Sans CJK JP", "Hiragino Sans", "Yu Gothic", sans-serif; color: #1f2937; margin: 0; font-size: 10.5pt; line-height: 1.35; }
+  h1 { margin: 0; font-size: 18pt; color: #396999; }
+  .head { display: flex; align-items: baseline; gap: 10px; border-bottom: 3px solid #396999; padding-bottom: 4px; margin-bottom: 6px; }
+  .head small { color: #6b7280; font-size: 9.5pt; }
+  .flow { display: flex; align-items: center; gap: 4px; justify-content: center; margin-bottom: 7px; font-size: 9.5pt; }
+  .flow span { border: 1px solid #cbd5e1; border-radius: 999px; padding: 1px 9px; background: #fff; white-space: nowrap; }
   .flow .me { background: #396999; color: #fff; border-color: #396999; font-weight: bold; }
-  .flow .ar { color: #94a3b8; font-weight: bold; }
-  .step { display: flex; gap: 9px; border: 1px solid #e5e7eb; border-radius: 10px; padding: 7px 12px; margin-bottom: 6px; }
-  .num { flex: 0 0 34px; height: 34px; border-radius: 50%; background: #396999; color: #fff; font-weight: bold; font-size: 14pt; display: flex; align-items: center; justify-content: center; }
-  .step.orange { border-color: #fdba74; background: #fff7ed; }
-  .step.orange .num { background: #f97316; }
-  .body { flex: 1; }
-  .body h2 { margin: 0 0 2px; font-size: 13pt; }
-  .body p { margin: 1px 0; }
-  .btn { display: inline-block; border-radius: 6px; padding: 1px 8px; font-weight: bold; font-size: 10.5pt; white-space: nowrap; }
-  .b-orange { background: #f97316; color: #fff; }
-  .b-blue { background: #396999; color: #fff; }
-  .b-white { background: #fff; color: #396999; border: 1px solid #396999; }
-  .tag { display: inline-block; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px; padding: 0 6px; font-size: 10pt; }
-  table.pay { border-collapse: collapse; width: 100%; margin: 4px 0 3px; font-size: 10.5pt; }
-  table.pay th, table.pay td { border: 1px solid #d1d5db; padding: 4px 7px; text-align: left; vertical-align: top; }
-  table.pay th { background: #f1f5f9; white-space: nowrap; }
-  .note { font-size: 10pt; color: #4b5563; }
-  .ok { color: #047857; font-weight: bold; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .box { border: 1px dashed #94a3b8; border-radius: 8px; padding: 8px 10px; font-size: 10.5pt; }
-  .box h3 { margin: 0 0 4px; font-size: 11.5pt; color: #396999; }
-  .box ul { margin: 0; padding-left: 16px; }
-  .box li { margin: 1px 0; }
-  .foot { margin-top: 6px; text-align: center; font-size: 10.5pt; color: #6b7280; }
+  .flow b { color: #94a3b8; }
+  .step { border: 1px solid #e5e7eb; border-radius: 10px; padding: 6px 9px 8px; margin-bottom: 6px; }
+  .step.o { border-color: #fdba74; background: #fffaf3; }
+  .t { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .n { flex: 0 0 26px; height: 26px; border-radius: 50%; background: #396999; color: #fff; font-weight: bold; font-size: 13pt; display: flex; align-items: center; justify-content: center; }
+  .o .n { background: #f97316; }
+  .t h2 { margin: 0; font-size: 13pt; }
+  img { display: block; max-width: 100%; border: 1px solid #e5e7eb; border-radius: 6px; }
+  .row { display: flex; gap: 8px; align-items: flex-start; }
+  .arrow { align-self: center; font-size: 18pt; color: #f97316; font-weight: bold; }
+  .cap { font-size: 9.5pt; color: #374151; margin-top: 3px; }
+  .chips { display: flex; flex-direction: column; gap: 4px; font-size: 9.5pt; }
+  .chip { border-radius: 8px; padding: 4px 8px; border: 1px solid; }
+  .c1 { background: #f0fdf4; border-color: #86efac; }
+  .c2 { background: #f8fafc; border-color: #cbd5e1; }
+  .c3 { background: #fff7ed; border-color: #fdba74; }
+  .foot { text-align: center; font-size: 10pt; color: #4b5563; margin-top: 4px; }
 </style></head>
 <body>
-  <div class="head">
-    <h1>請求回覧　フロント向け かんたんマニュアル<span style="display:block;font-size:10pt;color:#4b5563;font-weight:normal">建物管理部 請求回覧システム</span></h1>
-  </div>
+  <div class="head"><h1>請求回覧 フロント向け かんたんマニュアル</h1><small>建物管理部 請求回覧システム</small></div>
 
   <div class="flow">
-    <b style="margin-right:4px">請求書の流れ</b>
-    <span class="f">業務管理課が請求書を登録</span><span class="ar">▶</span>
-    <span class="f me">あなた：回覧申請</span><span class="ar">▶</span>
-    <span class="f">① 上長</span><span class="ar">▶</span>
-    <span class="f">② 業務管理課</span><span class="ar">▶</span>
-    <span class="f">③ 会計課／本社経理</span><span class="ar">▶</span>
-    <span class="f">完了</span>
+    <span>業務管理課が登録</span><b>▶</b><span class="me">あなた：回覧申請</span><b>▶</b><span>① 上長</span><b>▶</b><span>② 業務管理課</span><b>▶</b><span>③ 会計課／本社経理</span><b>▶</b><span>完了</span>
   </div>
 
+  <!-- 1 + 2 -->
+  <div class="row">
+    <div class="step" style="flex:0 0 27%">
+      <div class="t"><div class="n">1</div><h2>ログイン</h2></div>
+      <img src="manual_img/1_login.png">
+      <div class="cap">社員番号とパスワード</div>
+    </div>
+    <div class="step o" style="flex:1">
+      <div class="t"><div class="n">2</div><h2>お知らせが来たら「回覧申請する」</h2></div>
+      <div class="cap" style="margin:0 0 4px">メール／LINE WORKS でお知らせ → ログインすると最初の画面に出ます</div>
+      <img src="manual_img/2_inbox.png">
+    </div>
+  </div>
+
+  <!-- 3 -->
   <div class="step">
-    <div class="num">1</div>
-    <div class="body">
-      <h2>ログインする</h2>
-      <p>システムを開き、<b>社員番号</b>と<b>パスワード</b>を入れて「ログイン」を押します。</p>
-      <p class="note">※ 初めての方・忘れた方は業務管理課へ。パスワードは左メニューの「パスワード変更」で変えられます。</p>
+    <div class="t"><div class="n">3</div><h2>支払先を選んで、空いている所を入れる</h2></div>
+    <div class="row">
+      <div style="flex:1.15">
+        <img src="manual_img/3a_auto.png" style="margin-bottom:5px">
+        <img src="manual_img/3b_pay.png">
+      </div>
+      <div style="flex:0.85">
+        <div class="chips">
+          <div class="chip c1"><b>管理組合</b>：勘定科目 と 手数料（円は<b>税抜</b>）</div>
+          <div class="chip c2"><b>会社（TD）委託内</b>：追加なし</div>
+          <div class="chip c3"><b>会社（TD）元請</b>：<b>見積書PDF</b>を必ず添付</div>
+        </div>
+        <img src="manual_img/3c_route.png" style="margin-top:6px">
+        <div class="cap">マンション・請求書・回覧先は<b>自動で入ります</b></div>
+      </div>
     </div>
   </div>
 
-  <div class="step orange">
-    <div class="num">2</div>
-    <div class="body">
-      <h2>お知らせが届いたら「回覧申請する」を押す</h2>
-      <p>業務管理課が請求書を登録すると、<b>メール</b>または<b>LINE WORKS</b>でお知らせが届きます。</p>
-      <p>ログインすると、最初の画面に <span class="tag">📥 対応が必要な請求書があります</span> と出ます。
-         <span class="btn b-white">📎請求書</span> で中身を見て、<span class="btn b-orange">回覧申請する</span> を押します。</p>
-    </div>
-  </div>
-
+  <!-- 4 -->
   <div class="step">
-    <div class="num">3</div>
-    <div class="body">
-      <h2>申請の画面で、空いている所を入れる</h2>
-      <p>マンション・請求書・回覧先（①②③）は<b>自動で入っています</b>。確認して、<b>支払先</b>を選びます。</p>
-      <table class="pay">
-        <tr><th>支払先</th><th>あなたが入れるもの</th></tr>
-        <tr><td>管理組合</td><td><b>勘定科目</b>（10文字まで　例：小修繕費）と<b>手数料</b>（円／％／なし から選ぶ。円は<b>税抜</b>）</td></tr>
-        <tr><td>会社（TD）委託内</td><td>追加で入れるものはありません</td></tr>
-        <tr><td>会社（TD）元請</td><td><b>見積書のPDFを必ず添付</b>（ないと申請できません）</td></tr>
-      </table>
-      <p class="note">※ 赤い <b style="color:#ef4444">*</b> は必須です。必要なら「備考」や「添付資料」も付けられます。</p>
+    <div class="t"><div class="n">4</div><h2>一番下の青いボタンで送信</h2></div>
+    <div class="row">
+      <div style="flex:1.3"><img src="manual_img/4_submit.png"></div>
+      <div class="arrow">▶</div>
+      <div style="flex:0.9"><img src="manual_img/4_done.png"><div class="cap">これが出たら<b>完了</b></div></div>
     </div>
   </div>
 
-  <div class="step">
-    <div class="num">4</div>
-    <div class="body">
-      <h2>画面のいちばん下の青いボタンを押す</h2>
-      <p><span class="btn b-blue">次へ：回覧先の確認 →</span> を押すと送信されます。
-         上に <span class="ok">✅ 申請を送信しました</span> と出れば<b>完了</b>です。上長へ自動でお知らせが行きます。</p>
+  <!-- 5 -->
+  <div class="step o">
+    <div class="t"><div class="n">5</div><h2>差し戻されたら、直して再申請</h2></div>
+    <div class="row">
+      <div style="flex:1"><img src="manual_img/5_returned.png"></div>
+      <div class="arrow">▶</div>
+      <div style="flex:1"><img src="manual_img/5b_banner.png"><div class="cap">理由どおりに直して「↩ 再申請する」</div></div>
     </div>
   </div>
 
-  <div class="step orange">
-    <div class="num">5</div>
-    <div class="body">
-      <h2>差し戻されたら、直して「再申請」</h2>
-      <p>最初の画面に <span class="tag">↩ 差し戻し – 再申請が必要です</span> と、<b>差し戻し理由</b>が出ます。</p>
-      <p><span class="btn b-orange">再申請する</span> → 理由どおりに直す → <b>「再申請理由・修正内容」</b>を書く → <span class="btn b-orange">↩ 再申請する</span></p>
-    </div>
-  </div>
-
-  <div class="grid2">
-    <div class="box">
-      <h3>🔎 進み具合を見たいとき</h3>
-      <ul>
-        <li>左メニューの「<b>申請一覧・検索</b>」で、自分の申請の状態（回覧中／完了／差し戻し）が見られます。</li>
-        <li>申請を開くと、いま誰のところにあるか（回覧ルート）が分かります。</li>
-      </ul>
-    </div>
-    <div class="box">
-      <h3>💡 困ったときは</h3>
-      <ul>
-        <li>マンションの担当者が違う → 業務管理課へ連絡してください。</li>
-        <li>請求書を間違えて受け取った → 申請せずに業務管理課へ。</li>
-        <li>画面がおかしい → 一度ログアウトして入り直してください。</li>
-      </ul>
-    </div>
-  </div>
-
-  <div class="foot">わからないことは <b>業務管理課</b> までお気軽にどうぞ</div>
+  <div class="foot">🔎 進み具合は左メニュー「申請一覧・検索」　／　💡 わからないことは <b>業務管理課</b> へ</div>
 </body></html>
