@@ -185,6 +185,16 @@ export class DriveClient {
     throw err
   }
 
+  /** ファイルをゴミ箱へ移動（完全削除はしない。30日以内ならドライブのゴミ箱から戻せる） */
+  async trashFile(fileId: string): Promise<void> {
+    const url = `${DRIVE_API}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id,trashed`
+    await this.apiFetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashed: true }),
+    })
+  }
+
   /** 保存先ルートフォルダの情報を取得 (healthCheck用) */
   async healthCheck(): Promise<HealthCheckResult> {
     try {

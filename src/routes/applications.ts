@@ -7,6 +7,7 @@ import { syncApplicationToDrive, type SyncEnv } from '../lib/drive-sync'
 import { budgetConfigured } from '../lib/budget'
 import { maybeSyncAssignees } from '../lib/assignee-sync'
 import { registerEstimate } from '../lib/estimate-ledger'
+import { deleteTestApplication } from '../lib/app-delete'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const applications = new Hono<{ Bindings: Bindings }>()
@@ -132,6 +133,8 @@ applications.get('/', async (c) => {
   const from = c.req.query('from') || ''
   const to = c.req.query('to') || ''
   const createdAppNumber = c.req.query('created') || ''  // 新規申請直後のトースト表示用
+  const deletedMsg = (c.req.query('deleted') || '').replace(/[<>&"']/g, (ch) =>
+    ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[ch] as string))
 
   let sql = `SELECT a.*, m.name as mansion_name, u.name as applicant_name,
       (SELECT COUNT(*) FROM applications a2 WHERE a2.original_application_id = a.id) as successor_count
@@ -159,6 +162,7 @@ applications.get('/', async (c) => {
   )
 
   const content = `
+    ${deletedMsg ? `<div class="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-2.5 rounded-lg">🗑 ${deletedMsg}</div>` : ''}
     ${createdAppNumber ? `
     <!-- 申請完了トースト（数秒後に自動で消える） -->
     <div id="createdToast"
@@ -2446,6 +2450,8 @@ applications.get('/:id', async (c) => {
   }
 
   // クエリパラメータからのフラッシュメッセージ
+  const deleteError = (c.req.query('delete_error') || '').replace(/[<>&"']/g, (ch) =>
+    ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[ch] as string))
   const flashMotouke = c.req.query('motouke_remind') || c.req.query('motouke_dup')
   let motoukeFlash = ''
   if (c.req.query('motouke_remind') === 'ok') {
@@ -2461,6 +2467,7 @@ applications.get('/:id', async (c) => {
   }
 
   const content = `
+    ${deleteError ? `<div class="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg">⚠️ ${deleteError}</div>` : ''}
     <div class="space-y-6 max-w-3xl">
       ${motoukeFlash}
 
@@ -2536,7 +2543,14 @@ applications.get('/:id', async (c) => {
             </div>
             <h2 class="text-xl font-bold text-gray-800">${app.mansion_name || app.title}</h2>
           </div>
-          ${statusBadge(app.status)}
+          <div class="flex flex-col items-end gap-2">
+            ${statusBadge(app.status)}
+            ${(app.is_test && user.is_admin) ? `
+            <form method="POST" action="/applications/${app.id}/delete-test"
+                  onsubmit="return confirm('テスト申請 ${app.application_number} を削除しますか？\\n\\n・回覧の記録、添付ファイル、元の請求書受付も一緒に削除されます\\n・Googleドライブに保存したファイルはゴミ箱へ移動します\\n\\n元に戻せません。')">
+              <button type="submit" class="text-xs px-3 py-1.5 border border-red-300 text-red-600 bg-white rounded-lg hover:bg-red-50 font-semibold whitespace-nowrap">🗑 テスト申請を削除</button>
+            </form>` : ''}
+          </div>
         </div>
 
         ${motoukeSuccessorB ? `
@@ -4253,6 +4267,20 @@ applications.post('/:id/resubmit', async (c) => {
 })
 
 // ファイルダウンロード
+// テスト申請の削除（管理者のみ・is_test=1 の申請だけ）
+applications.post('/:id/delete-test', async (c) => {
+  const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie')))
+  if (!user) return c.redirect('/login')
+  const id = parseInt(c.req.param('id'))
+  if (!user.is_admin) return c.redirect(`/applications/${id}`)
+  const r = await deleteTestApplication(c.env, id)
+  if (!r.ok) return c.redirect(`/applications/${id}?delete_error=${encodeURIComponent(r.message)}`)
+  let msg = r.message
+  if (r.driveTrashed) msg += `（Googleドライブのファイル ${r.driveTrashed}件 をゴミ箱へ移動）`
+  if (r.driveFailed && r.driveFailed.length) msg += `　※Googleドライブのファイル ${r.driveFailed.length}件 は移動できませんでした。ドライブで直接削除してください`
+  return c.redirect('/applications?deleted=' + encodeURIComponent(msg))
+})
+
 applications.get('/files/:attachId', async (c) => {
   const cookie = c.req.header('Cookie')
   const sessionId = getSessionIdFromCookie(cookie)
