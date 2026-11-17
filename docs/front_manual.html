@@ -27,6 +27,9 @@
   .c1 { background: #f0fdf4; border-color: #86efac; }
   .c2 { background: #f8fafc; border-color: #cbd5e1; }
   .c3 { background: #fff7ed; border-color: #fdba74; }
+  .ex { margin-top: 5px; display: flex; flex-direction: column; gap: 3px; font-size: 11pt; }
+  .ex div { background: #eff6ff; border: 1px solid #93c5fd; border-radius: 6px; padding: 2px 8px; }
+  .ex span { display: inline-block; background: #2563eb; color: #fff; font-size: 9pt; font-weight: bold; border-radius: 4px; padding: 0 5px; margin-right: 4px; }
   .foot { text-align: center; font-size: 10pt; color: #4b5563; margin-top: 4px; }
 </style></head>
 <body>
@@ -38,10 +41,13 @@
 
   <!-- 1 + 2 -->
   <div class="row">
-    <div class="step" style="flex:0 0 22%">
+    <div class="step" style="flex:0 0 33%">
       <div class="t"><div class="n">1</div><h2>ログイン</h2></div>
       <img src="manual_img/1_login.png">
-      <div class="cap">社員番号とパスワード</div>
+      <div class="ex">
+        <div><span>例</span> 社員番号 <b>3桁</b></div>
+        <div><span>例</span> PW <b>3桁</b></div>
+      </div>
     </div>
     <div style="flex:1; display:flex; flex-direction:column; gap:0">
       <div class="step o">
