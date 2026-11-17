@@ -65,6 +65,13 @@ export const SIDEBAR_CSS = `<style>
     .sidebar-item.active { background-color: #EEF4FA; color: #396999; font-weight: 600; }
     .sidebar-item svg { flex-shrink: 0; }
     .sidebar-item.sidebar-sub { padding: .3rem .75rem; font-size: .8125rem; line-height: 1.15rem; }
+    .send-group { margin: .375rem 0 .5rem; padding: .5rem; border: 1px solid #fed7aa; background: #fff7ed; border-radius: .625rem; }
+    .send-group-title { font-size: 11px; font-weight: 700; color: #c2410c; padding: 0 .25rem .375rem; }
+    .send-btn { display: flex; align-items: center; gap: .625rem; padding: .5rem .75rem; margin-top: .25rem; border-radius: .5rem; font-size: .8125rem; font-weight: 700; color: #fff; background: linear-gradient(90deg, #f97316, #f59e0b); box-shadow: 0 1px 2px rgba(0,0,0,.08); transition: filter .15s; }
+    .send-btn:hover { filter: brightness(.93); }
+    .send-btn.is-active { outline: 2px solid #ea580c; outline-offset: 2px; }
+    .send-btn-icon { width: 1.25rem; text-align: center; font-size: .9rem; line-height: 1; }
+    .send-btn-sub { display: block; font-size: 10px; font-weight: 500; opacity: .9; margin-top: 1px; }
     .admin-menu > summary { list-style: none; }
     .admin-menu > summary::-webkit-details-marker { display: none; }
     .admin-menu[open] .admin-chevron { transform: rotate(90deg); }
@@ -121,17 +128,19 @@ export function sidebarNav(user: any, title: string): string {
 
         ${showInbox ? `
         ${heading('請求書')}
-        <a href="/inbox" class="flex items-center gap-3 mb-1 px-4 py-2 rounded-lg text-sm font-bold text-white shadow-sm transition bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 ${title.includes('請求書受付') ? 'ring-2 ring-offset-1 ring-orange-400' : ''}">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
-          <span class="flex-1 truncate">請求書受付管理</span>
-          <span class="text-sm leading-none">📥</span>
-        </a>
-        <a href="/inbox/new" class="flex items-center gap-3 mb-1 px-4 py-2 rounded-lg text-sm font-bold text-white shadow-sm transition bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 ${title.includes('請求書登録') ? 'ring-2 ring-offset-1 ring-orange-400' : ''}">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          <span class="flex-1 leading-tight">請求書を登録・担当者へ送信</span>
-          <span class="text-sm leading-none">📤</span>
-        </a>
-        ${item('/inbox/bulk', '請求書をまとめて登録', title.includes('まとめて登録'), '<span class="w-4 text-center text-sm leading-none">📚</span>')}
+        ${item('/inbox', '請求書受付管理（一覧）', title.includes('請求書受付'), '<span class="w-4 text-center text-sm leading-none">📥</span>')}
+        <!-- 担当者へ送る（2つの送り方を同じ色・同じ枠でまとめる） -->
+        <div class="send-group">
+          <p class="send-group-title">📤 担当者へ請求書を送る</p>
+          <a href="/inbox/new" class="send-btn ${title.includes('請求書登録') ? 'is-active' : ''}">
+            <span class="send-btn-icon">＋</span>
+            <span class="flex-1 leading-tight">1件ずつ登録・送信</span>
+          </a>
+          <a href="/inbox/bulk" class="send-btn ${title.includes('まとめて登録') ? 'is-active' : ''}">
+            <span class="send-btn-icon">📚</span>
+            <span class="flex-1 leading-tight">まとめて登録・送信<span class="send-btn-sub">複数の物件を一度に</span></span>
+          </a>
+        </div>
         ${item('/inbox/estimates', '見積書・請求書作成 管理簿', title.includes('管理簿'), '<span class="w-4 text-center text-sm leading-none">📒</span>')}
         ` : ''}
 

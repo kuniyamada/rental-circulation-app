@@ -292,12 +292,13 @@ inbox.get('/', async (c) => {
       <!-- ヘッダー -->
       <div class="flex items-center justify-between">
         <h2 class="text-xl font-bold text-gray-800">📥 請求書受付管理</h2>
-        <div class="flex items-center gap-2">
-          <a href="/inbox/bulk" class="bg-white border border-[#396999] text-[#396999] hover:bg-[#EEF4FA] text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
-            <span>📚</span><span>まとめて登録</span>
+        <div class="flex items-center gap-2 flex-wrap justify-end">
+          <span class="text-xs font-bold text-orange-700 mr-1">📤 担当者へ送る：</span>
+          <a href="/inbox/new" class="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2 shadow-sm">
+            <span>＋</span><span>1件ずつ登録・送信</span>
           </a>
-          <a href="/inbox/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
-            <span>＋</span><span>請求書を登録</span>
+          <a href="/inbox/bulk" class="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2 shadow-sm">
+            <span>📚</span><span>まとめて登録・送信</span>
           </a>
         </div>
       </div>
@@ -428,7 +429,7 @@ inbox.get('/bulk', async (c) => {
     <div class="max-w-6xl mx-auto space-y-4">
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h2 class="text-xl font-bold text-gray-800">📚 請求書をまとめて登録・担当者へ送信</h2>
+          <h2 class="text-xl font-bold text-gray-800">📚 まとめて登録・担当者へ送信</h2>
           <p class="text-sm text-gray-500 mt-1">複数の物件の請求書PDFを一度に登録します。1物件だけのときは <a href="/inbox/new" class="text-[#396999] hover:underline">1件ずつの登録画面</a> を使ってください。</p>
         </div>
         <a href="/inbox" class="text-sm text-gray-500 hover:underline">← 請求書受付管理へ</a>
@@ -607,7 +608,7 @@ async function renderInboxForm(c: any, editId: number | null) {
       </div>` : ''}
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 class="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
-          ${isEdit ? '✏️ 受付を編集' : '📥 請求書を登録・フロントへ送信'}
+          ${isEdit ? '✏️ 受付を編集' : '📤 1件ずつ登録・担当者へ送信'}
         </h2>
         ${!isEdit ? `<p class="-mt-4 mb-5 text-xs text-gray-500">複数の物件をまとめて送るときは <a href="/inbox/bulk" class="text-[#396999] font-semibold hover:underline">📚 まとめて登録</a> が便利です。</p>` : ''}
         ${isEdit ? `<p class="-mt-4 mb-5 text-xs text-gray-500">変更を保存しても、担当フロントへのお知らせは送りません。必要なときは一覧の「再通知」を押してください。</p>` : ''}

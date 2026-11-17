@@ -258,7 +258,7 @@ applications.get('/', async (c) => {
       <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
         <h2 class="font-semibold text-gray-800">検索結果 <span class="text-[#396999]">${apps.results.length}件</span></h2>
         <div class="flex gap-2">
-        ${(user.role === 'operations' || user.is_admin) ? `<a href="/inbox/new" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">📥 請求書を登録・担当者へ送信</a>` : ''}
+        ${(user.role === 'operations' || user.is_admin) ? `<a href="/inbox/new" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">📤 1件ずつ登録・送信</a>` : ''}
         ${(['admin','front','front_supervisor'].includes(user.role)) ? `<a href="/applications/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition">＋ 新規申請</a>` : ''}
         </div>
       </div>
