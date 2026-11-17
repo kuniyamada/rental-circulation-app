@@ -302,7 +302,7 @@ app.get('/', async (c) => {
                     ${item.note ? `<p class="text-xs text-gray-400 mt-0.5">備考: ${item.note}</p>` : ''}
                   </div>
                   <div class="flex gap-2 items-center">
-                    ${item.attachment_key ? `<button type="button" data-url="/inbox/${item.id}/download" data-name="${String(item.attachment_name || 'invoice.pdf').replace(/[&<>"']/g, (ch: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])}" onclick="openSavedFilePreview(this.dataset.url, this.dataset.name)" class="text-xs text-[#396999] hover:underline">📎請求書</button>` : ''}
+                    ${[[item.attachment_key, item.attachment_name, 1, '📎請求書'], [item.attachment2_key, item.attachment2_name, 2, '📎資料①'], [item.attachment3_key, item.attachment3_name, 3, '📎資料②']].filter((x: any) => x[0]).map((x: any) => `<button type="button" data-url="/inbox/${item.id}/download?n=${x[2]}" data-name="${String(x[1] || 'document.pdf').replace(/[&<>"']/g, (ch: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])}" onclick="openSavedFilePreview(this.dataset.url, this.dataset.name)" class="text-xs text-[#396999] hover:underline whitespace-nowrap">${x[3]}</button>`).join('')}
                     <a href="/applications/new?inbox_id=${item.id}" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">回覧申請する</a>
                   </div>
                 </div>

@@ -610,7 +610,9 @@ applications.get('/new', async (c) => {
             <p class="text-xs text-[#396999] mt-1">マンション・請求書を引き継ぎました。内容を確認のうえ申請してください。</p>
             <div class="flex flex-wrap gap-3 mt-2 text-xs text-[#2E5580]">
               <span>🏢 ${inboxData.mansion_name}</span>
-              ${inboxData.attachment_name ? `<span>📎 ${inboxData.attachment_name}</span>` : ''}
+              ${inboxData.attachment_name ? `<span>📎 請求書：${escAttr(inboxData.attachment_name)}</span>` : ''}
+              ${inboxData.attachment2_name ? `<span>📎 その他資料①：${escAttr(inboxData.attachment2_name)}</span>` : ''}
+              ${inboxData.attachment3_name ? `<span>📎 その他資料②：${escAttr(inboxData.attachment3_name)}</span>` : ''}
               ${inboxData.note ? `<span>💬 ${inboxData.note}</span>` : ''}
             </div>
           </div>
@@ -1042,9 +1044,21 @@ applications.get('/new', async (c) => {
             ${(() => {
               const other1Att = resubmitAttachments.find(a => a.file_type === 'other1')
               const other2Att = resubmitAttachments.find(a => a.file_type === 'other2')
+              const inboxOther = (n: number) => {
+                const nm = n === 2 ? inboxData?.attachment2_name : inboxData?.attachment3_name
+                const has = n === 2 ? inboxData?.attachment2_key : inboxData?.attachment3_key
+                if (!has) return ''
+                return `
+              <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-[#EEF4FA] border border-[#AECBE5] rounded-lg">
+                <span class="text-[#396999] text-xs">📎 業務管理課から引き継ぎ：${escAttr(nm || 'document.pdf')}</span>
+                ${previewBtn(`/inbox/${inboxData.id}/download?n=${n}`, nm || 'document.pdf')}
+                <span class="text-xs text-gray-400 ml-auto">（別ファイル選択で上書き）</span>
+              </div>`
+              }
               return `
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料①</label>
+              ${inboxOther(2)}
               ${other1Att ? `
               <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
                 <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${other1Att.file_name}</span>
@@ -1063,6 +1077,7 @@ applications.get('/new', async (c) => {
             </div>
             <div>
               <label class="block text-xs text-gray-500 mb-1">添付資料②</label>
+              ${inboxOther(3)}
               ${other2Att ? `
               <div class="mb-2 flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
                 <span class="text-orange-700 text-xs">📎 元申請から引き継ぎ：${other2Att.file_name}</span>
@@ -2142,7 +2157,7 @@ applications.post('/', async (c) => {
   //   受付由来の請求書は差し替え不可・追加不可 → 請求書(invoice1〜6)のアップロードは無視する
   const inboxIdForFiles = body.inbox_id ? parseInt(body.inbox_id) : null
   const inboxRowForFiles = inboxIdForFiles
-    ? await db.prepare('SELECT attachment_key, attachment_name FROM invoice_inbox WHERE id = ?').bind(inboxIdForFiles).first() as any
+    ? await db.prepare('SELECT attachment_key, attachment_name, attachment2_key, attachment2_name, attachment3_key, attachment3_name FROM invoice_inbox WHERE id = ?').bind(inboxIdForFiles).first() as any
     : null
   const inboxAttachmentKey = inboxRowForFiles?.attachment_key || null
   const inboxAttachmentName = inboxRowForFiles?.attachment_name || null
@@ -2165,6 +2180,14 @@ applications.post('/', async (c) => {
       // inbox引き継ぎファイルをinvoice1として使用
       fileKeys['invoice1'] = inboxAttachmentKey
       fileNames['invoice1'] = inboxAttachmentName || 'invoice.pdf'
+    } else if (fileKey === 'other1' && inboxRowForFiles?.attachment2_key && !fileKeys['other1']) {
+      // 受付の2つ目のPDF → その他資料①
+      fileKeys['other1'] = inboxRowForFiles.attachment2_key
+      fileNames['other1'] = inboxRowForFiles.attachment2_name || 'document2.pdf'
+    } else if (fileKey === 'other2' && inboxRowForFiles?.attachment3_key && !fileKeys['other2']) {
+      // 受付の3つ目のPDF → その他資料②
+      fileKeys['other2'] = inboxRowForFiles.attachment3_key
+      fileNames['other2'] = inboxRowForFiles.attachment3_name || 'document3.pdf'
     } else if (fileKey === 'invoice1' && motoukeKumiaiAtt && !fileKeys['invoice1']) {
       // 元請セット申請B: 管理組合宛請求書PDFをinvoice1として引き継ぐ
       fileKeys['invoice1'] = motoukeKumiaiAtt.file_key

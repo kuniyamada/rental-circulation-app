@@ -18,7 +18,7 @@ export async function deleteTestApplication(env: any, appId: number): Promise<De
 
   const all = async (sql: string) => ((await db.prepare(sql).bind(appId).all()).results || []) as any[]
   const atts = await all('SELECT id, file_key FROM attachments WHERE application_id = ?')
-  const inboxes = await all('SELECT id, attachment_key FROM invoice_inbox WHERE application_id = ?')
+  const inboxes = await all('SELECT id, attachment_key, attachment2_key, attachment3_key FROM invoice_inbox WHERE application_id = ?')
   const drives = await all("SELECT drive_file_id FROM drive_uploads WHERE application_id = ? AND drive_file_id IS NOT NULL")
   const ledgers = await all("SELECT id, drive_file_id FROM estimate_ledger WHERE application_id = ?")
 
@@ -61,11 +61,11 @@ export async function deleteTestApplication(env: any, appId: number): Promise<De
   void ledgerIds
 
   // 3) R2 のファイル（ほかの申請・受付・管理簿から参照されていないものだけ）
-  const keys = Array.from(new Set([...atts.map(a => a.file_key), ...inboxes.map(i => i.attachment_key)].filter(Boolean)))
+  const keys = Array.from(new Set([...atts.map(a => a.file_key), ...inboxes.flatMap(i => [i.attachment_key, i.attachment2_key, i.attachment3_key])].filter(Boolean)))
   for (const key of keys) {
     const used = await db.prepare(`
       SELECT 1 FROM attachments WHERE file_key = ?1
-      UNION ALL SELECT 1 FROM invoice_inbox WHERE attachment_key = ?1
+      UNION ALL SELECT 1 FROM invoice_inbox WHERE attachment_key = ?1 OR attachment2_key = ?1 OR attachment3_key = ?1
       UNION ALL SELECT 1 FROM estimate_ledger WHERE r2_key = ?1
       LIMIT 1`).bind(key).first()
     if (!used) { try { await env.R2.delete(key) } catch (e) { console.error('[app-delete] R2 delete failed', key, e) } }

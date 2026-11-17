@@ -8,6 +8,7 @@ import { budgetConfigured } from '../lib/budget'
 import { maybeSyncAssignees } from '../lib/assignee-sync'
 import { saveLedgerToDrive, estimateFolderConfigured } from '../lib/estimate-ledger'
 import { DriveClient } from '../lib/drive-client'
+import { INBOX_MAX_PDFS, inboxFiles, inboxFileLabel, fileOf, validPdf, putInboxPdf, deleteInboxPdfIfUnused } from '../lib/inbox-files'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
 const inbox = new Hono<{ Bindings: Bindings }>()
@@ -96,6 +97,39 @@ async function notifyInbox(
   }
 }
 
+
+// PDF選択欄（最大3つ：1つ目=請求書 / 2つ目以降=その他資料）。登録・編集画面で共用
+function pdfPickerHtml(existing: { n: number; name: string; url: string }[], required: boolean): string {
+  return `
+          <div>
+            <label class="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-1">
+              <span>請求書PDF ${required ? '<span class="text-red-500">*</span>' : ''}</span>
+              <span class="text-xs font-normal text-gray-400">最大3つ（<span id="pdfCount">0 / 3</span>）</span>
+            </label>
+            <p class="text-xs text-gray-500 mb-2">1つ目は「請求書」、2つ目・3つ目は「その他資料」として担当フロントの回覧申請に引き継がれます。</p>
+            <div id="pdfDropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-3 transition space-y-2">
+              <div id="pdfList" class="space-y-2"></div>
+              <button type="button" id="pdfAddBtn" onclick="InboxPdfPicker.openPicker()"
+                class="w-full flex items-center justify-center gap-2 px-3 py-2.5 border border-[#AECBE5] bg-[#EEF4FA] text-[#396999] rounded-lg text-sm font-semibold hover:bg-[#D5E5F2] transition">
+                <span data-label>＋ 請求書PDFを追加</span>
+              </button>
+              <p class="text-[11px] text-gray-400 text-center">PDF形式（1つ最大10MB）・ここにドラッグ＆ドロップもできます</p>
+              <input type="file" id="pdfPicker" accept=".pdf,application/pdf" multiple class="hidden">
+              <input type="file" id="pdfFiles" name="pdf_files" multiple class="hidden">
+              <input type="hidden" id="pdfRemove" name="remove_files" value="">
+            </div>
+            <p id="pdfRequiredMsg" class="hidden text-xs text-red-600 mt-1 font-semibold">⚠️ 請求書PDFを1つ以上添付してください（必須）</p>
+          </div>
+          <script src="/static/inbox-pdfs.js"></script>
+          <script>
+            InboxPdfPicker.init({
+              existing: ${JSON.stringify(existing).replace(/</g, '\\u003c')},
+              inputId: 'pdfFiles', pickerId: 'pdfPicker', removeId: 'pdfRemove', listId: 'pdfList',
+              addBtnId: 'pdfAddBtn', zoneId: 'pdfDropZone', countId: 'pdfCount', requiredMsgId: 'pdfRequiredMsg'
+            });
+          </script>`
+}
+
 // レスポンス返却後も通知処理を続ける（画面遷移を待たせない）
 function runInBackground(c: any, task: () => Promise<void>): void {
   const p = (async () => { try { await task() } catch (e) { console.error('[BG] 請求書受付通知エラー:', e) } })()
@@ -131,6 +165,7 @@ inbox.get('/', async (c) => {
     SELECT
       ii.*,
       m.name as mansion_name,
+      m.mansion_number,
       f.name as front_name,
       f.email as front_email,
       r.name as registered_by_name
@@ -150,9 +185,10 @@ inbox.get('/', async (c) => {
   for (const l of (logsRes.results as any[])) (logsByInbox[l.inbox_id] ||= []).push(l)
 
   const esc = escAttr
-  const notifyCell = (inboxId: any): string => {
+  const notifyCell = (inboxId: any, remindCount: number): string => {
     const logs = logsByInbox[inboxId] || []
-    if (logs.length === 0) return '<span class="text-gray-300 text-xs">記録なし</span>'
+    const remind = remindCount > 0 ? `<div class="text-orange-600 whitespace-nowrap">🔁 再通知 ${remindCount}回</div>` : ''
+    if (logs.length === 0) return `<div class="text-xs space-y-1">${remind}<span class="text-gray-300">記録なし</span></div>`
     // チャネルごとの最新結果
     const latest: any[] = []
     const seen = new Set<string>()
@@ -172,7 +208,7 @@ inbox.get('/', async (c) => {
         ${ok ? '' : `<div class="text-red-500 break-all">理由: ${esc(l.error || '-')}</div>`}
       </li>`
     }).join('')
-    return `<div class="text-xs space-y-1">${latest.map(line).join('')}
+    return `<div class="text-xs space-y-1">${remind}${latest.map(line).join('')}
       <details class="mt-1">
         <summary class="cursor-pointer text-[#396999] hover:underline select-none">履歴を見る（${logs.length}件）</summary>
         <ul class="mt-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 min-w-[260px] max-w-[340px]">${history}</ul>
@@ -198,6 +234,10 @@ inbox.get('/', async (c) => {
         </a>
       </div>
 
+      ${c.req.query('edited') ? `
+      <div class="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-2">✅ 受付の内容を保存しました（お知らせは送っていません。必要なら「再通知」を押してください）</div>` : ''}
+      ${c.req.query('edit_error') ? `
+      <div class="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2">⚠ ${c.req.query('edit_error') === 'applied' ? 'この受付はすでに申請済のため編集できません' : '対象の受付が見つかりませんでした'}</div>` : ''}
       ${c.req.query('deleted') ? `
       <div class="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-2">✅ 受付を削除しました</div>` : ''}
       ${c.req.query('delete_error') ? `
@@ -225,57 +265,59 @@ inbox.get('/', async (c) => {
             <table class="w-full text-sm">
               <thead class="bg-gray-50">
                 <tr>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">登録日</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">マンション名</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">担当フロント</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">添付ファイル</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">リマインド</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">通知</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
-                  <th class="px-4 py-3"></th>
+                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">登録日時</th>
+                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">マンション</th>
+                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">担当フロント</th>
+                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">添付PDF</th>
+                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">通知</th>
+                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">状態</th>
+                  <th class="px-3 py-3"></th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-gray-50">
-                ${(items.results as any[]).map(item => `
-                  <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-3 text-xs text-gray-500">${item.created_at ? item.created_at.slice(0,10) : '-'}</td>
-                    <td class="px-4 py-3 font-medium text-gray-800">${item.mansion_name || '-'}</td>
-                    <td class="px-4 py-3 text-gray-700">
-                      <div>${item.front_name || '-'}</div>
-                      <div class="text-xs text-gray-400">${item.front_email || ''}</div>
+              <tbody class="divide-y divide-gray-100">
+                ${(items.results as any[]).map(item => {
+                  const files = inboxFiles(item)
+                  return `
+                  <tr class="hover:bg-gray-50 align-top">
+                    <td class="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">${fmtJst(item.created_at, true)}<div class="text-[11px] text-gray-400">登録: ${esc(item.registered_by_name || '-')}</div></td>
+                    <td class="px-3 py-3 min-w-[160px]">
+                      <div class="font-semibold text-gray-800">${item.mansion_number != null ? `<span class="text-[#2E5580] mr-1">${esc(item.mansion_number)}</span>` : ''}${esc(item.mansion_name || '-')}</div>
+                      ${item.note ? `<div class="text-[11px] text-gray-500 mt-0.5 break-all">💬 ${esc(item.note)}</div>` : ''}
                     </td>
-                    <td class="px-4 py-3">
-                      ${item.attachment_key
-                        ? previewBtn(`/inbox/${item.id}/download`, item.attachment_name || 'invoice.pdf', `📎 ${escAttr(item.attachment_name || 'ファイル')}`, 'text-[#396999] hover:underline text-xs flex items-center gap-1 text-left')
+                    <td class="px-3 py-3 whitespace-nowrap">
+                      <div class="text-gray-800">${esc(item.front_name || '-')}</div>
+                      <div class="text-[11px] text-gray-400">${esc(item.front_email || '')}</div>
+                    </td>
+                    <td class="px-3 py-3">
+                      ${files.length ? `<div class="space-y-1">${files.map(f => `<div class="flex items-center gap-1.5 whitespace-nowrap">
+                          <span class="text-[10px] px-1.5 py-0.5 rounded ${f.n === 1 ? 'bg-[#396999] text-white' : 'bg-gray-200 text-gray-700'}">${inboxFileLabel(f.n)}</span>
+                          ${previewBtn(`/inbox/${item.id}/download?n=${f.n}`, f.name, `📎 ${esc(f.name.length > 22 ? f.name.slice(0, 21) + '…' : f.name)}`, 'text-[#396999] hover:underline text-xs text-left')}
+                        </div>`).join('')}</div>`
                         : '<span class="text-gray-300 text-xs">なし</span>'}
                     </td>
-                    <td class="px-4 py-3 text-xs text-gray-500">
-                      ${item.remind_count > 0
-                        ? `<span class="text-orange-600">${item.remind_count}回送信済</span>`
-                        : '<span class="text-gray-400">未送信</span>'}
-                    </td>
-                    <td class="px-4 py-3 align-top">${notifyCell(item.id)}</td>
-                    <td class="px-4 py-3">
-                      <span class="text-xs px-2 py-1 rounded-full font-medium ${statusColor[item.status] || ''}">
+                    <td class="px-3 py-3">${notifyCell(item.id, item.remind_count || 0)}</td>
+                    <td class="px-3 py-3 whitespace-nowrap">
+                      <span class="text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${statusColor[item.status] || ''}">
                         ${statusLabel[item.status] || item.status}
                       </span>
                     </td>
-                    <td class="px-4 py-3">
-                      <div class="flex items-center gap-2">
+                    <td class="px-3 py-3">
+                      <div class="flex flex-col gap-1.5 items-stretch">
                         ${item.status === 'pending' ? `
-                          <form method="POST" action="/inbox/${item.id}/remind" onsubmit="return confirm('${item.front_name}さんにリマインドメールを送信しますか？')">
-                            <button type="submit" class="text-xs px-2 py-1 bg-orange-50 text-orange-600 hover:bg-orange-100 rounded transition">再通知</button>
+                          <a href="/inbox/${item.id}/edit" class="text-center text-xs px-3 py-1 bg-[#EEF4FA] text-[#396999] hover:bg-[#D5E5F2] rounded whitespace-nowrap transition">✏️ 編集</a>
+                          <form method="POST" action="/inbox/${item.id}/remind" onsubmit="return confirm('${esc(item.front_name || '')}さんに再通知を送信しますか？')">
+                            <button type="submit" class="w-full text-xs px-3 py-1 bg-orange-50 text-orange-600 hover:bg-orange-100 rounded whitespace-nowrap transition">🔁 再通知</button>
                           </form>
                         ` : ''}
                         ${(item.status === 'pending' || item.status === 'cancelled') ? `
                           <form method="POST" action="/inbox/${item.id}/delete" onsubmit="return confirm('この受付を削除しますか？\\n添付PDFも削除され、元に戻せません。')">
-                            <button type="submit" class="text-xs px-2 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded transition">削除</button>
+                            <button type="submit" class="w-full text-xs px-3 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded whitespace-nowrap transition">🗑 削除</button>
                           </form>
                         ` : ''}
                       </div>
                     </td>
-                  </tr>
-                `).join('')}
+                  </tr>`
+                }).join('')}
               </tbody>
             </table>
           </div>
@@ -289,11 +331,21 @@ inbox.get('/', async (c) => {
 // ============================================================
 // 請求書受付 登録フォーム
 // ============================================================
-inbox.get('/new', async (c) => {
+inbox.get('/new', (c) => renderInboxForm(c, null))
+inbox.get('/:id/edit', (c) => renderInboxForm(c, parseInt(c.req.param('id')) || -1))
+
+// 登録フォーム（editId があれば編集：未申請の受付のみ。編集してもお知らせは送らない）
+async function renderInboxForm(c: any, editId: number | null) {
   const user = (c as any).get('user') as any
   if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
 
   const db = c.env.DB
+  const editItem = editId
+    ? await db.prepare(`SELECT ii.*, m.mansion_number FROM invoice_inbox ii LEFT JOIN mansions m ON m.id = ii.mansion_id WHERE ii.id = ?`).bind(editId).first() as any
+    : null
+  if (editId && !editItem) return c.redirect('/inbox?edit_error=notfound')
+  if (editItem && editItem.status !== 'pending') return c.redirect('/inbox?edit_error=applied')
+  const isEdit = !!editItem
   await maybeSyncAssignees(c)
   const mansions = await db.prepare("SELECT * FROM mansions WHERE is_active = 1 AND is_visible = 1 ORDER BY CAST(mansion_number AS INTEGER)").all()
   const frontsRes = await db.prepare("SELECT * FROM users WHERE role IN ('front', 'front_supervisor') AND is_active = 1 ORDER BY name").all()
@@ -309,14 +361,15 @@ inbox.get('/new', async (c) => {
   const budgetEnabled = budgetConfigured(c.env)
 
   // 管理簿「この見積から請求書を登録」から来た場合: 物件を入力済みにし、登録時に管理簿を「登録・送信済」にする
-  const estimateId = parseInt(c.req.query('estimate_id') || '') || null
+  const estimateId = isEdit ? null : (parseInt(c.req.query('estimate_id') || '') || null)
   const estRow = estimateId
     ? await db.prepare(`SELECT e.*, a.application_number FROM estimate_ledger e LEFT JOIN applications a ON a.id = e.application_id WHERE e.id = ?`).bind(estimateId).first().catch(() => null) as any
     : null
 
   const errKey = c.req.query('error') || ''
   const errMsg = errKey === 'pdf_required' ? '請求書PDFを添付してください（PDFがないと登録できません）'
-    : errKey === 'pdf_invalid' ? 'PDFファイルを選択してください（最大10MB）'
+    : errKey === 'pdf_invalid' ? 'PDFファイルを選択してください（1つ最大10MB）'
+    : errKey === 'pdf_too_many' ? 'PDFは最大3つまでです'
     : errKey === 'required' ? 'マンションと担当フロントを選択してください'
     : ''
 
@@ -334,10 +387,11 @@ inbox.get('/new', async (c) => {
       </div>` : ''}
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 class="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
-          📥 請求書を登録・フロントへ送信
+          ${isEdit ? '✏️ 受付を編集' : '📥 請求書を登録・フロントへ送信'}
         </h2>
+        ${isEdit ? `<p class="-mt-4 mb-5 text-xs text-gray-500">変更を保存しても、担当フロントへのお知らせは送りません。必要なときは一覧の「再通知」を押してください。</p>` : ''}
 
-        <form method="POST" action="/inbox" enctype="multipart/form-data" class="space-y-5" id="inboxForm"
+        <form method="POST" action="${isEdit ? `/inbox/${editItem.id}/edit` : '/inbox'}" enctype="multipart/form-data" class="space-y-5" id="inboxForm"
               onkeydown="return preventEnterSubmit(event)" onsubmit="return confirmInboxSubmit()">
           ${estRow ? `<input type="hidden" name="estimate_id" value="${estRow.id}">` : ''}
 
@@ -383,27 +437,14 @@ inbox.get('/new', async (c) => {
             ${isTestMode ? `<p class="text-xs font-bold text-amber-600 mt-1">🧪 テストモード：★ 本橋・山崎 も選択できます</p>` : ''}
           </div>
 
-          <!-- 請求書PDF添付 -->
-          <div>
-            <label class="block text-sm font-semibold text-gray-700 mb-1">
-              請求書PDF <span class="text-red-500">*</span>
-            </label>
-            <div id="pdfDropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-[#5B8AB5] transition cursor-pointer" onclick="document.getElementById('pdfFile').click()">
-              <div class="text-3xl mb-1">📄</div>
-              <p class="text-sm text-gray-500">クリックしてPDFを選択、またはここにドラッグ＆ドロップ</p>
-              <p class="text-xs text-gray-400 mt-1">PDF形式（最大10MB）</p>
-              <input type="file" id="pdfFile" name="pdf_file" accept=".pdf,application/pdf"
-                class="hidden" onchange="showFileName(this)">
-              <p id="fileName" class="text-xs text-[#396999] mt-2 font-medium"></p>
-            </div>
-            <p id="pdfRequiredMsg" class="hidden text-xs text-red-600 mt-1 font-semibold">⚠️ 請求書PDFを添付してください（必須）</p>
-          </div>
+          <!-- 請求書PDF添付（最大3つ） -->
+          ${pdfPickerHtml(isEdit ? inboxFiles(editItem).map(f => ({ n: f.n, name: f.name, url: `/inbox/${editItem.id}/download?n=${f.n}` })) : [], true)}
 
           <!-- 備考 -->
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1">備考</label>
             <textarea name="note" rows="3" placeholder="業者名、請求内容など補足があれば入力"
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#396999] resize-none"></textarea>
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#396999] resize-none">${isEdit ? escAttr(editItem.note || '') : ''}</textarea>
           </div>
 
           <!-- 送信ボタン -->
@@ -413,7 +454,7 @@ inbox.get('/new', async (c) => {
             </a>
             <button type="submit" id="inboxSubmitBtn"
               class="flex-1 bg-[#396999] hover:bg-[#2E5580] text-white font-semibold px-4 py-2 rounded-lg text-sm transition flex items-center justify-center gap-2">
-              📤 登録してフロントに送信
+              ${isEdit ? '💾 変更を保存' : '📤 登録してフロントに送信'}
             </button>
           </div>
         </form>
@@ -561,13 +602,12 @@ inbox.get('/new', async (c) => {
       }
 
       // 送信前チェック: マンション・担当フロント・PDF（必須）→ 確認ダイアログ
+      const IS_EDIT = ${isEdit ? 'true' : 'false'};
       let inboxSubmitting = false;
       function confirmInboxSubmit() {
         if (inboxSubmitting) return false;
         const mansionId = document.getElementById('mansionIdInput').value;
         const fs = document.getElementById('frontSelect');
-        const pdf = document.getElementById('pdfFile');
-        const pdfMsg = document.getElementById('pdfRequiredMsg');
         if (!mansionId) {
           alert('マンション番号を入力してください');
           document.getElementById('mansionNumberInput').focus();
@@ -578,92 +618,44 @@ inbox.get('/new', async (c) => {
           if (fs) fs.focus();
           return false;
         }
-        if (!pdf || !pdf.files || pdf.files.length === 0) {
-          if (pdfMsg) pdfMsg.classList.remove('hidden');
-          const zone = document.getElementById('pdfDropZone');
-          if (zone) { zone.classList.add('border-red-400', 'bg-red-50'); zone.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        if (InboxPdfPicker.count() === 0) {
+          InboxPdfPicker.showRequired();
           alert('請求書PDFを添付してください（必須です）');
           return false;
         }
+        InboxPdfPicker.sync();
         const frontName = fs.options[fs.selectedIndex].text.replace(/^★\\s*/, '').replace(/（.*$/, '').trim();
         const mansionName = (document.getElementById('mansionResult').textContent || '').replace(/\\s+/g, ' ').trim();
-        const ok = confirm(frontName + ' さんに送信します。よろしいですか？\\n\\n'
+        const ok = confirm((IS_EDIT ? '変更を保存します。よろしいですか？（お知らせは送りません）\\n\\n担当フロント：' + frontName + '\\n' : frontName + ' さんに送信します。よろしいですか？\\n\\n')
           + 'マンション：' + mansionName + '\\n'
-          + '請求書PDF：' + pdf.files[0].name);
+          + InboxPdfPicker.names().join('\\n'));
         if (!ok) return false;
         inboxSubmitting = true;
         const btn = document.getElementById('inboxSubmitBtn');
-        if (btn) { btn.disabled = true; btn.classList.add('opacity-60'); btn.textContent = '送信中…'; }
+        if (btn) { btn.disabled = true; btn.classList.add('opacity-60'); btn.textContent = IS_EDIT ? '保存中…' : '送信中…'; }
         return true;
       }
 
-      // PDFかどうか・サイズ（最大10MB）をチェック
-      function isValidPdf(file) {
-        if (!file) return false;
-        const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-        if (!isPdf) { alert('PDFファイルを選択してください'); return false; }
-        if (file.size > 10 * 1024 * 1024) { alert('ファイルサイズが10MBを超えています'); return false; }
-        return true;
-      }
-
-      function showFileName(input) {
-        const p = document.getElementById('fileName');
-        if (input.files && input.files[0]) {
-          if (!isValidPdf(input.files[0])) {
-            input.value = '';
-            p.textContent = '';
-            return;
-          }
-          p.textContent = '✅ ' + input.files[0].name;
-          const pdfMsg = document.getElementById('pdfRequiredMsg');
-          if (pdfMsg) pdfMsg.classList.add('hidden');
-          const zone = document.getElementById('pdfDropZone');
-          if (zone) zone.classList.remove('border-red-400', 'bg-red-50');
-        } else {
-          p.textContent = '';
-        }
-      }
-
-      // ドラッグ＆ドロップ対応
-      (function() {
-        const zone = document.getElementById('pdfDropZone');
-        const input = document.getElementById('pdfFile');
-        if (!zone || !input) return;
-        const on = () => zone.classList.add('border-[#396999]', 'bg-[#EEF4FA]');
-        const off = () => zone.classList.remove('border-[#396999]', 'bg-[#EEF4FA]');
-        ['dragenter', 'dragover'].forEach(function(ev) {
-          zone.addEventListener(ev, function(e) { e.preventDefault(); e.stopPropagation(); on(); });
-        });
-        zone.addEventListener('dragleave', function(e) {
-          e.preventDefault();
-          if (!zone.contains(e.relatedTarget)) off();
-        });
-        zone.addEventListener('drop', function(e) {
-          e.preventDefault(); e.stopPropagation(); off();
-          const files = e.dataTransfer && e.dataTransfer.files;
-          if (!files || files.length === 0) return;
-          const file = files[0];
-          if (!isValidPdf(file)) return;
-          const dt = new DataTransfer();
-          dt.items.add(file);
-          input.files = dt.files;
-          showFileName(input);
-        });
-        // 枠の外にドロップしたときにブラウザがPDFを開いて画面遷移しないようにする
-        ['dragover', 'drop'].forEach(function(ev) {
-          window.addEventListener(ev, function(e) { e.preventDefault(); });
-        });
-      })();
       ${estRow && estRow.mansion_number != null ? `
       // 管理簿から来た場合: 物件番号を入力済みにする
       (function() {
         const el = document.getElementById('mansionNumberInput');
         if (el) { el.value = '${Number(estRow.mansion_number)}'; searchMansion(el.value); }
       })();` : ''}
+      ${isEdit ? `
+      // 編集: 今の内容を入れておく（マンション番号 → 担当フロントは今の担当に戻す）
+      (function() {
+        const el = document.getElementById('mansionNumberInput');
+        ${editItem.mansion_number != null ? `if (el) { el.value = '${Number(editItem.mansion_number)}'; searchMansion(el.value); }` : ''}
+        const idInput = document.getElementById('mansionIdInput');
+        if (idInput && !idInput.value) idInput.value = '${Number(editItem.mansion_id)}';
+        const fs = document.getElementById('frontSelect');
+        if (fs) fs.value = '${Number(editItem.front_user_id)}';
+      })();` : ''}
     </script>
   `
-  return c.html(layout('請求書登録', content, user))
-})
+  return c.html(layout(isEdit ? '請求書受付の編集' : '請求書登録', content, user))
+}
 
 // ============================================================
 // 請求書受付 登録処理
@@ -674,53 +666,53 @@ inbox.post('/', async (c) => {
 
   const db = c.env.DB
   const r2 = c.env.R2
-  const body = await c.req.parseBody() as any
+  const body = await c.req.parseBody({ all: true }) as any
+  const one = (v: any) => Array.isArray(v) ? v[0] : v
 
-  const mansionId = body.mansion_id
-  const frontUserId = body.front_user_id
-  const note = body.note || null
-  const pdfFile = body.pdf_file as File | null
+  const mansionId = one(body.mansion_id)
+  const frontUserId = one(body.front_user_id)
+  const note = one(body.note) || null
+  // PDF（最大3つ）。旧画面の pdf_file も受け付ける
+  const rawFiles = ([] as any[]).concat(body.pdf_files ?? [], body.pdf_file ?? [])
+  const pdfs = rawFiles.map(fileOf).filter(Boolean) as File[]
 
-  const backQs = body.estimate_id ? `&estimate_id=${encodeURIComponent(String(body.estimate_id))}` : ''
+  const estIdRaw = one(body.estimate_id)
+  const backQs = estIdRaw ? `&estimate_id=${encodeURIComponent(String(estIdRaw))}` : ''
   if (!mansionId || !frontUserId) {
     return c.redirect('/inbox/new?error=required' + backQs)
   }
   // 請求書PDFは必須（PDFなしの受付が担当フロントに届かないように）
-  if (!pdfFile || typeof pdfFile === 'string' || !(pdfFile as File).size) {
+  if (pdfs.length === 0) {
     return c.redirect('/inbox/new?error=pdf_required' + backQs)
   }
-  const pf = pdfFile as File
-  const isPdf = pf.type === 'application/pdf' || /\.pdf$/i.test(pf.name || '')
-  if (!isPdf || pf.size > 10 * 1024 * 1024) {
+  if (pdfs.length > INBOX_MAX_PDFS) {
+    return c.redirect('/inbox/new?error=pdf_too_many' + backQs)
+  }
+  if (!pdfs.every(validPdf)) {
     return c.redirect('/inbox/new?error=pdf_invalid' + backQs)
   }
 
-  let attachmentKey: string | null = null
-  let attachmentName: string | null = null
-
-  // PDFをR2にアップロード
-  if (pdfFile && pdfFile.size > 0) {
-    attachmentName = pdfFile.name
-    attachmentKey = `inbox/${Date.now()}_${pdfFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-    const arrayBuffer = await pdfFile.arrayBuffer()
-    await r2.put(attachmentKey, arrayBuffer, {
-      httpMetadata: { contentType: pdfFile.type || 'application/pdf' }
-    })
-  }
+  // PDFをR2にアップロード（1つ目=請求書、2つ目・3つ目=その他資料）
+  const saved: { key: string; name: string }[] = []
+  for (let i = 0; i < pdfs.length; i++) saved.push(await putInboxPdf(r2, pdfs[i], i + 1))
+  const attachmentKey = saved[0]?.key || null
+  const attachmentName = saved[0]?.name || null
 
   const now = new Date().toISOString()
 
   // DBに登録
   const result = await db.prepare(`
     INSERT INTO invoice_inbox
-      (mansion_id, front_user_id, registered_by, attachment_key, attachment_name, note, status, notified_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-  `).bind(mansionId, frontUserId, user.uid, attachmentKey, attachmentName, note, now, now, now).run()
+      (mansion_id, front_user_id, registered_by, attachment_key, attachment_name, attachment2_key, attachment2_name, attachment3_key, attachment3_name, note, status, notified_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+  `).bind(mansionId, frontUserId, user.uid, attachmentKey, attachmentName,
+    saved[1]?.key || null, saved[1]?.name || null, saved[2]?.key || null, saved[2]?.name || null,
+    note, now, now, now).run()
 
   const inboxId = result.meta.last_row_id
 
   // 管理簿の見積書から登録した場合: 管理簿を「登録・送信済」にして紐付け
-  const estimateId = parseInt(String(body.estimate_id || '')) || null
+  const estimateId = parseInt(String(estIdRaw || '')) || null
   if (estimateId) {
     await db.prepare(`
       UPDATE estimate_ledger SET status = 'sent', inbox_id = ?, sent_at = datetime('now'),
@@ -746,6 +738,58 @@ inbox.post('/', async (c) => {
 })
 
 // ============================================================
+// 請求書受付 編集（未申請のみ。お知らせは送らない）
+//   PDF: remove_files（外した番号）を除き、新しいPDFを後ろに足して 1〜3 に詰め直す（1つ目=請求書）
+// ============================================================
+inbox.post('/:id/edit', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
+  const db = c.env.DB
+  const id = parseInt(c.req.param('id')) || 0
+  const item = await db.prepare('SELECT * FROM invoice_inbox WHERE id = ?').bind(id).first() as any
+  if (!item) return c.redirect('/inbox?edit_error=notfound')
+  if (item.status !== 'pending') return c.redirect('/inbox?edit_error=applied')
+
+  const body = await c.req.parseBody({ all: true }) as any
+  const one = (v: any) => Array.isArray(v) ? v[0] : v
+  const mansionId = parseInt(String(one(body.mansion_id) || '')) || null
+  const frontUserId = parseInt(String(one(body.front_user_id) || '')) || null
+  const note = String(one(body.note) || '').trim() || null
+  const back = `/inbox/${id}/edit`
+  if (!mansionId || !frontUserId) return c.redirect(back + '?error=required')
+
+  const removed = new Set(String(one(body.remove_files) || '').split(',').map(x => parseInt(x)).filter(n => n >= 1 && n <= 3))
+  const kept = inboxFiles(item).filter(f => !removed.has(f.n))
+  const newPdfs = ([] as any[]).concat(body.pdf_files ?? []).map(fileOf).filter(Boolean) as File[]
+  if (kept.length + newPdfs.length === 0) return c.redirect(back + '?error=pdf_required')
+  if (kept.length + newPdfs.length > INBOX_MAX_PDFS) return c.redirect(back + '?error=pdf_too_many')
+  if (!newPdfs.every(validPdf)) return c.redirect(back + '?error=pdf_invalid')
+
+  const finalFiles: { key: string; name: string }[] = kept.map(f => ({ key: f.key, name: f.name }))
+  for (let i = 0; i < newPdfs.length; i++) finalFiles.push(await putInboxPdf(c.env.R2, newPdfs[i], finalFiles.length + 1))
+
+  const res = await db.prepare(`
+    UPDATE invoice_inbox SET mansion_id = ?, front_user_id = ?, note = ?,
+      attachment_key = ?, attachment_name = ?, attachment2_key = ?, attachment2_name = ?, attachment3_key = ?, attachment3_name = ?,
+      updated_at = ?
+    WHERE id = ? AND status = 'pending'
+  `).bind(mansionId, frontUserId, note,
+    finalFiles[0]?.key || null, finalFiles[0]?.name || null,
+    finalFiles[1]?.key || null, finalFiles[1]?.name || null,
+    finalFiles[2]?.key || null, finalFiles[2]?.name || null,
+    new Date().toISOString(), id).run()
+  if (!res.meta.changes) {
+    // 保存の直前に申請された：新しく上げたPDFは片付ける
+    for (const f of finalFiles.slice(kept.length)) await deleteInboxPdfIfUnused(db, c.env.R2, f.key)
+    return c.redirect('/inbox?edit_error=applied')
+  }
+  // 外したPDFを片付ける（回覧申請などで使われていないものだけ）
+  for (const f of inboxFiles(item).filter(f => removed.has(f.n))) await deleteInboxPdfIfUnused(db, c.env.R2, f.key)
+
+  return c.redirect('/inbox?edited=1')
+})
+
+// ============================================================
 // 添付ファイルダウンロード
 // ============================================================
 inbox.get('/:id/download', async (c) => {
@@ -762,12 +806,15 @@ inbox.get('/:id/download', async (c) => {
     return c.redirect('/')
   }
 
-  if (!item.attachment_key) return c.text('添付ファイルがありません', 404)
+  // ?n=2 / ?n=3 で2つ目・3つ目のPDF（既定は1つ目＝請求書）
+  const n = Math.min(3, Math.max(1, parseInt(c.req.query('n') || '1') || 1))
+  const f = inboxFiles(item).find(x => x.n === n)
+  if (!f) return c.text('添付ファイルがありません', 404)
 
-  const obj = await r2.get(item.attachment_key)
+  const obj = await r2.get(f.key)
   if (!obj) return c.notFound()
 
-  const fileName = encodeURIComponent(item.attachment_name || 'invoice.pdf')
+  const fileName = encodeURIComponent(f.name)
   return new Response(obj.body, {
     headers: {
       'Content-Type': obj.httpMetadata?.contentType || 'application/pdf',
@@ -845,7 +892,7 @@ inbox.post('/:id/delete', async (c) => {
   const id = c.req.param('id')
 
   const item = await db.prepare(
-    "SELECT id, status, attachment_key FROM invoice_inbox WHERE id = ?"
+    "SELECT id, status, attachment_key, attachment2_key, attachment3_key FROM invoice_inbox WHERE id = ?"
   ).bind(id).first() as any
   if (!item) return c.redirect('/inbox?delete_error=notfound')
   if (item.status !== 'pending' && item.status !== 'cancelled') {
@@ -863,14 +910,9 @@ inbox.post('/:id/delete', async (c) => {
     "UPDATE estimate_ledger SET status = 'invoiced', inbox_id = NULL, sent_at = NULL, updated_at = datetime('now') WHERE inbox_id = ?"
   ).bind(id).run().catch(() => {})
 
-  // 添付PDF（R2）を削除。念のため回覧申請の添付として使われていないか確認してから消す
-  if (item.attachment_key) {
-    const used = await db.prepare(
-      'SELECT id FROM attachments WHERE file_key = ? LIMIT 1'
-    ).bind(item.attachment_key).first()
-    if (!used) {
-      try { await c.env.R2.delete(item.attachment_key) } catch (e) { console.error('R2 delete failed', e) }
-    }
+  // 添付PDF（R2）を削除。回覧申請の添付として使われていないものだけ消す
+  for (const k of [item.attachment_key, item.attachment2_key, item.attachment3_key]) {
+    await deleteInboxPdfIfUnused(db, c.env.R2, k)
   }
 
   return c.redirect('/inbox?deleted=1')
