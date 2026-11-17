@@ -24,22 +24,10 @@ function previewBtn(url: string, name: string, label = '👁 確認', cls = 'inl
 
 // ============================================================
 // 申請一覧の「進捗」表示
-//   ✅確認済 → ⏳今の確認待ち（太字・待ち日数。5日目以上は赤） → ○まだ先
+//   ✅確認済 → ⏳今の確認待ち（太字） → ○まだ先
 //   差し戻し・否決・保留は、どの段階のだれで止まったかを表示
 // ============================================================
 const STEP_SHORT: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終' }
-function utcMs(v: any): number {
-  if (!v) return NaN
-  const t = String(v)
-  return Date.parse(t.includes('T') ? t : t.replace(' ', 'T') + 'Z')
-}
-function waitDays(since: any): { n: number; html: string } {
-  const ms = utcMs(since)
-  if (isNaN(ms)) return { n: 0, html: '' }
-  const n = Math.max(0, Math.floor((Date.now() - ms) / 86400000)) + 1
-  const cls = n >= 5 ? 'bg-red-100 text-red-700 font-bold' : 'bg-gray-100 text-gray-600'
-  return { n, html: `<span class="ml-1 text-[11px] px-1.5 py-0.5 rounded ${cls} whitespace-nowrap">${n}日目</span>` }
-}
 function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
   const firstName = (n: any) => String(n || '').split(/[\s\u3000]/)[0] || String(n || '')
   const arrow = '<span class="text-gray-300 mx-0.5">→</span>'
@@ -47,11 +35,6 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
   if (app.status === 'draft') return '<span class="text-xs text-gray-500">📝 下書き</span>'
   if (!sorted.length) return statusBadge(app.status)
 
-  // 今の段階の待ち始め = 直前に承認された時刻（なければ申請日時）
-  const sinceOf = (stepNo: number) => {
-    const prev = sorted.filter(s => s.step_number < stepNo && s.status === 'approved' && s.acted_at).map(s => utcMs(s.acted_at))
-    return prev.length ? new Date(Math.max(...prev)).toISOString() : app.created_at
-  }
   const parts: string[] = []
   let tail = ''
   for (const st of sorted) {
@@ -60,23 +43,20 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
     if (st.status === 'approved') {
       parts.push(`<span class="text-green-700 whitespace-nowrap" title="${who} ${escAttr(String(st.acted_at || '').slice(0, 16))} 確認済">✅${label}</span>`)
     } else if (st.status === 'pending' && app.status === 'circulating' && st.step_number === app.current_step) {
-      const w = waitDays(sinceOf(st.step_number))
-      parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded bg-[#EEF4FA] border border-[#AECBE5] text-[#234166] font-bold">⏳${label}（${escAttr(firstName(st.reviewer_name))}）${w.html}</span>`)
+      parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded bg-[#EEF4FA] border border-[#AECBE5] text-[#234166] font-bold">⏳${label}（${escAttr(firstName(st.reviewer_name))}）</span>`)
     } else if (st.status === 'returned') {
-      const w = waitDays(st.acted_at)
       parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-orange-50 border border-orange-200 text-orange-700 font-bold">🔙${label}（${escAttr(firstName(st.reviewer_name))}）で差し戻し</span>`)
       tail = hasSuccessor
         ? `<div class="mt-1 text-[11px] text-gray-500">→ 再申請済</div>`
-        : `<div class="mt-1 text-[11px] text-orange-700 font-semibold">→ 申請者（${escAttr(firstName(app.applicant_name))}）の再申請待ち${w.html}</div>`
+        : `<div class="mt-1 text-[11px] text-orange-700 font-semibold">→ 申請者（${escAttr(firstName(app.applicant_name))}）の再申請待ち</div>`
       break
     } else if (st.status === 'rejected') {
       parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-700 font-bold">✖${label}（${escAttr(firstName(st.reviewer_name))}）で否決</span>`)
       if (hasSuccessor) tail = `<div class="mt-1 text-[11px] text-gray-500">→ 再提出済</div>`
       break
     } else if (st.status === 'on_hold') {
-      const w = waitDays(st.acted_at)
       parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-yellow-50 border border-yellow-300 text-yellow-800 font-bold">❓${label}（${escAttr(firstName(st.reviewer_name))}）が保留・質問中</span>`)
-      tail = `<div class="mt-1 text-[11px] text-yellow-800 font-semibold">→ 申請者（${escAttr(firstName(app.applicant_name))}）の回答待ち${w.html}</div>`
+      tail = `<div class="mt-1 text-[11px] text-yellow-800 font-semibold">→ 申請者（${escAttr(firstName(app.applicant_name))}）の回答待ち</div>`
       break
     } else {
       parts.push(`<span class="text-gray-400 whitespace-nowrap">○${label}</span>`)
