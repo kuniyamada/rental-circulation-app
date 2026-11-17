@@ -48,6 +48,7 @@ export async function deleteTestApplication(env: any, appId: number): Promise<De
   const inboxIds = inboxes.map(i => i.id)
   const stmts: D1PreparedStatement[] = [
     db.prepare('DELETE FROM notification_logs WHERE application_id = ?').bind(appId),
+    db.prepare('DELETE FROM notify_logs WHERE application_id = ?').bind(appId),
     db.prepare('DELETE FROM circulation_steps WHERE application_id = ?').bind(appId),
     db.prepare('DELETE FROM drive_uploads WHERE application_id = ?').bind(appId),
     db.prepare('DELETE FROM estimate_ledger WHERE application_id = ?').bind(appId),

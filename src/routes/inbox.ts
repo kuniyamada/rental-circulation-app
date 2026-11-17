@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { getSessionUser, getSessionIdFromCookie } from '../lib/auth'
 import { layout } from './layout'
-import { sendMail, buildInboxNotificationBody } from '../lib/mail'
+import { sendMail, sendMailDetailed, buildInboxNotificationBody } from '../lib/mail'
+import { logNotify, NOTIFY_TYPE_LABEL, CHANNEL_LABEL, fmtJst } from '../lib/notify-log'
 import { sendLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
 import { budgetConfigured } from '../lib/budget'
 import { maybeSyncAssignees } from '../lib/assignee-sync'
@@ -27,30 +28,44 @@ function previewBtn(url: string, name: string, label = '👁 確認', cls = 'inl
 async function notifyInbox(
   db: D1Database,
   frontUserId: number | string,
-  data: { mansionName: string; registeredBy: string; note: string; appUrl: string; isReminder: boolean; remindCount: number }
+  data: { mansionName: string; registeredBy: string; note: string; appUrl: string; isReminder: boolean; remindCount: number; inboxId?: number | string | null }
 ): Promise<void> {
+  const type = data.isReminder ? 'inbox_remind' : 'inbox_new'
   const u = await db.prepare(
     'SELECT name, email, notify_method, lineworks_user_id FROM users WHERE id = ?'
   ).bind(frontUserId).first() as any
-  if (!u) return
+  const base = { type, recipientId: frontUserId, recipientName: u?.name ?? null, inboxId: data.inboxId ?? null }
+  if (!u) {
+    await logNotify(db, { ...base, channel: 'email', status: 'skipped', error: '担当フロントのユーザーが見つかりません' })
+    return
+  }
   const method = u.notify_method || 'email'
+  const subject = data.isReminder
+    ? `【リマインド${data.remindCount}回目】${data.mansionName} の請求書回覧申請をお願いします`
+    : `【請求書受付】${data.mansionName || 'マンション'} の請求書が届きました`
 
   // メール
   if (method === 'email' || method === 'both') {
     const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
-    if (smtp && u.email) {
-      const subject = data.isReminder
-        ? `【リマインド${data.remindCount}回目】${data.mansionName} の請求書回覧申請をお願いします`
-        : `【請求書受付】${data.mansionName || 'マンション'} の請求書が届きました`
+    if (!smtp) {
+      await logNotify(db, { ...base, channel: 'email', to: u.email, subject, status: 'skipped', error: 'メール送信設定（SMTP）がありません' })
+    } else if (!u.email) {
+      await logNotify(db, { ...base, channel: 'email', subject, status: 'skipped', error: 'メールアドレスが登録されていません' })
+    } else {
       const html = buildInboxNotificationBody({ frontName: u.name, ...data })
-      await sendMail(smtp, { to: u.email, subject, html })
+      const r = await sendMailDetailed(smtp, { to: u.email, subject, html })
+      await logNotify(db, { ...base, channel: 'email', to: u.email, subject, status: r.ok ? 'sent' : 'failed', error: r.ok ? null : (r.error || '送信に失敗しました') })
     }
   }
 
   // LINE WORKS
   if (method === 'lineworks' || method === 'both') {
     const row = await db.prepare('SELECT * FROM lineworks_config WHERE is_active = 1 LIMIT 1').first() as LineWorksConfigRow | null
-    if (row && u.lineworks_user_id) {
+    if (!row) {
+      await logNotify(db, { ...base, channel: 'lineworks', to: u.lineworks_user_id, subject, status: 'skipped', error: 'LINE WORKS の設定が有効になっていません' })
+    } else if (!u.lineworks_user_id) {
+      await logNotify(db, { ...base, channel: 'lineworks', subject, status: 'skipped', error: 'LINE WORKS のIDが登録されていません' })
+    } else {
       const lines = [
         data.isReminder ? `⚠️ リマインド（${data.remindCount}回目）` : '📥 請求書受付のお知らせ',
         `マンション: ${data.mansionName}`,
@@ -60,17 +75,23 @@ async function notifyInbox(
       lines.push('', '回覧申請をお願いします。')
       const full = lines.join('\n')
       const text = full.length > 155 ? full.substring(0, 155) + '...' : full
-      const result = await sendLineWorksMessage(rowToConfig(row), u.lineworks_user_id, {
-        type: 'button_template',
-        altText: full,
-        template: { type: 'buttons', text, actions: [{ type: 'uri', label: '回覧申請を開始する', uri: data.appUrl }] },
-      }, async (tokenData) => {
-        const expiresAt = Math.floor(Date.now() / 1000) + Number(tokenData.expires_in || 86400)
-        await db.prepare(
-          'UPDATE lineworks_config SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=datetime("now") WHERE is_active=1'
-        ).bind(tokenData.access_token, tokenData.refresh_token || row.refresh_token || null, expiresAt).run()
-      })
+      let result: true | string
+      try {
+        result = await sendLineWorksMessage(rowToConfig(row), u.lineworks_user_id, {
+          type: 'button_template',
+          altText: full,
+          template: { type: 'buttons', text, actions: [{ type: 'uri', label: '回覧申請を開始する', uri: data.appUrl }] },
+        }, async (tokenData) => {
+          const expiresAt = Math.floor(Date.now() / 1000) + Number(tokenData.expires_in || 86400)
+          await db.prepare(
+            'UPDATE lineworks_config SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=datetime("now") WHERE is_active=1'
+          ).bind(tokenData.access_token, tokenData.refresh_token || row.refresh_token || null, expiresAt).run()
+        })
+      } catch (e: any) {
+        result = String(e?.message || e)
+      }
       if (result !== true) console.error(`[LW] 請求書受付通知の送信失敗 userId=${u.lineworks_user_id}: ${result}`)
+      await logNotify(db, { ...base, channel: 'lineworks', to: u.lineworks_user_id, subject, status: result === true ? 'sent' : 'failed', error: result === true ? null : String(result) })
     }
   }
 }
@@ -120,6 +141,43 @@ inbox.get('/', async (c) => {
     ${where}
     ORDER BY ii.created_at DESC
   `).all()
+
+  // 通知履歴（受付ごと）
+  const logsRes = await db.prepare(
+    'SELECT * FROM notify_logs WHERE inbox_id IS NOT NULL ORDER BY id DESC LIMIT 5000'
+  ).all().catch(() => ({ results: [] as any[] }))
+  const logsByInbox: Record<string, any[]> = {}
+  for (const l of (logsRes.results as any[])) (logsByInbox[l.inbox_id] ||= []).push(l)
+
+  const esc = escAttr
+  const notifyCell = (inboxId: any): string => {
+    const logs = logsByInbox[inboxId] || []
+    if (logs.length === 0) return '<span class="text-gray-300 text-xs">記録なし</span>'
+    // チャネルごとの最新結果
+    const latest: any[] = []
+    const seen = new Set<string>()
+    for (const l of logs) { if (!seen.has(l.channel)) { seen.add(l.channel); latest.push(l) } }
+    const line = (l: any) => {
+      const ch = CHANNEL_LABEL[l.channel] || l.channel
+      if (l.status === 'sent') return `<div class="text-green-700 whitespace-nowrap">✅ ${ch} ${fmtJst(l.created_at)}</div>`
+      const label = l.status === 'failed' ? '⚠️ 送信失敗' : '⚠️ 未送信'
+      return `<div class="text-red-600"><span class="font-bold whitespace-nowrap">${label}</span><span class="text-gray-500">（${ch} ${fmtJst(l.created_at)}）</span><div class="text-[11px] text-red-500 break-all max-w-[220px]">${esc(l.error || '')}</div></div>`
+    }
+    const history = logs.map((l: any) => {
+      const ok = l.status === 'sent'
+      const st = ok ? '<span class="text-green-700">送信済</span>' : l.status === 'failed' ? '<span class="text-red-600 font-bold">送信失敗</span>' : '<span class="text-red-600 font-bold">未送信</span>'
+      return `<li class="py-1 border-t border-gray-100 first:border-0">
+        <div class="whitespace-nowrap">${fmtJst(l.created_at)}　${esc(NOTIFY_TYPE_LABEL[l.notification_type] || l.notification_type)}　${esc(CHANNEL_LABEL[l.channel] || l.channel)}　${st}</div>
+        <div class="text-gray-400 break-all">宛先: ${esc(l.recipient_name || '-')}${l.to_address ? '（' + esc(l.to_address) + '）' : ''}</div>
+        ${ok ? '' : `<div class="text-red-500 break-all">理由: ${esc(l.error || '-')}</div>`}
+      </li>`
+    }).join('')
+    return `<div class="text-xs space-y-1">${latest.map(line).join('')}
+      <details class="mt-1">
+        <summary class="cursor-pointer text-[#396999] hover:underline select-none">履歴を見る（${logs.length}件）</summary>
+        <ul class="mt-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 min-w-[260px] max-w-[340px]">${history}</ul>
+      </details></div>`
+  }
 
   const statusLabel: Record<string, string> = {
     pending: '未申請', applied: '申請済', cancelled: 'キャンセル'
@@ -172,6 +230,7 @@ inbox.get('/', async (c) => {
                   <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">担当フロント</th>
                   <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">添付ファイル</th>
                   <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">リマインド</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">通知</th>
                   <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
                   <th class="px-4 py-3"></th>
                 </tr>
@@ -195,6 +254,7 @@ inbox.get('/', async (c) => {
                         ? `<span class="text-orange-600">${item.remind_count}回送信済</span>`
                         : '<span class="text-gray-400">未送信</span>'}
                     </td>
+                    <td class="px-4 py-3 align-top">${notifyCell(item.id)}</td>
                     <td class="px-4 py-3">
                       <span class="text-xs px-2 py-1 rounded-full font-medium ${statusColor[item.status] || ''}">
                         ${statusLabel[item.status] || item.status}
@@ -679,6 +739,7 @@ inbox.post('/', async (c) => {
     appUrl,
     isReminder: false,
     remindCount: 0,
+    inboxId,
   }))
 
   return c.redirect('/inbox?sent=1')
@@ -749,6 +810,7 @@ inbox.post('/:id/remind', async (c) => {
     appUrl,
     isReminder: true,
     remindCount: newCount,
+    inboxId: item.id,
   }))
 
   return c.redirect('/inbox?reminded=1')

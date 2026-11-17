@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { getSessionUser, getSessionIdFromCookie, generateApplicationNumber } from '../lib/auth'
 import { layout, statusBadge, paymentLabel } from './layout'
-import { buildMailSubject, buildMailBody, sendMail } from '../lib/mail'
+import { buildMailSubject, buildMailBody, sendMail, sendMailDetailed } from '../lib/mail'
+import { logNotify } from '../lib/notify-log'
 import { sendLineWorksMessage, buildLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
 import { syncApplicationToDrive, type SyncEnv } from '../lib/drive-sync'
 import { budgetConfigured } from '../lib/budget'
@@ -42,10 +43,18 @@ async function sendNotification(
 ): Promise<void> {
   // 受信者の通知設定とLINE WORKS IDを取得
   const recipient = await db.prepare(
-    'SELECT email, notify_method, lineworks_user_id FROM users WHERE id = ?'
-  ).bind(recipientId).first() as { email: string; notify_method: string; lineworks_user_id: string | null } | null
+    'SELECT name, email, notify_method, lineworks_user_id FROM users WHERE id = ?'
+  ).bind(recipientId).first() as { name: string; email: string; notify_method: string; lineworks_user_id: string | null } | null
 
-  if (!recipient) return
+  // 通知履歴用：appUrl（/applications/{id}）から申請IDを取り出す
+  const m = /\/applications\/(\d+)/.exec(data.appUrl || '')
+  const applicationId = m ? Number(m[1]) : null
+  const base = { type, recipientId, recipientName: recipient?.name ?? null, applicationId }
+
+  if (!recipient) {
+    await logNotify(db, { ...base, channel: 'email', status: 'skipped', error: '送信先のユーザーが見つかりません' })
+    return
+  }
 
   const method = recipient.notify_method || 'email'
 
@@ -56,44 +65,61 @@ async function sendNotification(
   // メール送信
   if (method === 'email' || method === 'both') {
     const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
-    if (smtp && recipient.email) {
-      await sendMail(smtp, {
+    const subject = mailPrefix + buildMailSubject(type, data.appNumber)
+    if (!smtp) {
+      await logNotify(db, { ...base, channel: 'email', to: recipient.email, subject, status: 'skipped', error: 'メール送信設定（SMTP）がありません' })
+    } else if (!recipient.email) {
+      await logNotify(db, { ...base, channel: 'email', subject, status: 'skipped', error: 'メールアドレスが登録されていません' })
+    } else {
+      const r = await sendMailDetailed(smtp, {
         to: recipient.email,
-        subject: mailPrefix + buildMailSubject(type, data.appNumber),
+        subject,
         html: (data.isTest ? '<div style="background:#fef3c7;border:2px solid #f59e0b;padding:10px 16px;margin:0 0 12px;border-radius:6px;color:#92400e;font-weight:bold;">🧪 テスト申請 - 本番運用ではありません</div>' : '') + buildMailBody(type, data),
       })
+      await logNotify(db, { ...base, channel: 'email', to: recipient.email, subject, status: r.ok ? 'sent' : 'failed', error: r.ok ? null : (r.error || '送信に失敗しました') })
     }
   }
 
   // LINE WORKS送信
   if (method === 'lineworks' || method === 'both') {
     const lwConfig = await db.prepare('SELECT * FROM lineworks_config WHERE is_active = 1 LIMIT 1').first() as LineWorksConfigRow | null
-    if (lwConfig && recipient.lineworks_user_id) {
+    const lwSubject = buildMailSubject(type, data.appNumber)
+    if (!lwConfig) {
+      await logNotify(db, { ...base, channel: 'lineworks', to: recipient.lineworks_user_id, subject: lwSubject, status: 'skipped', error: 'LINE WORKS の設定が有効になっていません' })
+    } else if (!recipient.lineworks_user_id) {
+      await logNotify(db, { ...base, channel: 'lineworks', subject: lwSubject, status: 'skipped', error: 'LINE WORKS のIDが登録されていません' })
+    } else {
       const config = rowToConfig(lwConfig)
       // テスト時は件名にプレフィックス付与するため、appNumberに🧪TESTを先頭付加
       const dataForLW = data.isTest
         ? { ...data, appNumber: lwPrefix + data.appNumber }
         : data
       const message = buildLineWorksMessage(type, dataForLW)
-      const lwResult = await sendLineWorksMessage(config, recipient.lineworks_user_id, message,
-        // Refresh Token でトークンが更新された場合に DB を更新するコールバック
-        async (tokenData) => {
-          const expiresAt = Math.floor(Date.now() / 1000) + Number(tokenData.expires_in || 86400)
-          await db.prepare(`
-            UPDATE lineworks_config
-            SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=datetime("now")
-            WHERE is_active=1
-          `).bind(
-            tokenData.access_token,
-            tokenData.refresh_token || config.refreshToken || null,
-            expiresAt
-          ).run()
-          console.log('[LW] DBのアクセストークンを更新しました')
-        }
-      )
+      let lwResult: true | string
+      try {
+        lwResult = await sendLineWorksMessage(config, recipient.lineworks_user_id, message,
+          // Refresh Token でトークンが更新された場合に DB を更新するコールバック
+          async (tokenData) => {
+            const expiresAt = Math.floor(Date.now() / 1000) + Number(tokenData.expires_in || 86400)
+            await db.prepare(`
+              UPDATE lineworks_config
+              SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=datetime("now")
+              WHERE is_active=1
+            `).bind(
+              tokenData.access_token,
+              tokenData.refresh_token || config.refreshToken || null,
+              expiresAt
+            ).run()
+            console.log('[LW] DBのアクセストークンを更新しました')
+          }
+        )
+      } catch (e: any) {
+        lwResult = String(e?.message || e)
+      }
       if (lwResult !== true) {
         console.error(`[LW] 通知失敗 type=${type} userId=${recipient.lineworks_user_id}: ${lwResult}`)
       }
+      await logNotify(db, { ...base, channel: 'lineworks', to: recipient.lineworks_user_id, subject: (data.isTest ? lwPrefix : '') + lwSubject, status: lwResult === true ? 'sent' : 'failed', error: lwResult === true ? null : String(lwResult) })
     }
   }
 }

@@ -102,6 +102,7 @@ export function sidebarNav(user: any, title: string): string {
       { href: '/admin/smtp',      label: 'メール設定',       active: title.includes('メール'),       icon: I['メール設定'] },
       { href: '/admin/lineworks', label: 'LINE WORKS設定',   active: title.includes('LINE WORKS'),   icon: I['LINE WORKS設定'] },
       { href: '/admin/reminder',  label: 'リマインダー設定', active: title.includes('リマインダー'), icon: I['リマインダー設定'] },
+      { href: '/admin/notify-logs', label: '通知履歴',       active: title === '通知履歴',           icon: '<span class="w-4 text-center text-sm leading-none">🔔</span>' },
     ]},
     { name: 'システム', items: [
       { href: '/admin/login-logs', label: 'ログイン履歴',       active: title === 'ログイン履歴',        icon: I['ログイン履歴'] },

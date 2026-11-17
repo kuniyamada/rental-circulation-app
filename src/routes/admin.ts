@@ -15,6 +15,7 @@ import {
 } from '../lib/backup'
 import driveRoutes from './drive'
 import { sweepExpiredSessions } from '../lib/login-log'
+import { NOTIFY_TYPE_LABEL, CHANNEL_LABEL, fmtJst } from '../lib/notify-log'
 import { assigneeSyncEnabled, getSyncState, maybeSyncAssignees, runAssigneeSync } from '../lib/assignee-sync'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
@@ -3331,6 +3332,130 @@ function buildLoginLogFilter(q: (k: string) => string | undefined) {
   }
   return { from, to, type, keyword, where, binds }
 }
+
+// ============================================================
+// 通知履歴（メール / LINE WORKS の送信結果）
+// ============================================================
+admin.get('/notify-logs', async (c) => {
+  const user = (c as any).get('user')
+  const db = c.env.DB
+  const q = (k: string) => (c.req.query(k) || '').trim()
+  const fType = q('type'), fStatus = q('status'), fChannel = q('channel'), fFrom = q('from'), fTo = q('to'), fKw = q('q')
+  const where: string[] = ['1=1']
+  const binds: any[] = []
+  if (fType) { where.push('l.notification_type = ?'); binds.push(fType) }
+  if (fStatus === 'ng') where.push("l.status IN ('failed','skipped')")
+  else if (fStatus) { where.push('l.status = ?'); binds.push(fStatus) }
+  if (fChannel) { where.push('l.channel = ?'); binds.push(fChannel) }
+  // 日付は日本時間で指定 → UTCに直して比較
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fFrom)) { where.push("l.created_at >= datetime(?, '-9 hours')"); binds.push(fFrom + ' 00:00:00') }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fTo)) { where.push("l.created_at < datetime(?, '-9 hours', '+1 day')"); binds.push(fTo + ' 00:00:00') }
+  if (fKw) { where.push('(l.recipient_name LIKE ? OR l.to_address LIKE ? OR l.subject LIKE ?)'); binds.push(`%${fKw}%`, `%${fKw}%`, `%${fKw}%`) }
+
+  const PAGE_SIZE = 100
+  const page = Math.max(1, parseInt(c.req.query('page') || '1', 10) || 1)
+  const cnt = await db.prepare(`SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+      SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped
+    FROM notify_logs l WHERE ${where.join(' AND ')}`).bind(...binds).first().catch(() => null) as any
+  const total = Number(cnt?.total || 0)
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const curPage = Math.min(page, totalPages)
+  const rows = await db.prepare(`
+    SELECT l.*, a.application_number, m.name AS mansion_name, mi.name AS inbox_mansion_name
+    FROM notify_logs l
+    LEFT JOIN applications a ON a.id = l.application_id
+    LEFT JOIN mansions m ON m.id = a.mansion_id
+    LEFT JOIN invoice_inbox ii ON ii.id = l.inbox_id
+    LEFT JOIN mansions mi ON mi.id = ii.mansion_id
+    WHERE ${where.join(' AND ')}
+    ORDER BY l.id DESC LIMIT ? OFFSET ?`).bind(...binds, PAGE_SIZE, (curPage - 1) * PAGE_SIZE).all().catch(() => ({ results: [] as any[] }))
+
+  const esc = (v: any) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])
+  const qs = (extra: Record<string, string | number>) => {
+    const p = new URLSearchParams({ type: fType, status: fStatus, channel: fChannel, from: fFrom, to: fTo, q: fKw })
+    for (const [k, v] of Object.entries(extra)) p.set(k, String(v))
+    return p.toString()
+  }
+  const stBadge = (st: string) => st === 'sent'
+    ? '<span class="inline-block text-xs px-2 py-0.5 rounded border bg-green-50 text-green-700 border-green-200 whitespace-nowrap">✅ 送信済</span>'
+    : st === 'failed'
+      ? '<span class="inline-block text-xs px-2 py-0.5 rounded border bg-red-50 text-red-700 border-red-300 font-bold whitespace-nowrap">⚠️ 送信失敗</span>'
+      : '<span class="inline-block text-xs px-2 py-0.5 rounded border bg-red-50 text-red-600 border-red-200 whitespace-nowrap">⚠️ 未送信</span>'
+  const target = (r: any) => {
+    if (r.application_id) {
+      const label = r.application_number ? `${esc(r.application_number)}${r.mansion_name ? '<br><span class="text-gray-400">' + esc(r.mansion_name) + '</span>' : ''}` : `申請#${r.application_id}（削除済）`
+      return r.application_number ? `<a href="/applications/${r.application_id}" class="text-[#396999] hover:underline">${label}</a>` : `<span class="text-gray-400">${label}</span>`
+    }
+    if (r.inbox_id) return `<a href="/inbox" class="text-[#396999] hover:underline">受付#${r.inbox_id}</a>${r.inbox_mansion_name ? '<br><span class="text-gray-400">' + esc(r.inbox_mansion_name) + '</span>' : ''}`
+    return '-'
+  }
+  const tableRows = (rows.results as any[]).map((r) => `
+    <tr class="border-b border-gray-100 hover:bg-gray-50 ${r.status !== 'sent' ? 'bg-red-50/40' : ''}">
+      <td class="px-3 py-2 whitespace-nowrap text-gray-700">${fmtJst(r.created_at, true)}</td>
+      <td class="px-3 py-2 whitespace-nowrap">${esc(NOTIFY_TYPE_LABEL[r.notification_type] || r.notification_type)}</td>
+      <td class="px-3 py-2 whitespace-nowrap">${esc(CHANNEL_LABEL[r.channel] || r.channel)}</td>
+      <td class="px-3 py-2">${stBadge(r.status)}${r.status !== 'sent' && r.error ? `<div class="text-xs text-red-600 mt-1 break-all max-w-[280px]">${esc(r.error)}</div>` : ''}</td>
+      <td class="px-3 py-2"><div class="whitespace-nowrap">${esc(r.recipient_name || '-')}</div><div class="text-xs text-gray-400 break-all">${esc(r.to_address || '')}</div></td>
+      <td class="px-3 py-2 text-xs">${target(r)}</td>
+      <td class="px-3 py-2 text-xs text-gray-600 break-all max-w-[320px]">${esc(r.subject || '')}</td>
+    </tr>`).join('')
+  const opt = (cur: string, v: string, label: string) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${label}</option>`
+  const pager = totalPages > 1 ? `
+    <div class="flex items-center justify-between px-4 py-3 border-t border-gray-100 text-sm">
+      <span class="text-gray-500">${total}件中 ${(curPage - 1) * PAGE_SIZE + 1}〜${Math.min(curPage * PAGE_SIZE, total)}件</span>
+      <div class="flex gap-2">
+        ${curPage > 1 ? `<a href="/admin/notify-logs?${qs({ page: curPage - 1 })}" class="px-3 py-1 border rounded hover:bg-gray-50">← 前へ</a>` : ''}
+        ${curPage < totalPages ? `<a href="/admin/notify-logs?${qs({ page: curPage + 1 })}" class="px-3 py-1 border rounded hover:bg-gray-50">次へ →</a>` : ''}
+      </div>
+    </div>` : ''
+
+  const content = `
+    <div class="space-y-4">
+      <div>
+        <h2 class="text-xl font-bold text-gray-800">🔔 通知履歴</h2>
+        <p class="text-sm text-gray-500 mt-1">メール・LINE WORKS で送ったお知らせの記録です（請求書受付・再通知・承認依頼・完了・差し戻し・リマインドなど）。この機能を入れる前のお知らせは記録されていません。</p>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="bg-white rounded-xl border border-gray-100 p-3"><div class="text-xs text-gray-500">件数</div><div class="text-xl font-bold">${total}</div></div>
+        <div class="bg-white rounded-xl border border-gray-100 p-3"><div class="text-xs text-gray-500">送信済</div><div class="text-xl font-bold text-green-700">${Number(cnt?.sent || 0)}</div></div>
+        <a href="/admin/notify-logs?${qs({ status: 'failed', page: 1 })}" class="bg-white rounded-xl border ${Number(cnt?.failed || 0) ? 'border-red-300' : 'border-gray-100'} p-3 hover:bg-red-50"><div class="text-xs text-gray-500">送信失敗</div><div class="text-xl font-bold text-red-600">${Number(cnt?.failed || 0)}</div></a>
+        <a href="/admin/notify-logs?${qs({ status: 'skipped', page: 1 })}" class="bg-white rounded-xl border border-gray-100 p-3 hover:bg-red-50"><div class="text-xs text-gray-500">未送信（設定不足）</div><div class="text-xl font-bold text-red-500">${Number(cnt?.skipped || 0)}</div></a>
+      </div>
+      <form method="GET" action="/admin/notify-logs" class="bg-white rounded-xl border border-gray-100 p-4 flex flex-wrap items-end gap-3 text-sm">
+        <label class="flex flex-col gap-1"><span class="text-xs text-gray-500">種類</span>
+          <select name="type" class="border rounded px-2 py-1.5">${opt(fType, '', 'すべて')}${Object.entries(NOTIFY_TYPE_LABEL).map(([k, v]) => opt(fType, k, v)).join('')}</select></label>
+        <label class="flex flex-col gap-1"><span class="text-xs text-gray-500">結果</span>
+          <select name="status" class="border rounded px-2 py-1.5">${opt(fStatus, '', 'すべて')}${opt(fStatus, 'sent', '送信済')}${opt(fStatus, 'ng', '失敗・未送信')}${opt(fStatus, 'failed', '送信失敗')}${opt(fStatus, 'skipped', '未送信（設定不足）')}</select></label>
+        <label class="flex flex-col gap-1"><span class="text-xs text-gray-500">方法</span>
+          <select name="channel" class="border rounded px-2 py-1.5">${opt(fChannel, '', 'すべて')}${opt(fChannel, 'email', 'メール')}${opt(fChannel, 'lineworks', 'LINE WORKS')}</select></label>
+        <label class="flex flex-col gap-1"><span class="text-xs text-gray-500">期間</span>
+          <span class="flex items-center gap-1"><input type="date" name="from" value="${esc(fFrom)}" class="border rounded px-2 py-1"> 〜 <input type="date" name="to" value="${esc(fTo)}" class="border rounded px-2 py-1"></span></label>
+        <label class="flex flex-col gap-1"><span class="text-xs text-gray-500">宛先・件名</span>
+          <input type="text" name="q" value="${esc(fKw)}" placeholder="名前・アドレス・件名" class="border rounded px-2 py-1.5 w-48"></label>
+        <button type="submit" class="bg-[#396999] hover:bg-[#2E5580] text-white px-4 py-1.5 rounded">絞り込む</button>
+        <a href="/admin/notify-logs" class="text-gray-500 hover:underline py-1.5">クリア</a>
+      </form>
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        ${(rows.results as any[]).length === 0 ? `<div class="text-center py-12 text-gray-400"><div class="text-4xl mb-2">📭</div><p>記録がありません</p></div>` : `
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs text-gray-500">
+              <tr>
+                <th class="px-3 py-2 text-left">日時</th><th class="px-3 py-2 text-left">種類</th><th class="px-3 py-2 text-left">方法</th>
+                <th class="px-3 py-2 text-left">結果</th><th class="px-3 py-2 text-left">宛先</th><th class="px-3 py-2 text-left">対象</th><th class="px-3 py-2 text-left">件名</th>
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>`}
+        ${pager}
+      </div>
+    </div>`
+  return c.html(layout('通知履歴', content, user))
+})
 
 admin.get('/login-logs', async (c) => {
   const user = (c as any).get('user')

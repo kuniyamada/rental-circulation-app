@@ -1,3 +1,4 @@
+import { logNotify } from './lib/notify-log'
 import { Hono } from 'hono'
 import { serveStatic } from 'hono/cloudflare-workers'
 import { getSessionUser, getSessionIdFromCookie, PREVIEW_ROLES } from './lib/auth'
@@ -706,7 +707,10 @@ app.get('/api/trigger-review-reminders', async (c) => {
   const now = new Date().toISOString()
 
   for (const t of (targets.results as any[])) {
-    if (!t.reviewer_email || !smtp) continue
+    if (!t.reviewer_email || !smtp) {
+      await logNotify(db, { type: 'review_reminder', channel: 'email', recipientId: t.reviewer_id, recipientName: t.reviewer_name, to: t.reviewer_email, status: 'skipped', error: !smtp ? 'メール送信設定（SMTP）がありません' : 'メールアドレスが登録されていません', applicationId: t.application_id })
+      continue
+    }
 
     const newCount = (t.remind_count || 0) + 1
     const stepLabel: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終承認者' }
@@ -760,7 +764,10 @@ app.get('/api/trigger-review-reminders', async (c) => {
 </body>
 </html>`
 
-    const ok = await sendMail(smtp, { to: t.reviewer_email, subject, html })
+    const { sendMailDetailed } = await import('./lib/mail')
+    const r = await sendMailDetailed(smtp, { to: t.reviewer_email, subject, html })
+    const ok = r.ok
+    await logNotify(db, { type: 'review_reminder', channel: 'email', recipientId: t.reviewer_id, recipientName: t.reviewer_name, to: t.reviewer_email, subject, status: ok ? 'sent' : 'failed', error: ok ? null : (r.error || '送信に失敗しました'), applicationId: t.application_id })
     if (ok) {
       await db.prepare(
         'UPDATE circulation_steps SET remind_count = ?, last_reminded_at = ? WHERE id = ?'
@@ -806,9 +813,11 @@ app.post('/api/review-remind/:stepId', async (c) => {
   if (!step) return c.json({ error: 'ステップが見つかりません' }, 404)
 
   const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
-  if (!smtp) return c.json({ error: 'SMTP設定がありません' }, 500)
+  if (!smtp) {
+    await logNotify(db, { type: 'review_reminder', channel: 'email', recipientId: step.reviewer_id, recipientName: step.reviewer_name, to: step.reviewer_email, status: 'skipped', error: 'メール送信設定（SMTP）がありません', applicationId: step.app_id })
+    return c.json({ error: 'SMTP設定がありません' }, 500)
+  }
 
-  const { sendMail } = await import('./lib/mail')
   const newCount = (step.remind_count || 0) + 1
   const stepLabel: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終承認者' }
   const appUrl = `${new URL(c.req.url).origin}/applications/${step.app_id}`
@@ -830,7 +839,10 @@ app.post('/api/review-remind/:stepId', async (c) => {
 </body></html>`
 
   const now = new Date().toISOString()
-  const ok = await sendMail(smtp, { to: step.reviewer_email, subject, html })
+  const { sendMailDetailed } = await import('./lib/mail')
+  const r = await sendMailDetailed(smtp, { to: step.reviewer_email, subject, html })
+  const ok = r.ok
+  await logNotify(db, { type: 'review_reminder', channel: 'email', recipientId: step.reviewer_id, recipientName: step.reviewer_name, to: step.reviewer_email, subject, status: ok ? 'sent' : 'failed', error: ok ? null : (r.error || '送信に失敗しました'), applicationId: step.app_id })
   if (ok) {
     await db.prepare('UPDATE circulation_steps SET remind_count = ?, last_reminded_at = ? WHERE id = ?')
       .bind(newCount, now, stepId).run()
