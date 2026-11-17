@@ -131,6 +131,7 @@ export function sidebarNav(user: any, title: string): string {
           <span class="flex-1 leading-tight">請求書を登録・担当者へ送信</span>
           <span class="text-sm leading-none">📤</span>
         </a>
+        ${item('/inbox/bulk', '請求書をまとめて登録', title.includes('まとめて登録'), '<span class="w-4 text-center text-sm leading-none">📚</span>')}
         ${item('/inbox/estimates', '見積書・請求書作成 管理簿', title.includes('管理簿'), '<span class="w-4 text-center text-sm leading-none">📒</span>')}
         ` : ''}
 

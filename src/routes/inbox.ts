@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { getSessionUser, getSessionIdFromCookie } from '../lib/auth'
 import { layout } from './layout'
-import { sendMail, sendMailDetailed, buildInboxNotificationBody } from '../lib/mail'
+import { sendMail, sendMailDetailed, buildInboxNotificationBody, buildInboxBulkNotificationBody } from '../lib/mail'
 import { logNotify, NOTIFY_TYPE_LABEL, CHANNEL_LABEL, fmtJst } from '../lib/notify-log'
 import { sendLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
 import { budgetConfigured } from '../lib/budget'
@@ -130,6 +130,69 @@ function pdfPickerHtml(existing: { n: number; name: string; url: string }[], req
           </script>`
 }
 
+
+// ============================================================
+// まとめて登録のお知らせ（担当フロントごとに1通）
+//   通知履歴は受付ごとに1行ずつ残す（一覧の「通知」列に出すため）
+// ============================================================
+async function notifyInboxBulk(
+  db: D1Database,
+  frontUserId: number,
+  items: { inboxId: number; label: string; url: string }[],
+  data: { registeredBy: string; note: string; dashboardUrl: string }
+): Promise<void> {
+  const type = 'inbox_new'
+  const u = await db.prepare('SELECT name, email, notify_method, lineworks_user_id FROM users WHERE id = ?').bind(frontUserId).first() as any
+  const logAll = async (e: any) => { for (const it of items) await logNotify(db, { type, recipientId: frontUserId, recipientName: u?.name ?? null, inboxId: it.inboxId, ...e }) }
+  if (!u) { await logAll({ channel: 'email', status: 'skipped', error: '担当フロントのユーザーが見つかりません' }); return }
+  const method = u.notify_method || 'email'
+  // 件名の物件番号（同じ物件が複数なら「044×2」）
+  const numCount: Record<string, number> = {}
+  const numOrder: string[] = []
+  for (const i of items) { const k = i.label.split(' ')[0]; if (!(k in numCount)) { numCount[k] = 0; numOrder.push(k) } numCount[k]++ }
+  const head = numOrder.slice(0, 4).map(k => numCount[k] > 1 ? `${k}×${numCount[k]}` : k).join('・') + (numOrder.length > 4 ? ' ほか' : '')
+  const subject = `【請求書受付】${items.length}件の請求書が届きました（${head}）`
+
+  if (method === 'email' || method === 'both') {
+    const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
+    if (!smtp) await logAll({ channel: 'email', to: u.email, subject, status: 'skipped', error: 'メール送信設定（SMTP）がありません' })
+    else if (!u.email) await logAll({ channel: 'email', subject, status: 'skipped', error: 'メールアドレスが登録されていません' })
+    else {
+      const html = buildInboxBulkNotificationBody({ frontName: u.name, registeredBy: data.registeredBy, note: data.note, items, dashboardUrl: data.dashboardUrl })
+      const r = await sendMailDetailed(smtp, { to: u.email, subject, html })
+      await logAll({ channel: 'email', to: u.email, subject, status: r.ok ? 'sent' : 'failed', error: r.ok ? null : (r.error || '送信に失敗しました') })
+    }
+  }
+
+  if (method === 'lineworks' || method === 'both') {
+    const row = await db.prepare('SELECT * FROM lineworks_config WHERE is_active = 1 LIMIT 1').first() as LineWorksConfigRow | null
+    if (!row) await logAll({ channel: 'lineworks', to: u.lineworks_user_id, subject, status: 'skipped', error: 'LINE WORKS の設定が有効になっていません' })
+    else if (!u.lineworks_user_id) await logAll({ channel: 'lineworks', subject, status: 'skipped', error: 'LINE WORKS のIDが登録されていません' })
+    else {
+      const lines = [`📥 請求書受付のお知らせ（${items.length}件）`, ...items.map(i => `・${i.label}`), `登録: ${data.registeredBy}`]
+      if (data.note) lines.push(`備考: ${data.note}`)
+      lines.push('', '回覧申請をお願いします。')
+      const full = lines.join('\n')
+      const text = full.length > 155 ? full.substring(0, 155) + '...' : full
+      let result: true | string
+      try {
+        result = await sendLineWorksMessage(rowToConfig(row), u.lineworks_user_id, {
+          type: 'button_template',
+          altText: full,
+          template: { type: 'buttons', text, actions: [{ type: 'uri', label: '届いた請求書を見る', uri: data.dashboardUrl }] },
+        }, async (tokenData) => {
+          const expiresAt = Math.floor(Date.now() / 1000) + Number(tokenData.expires_in || 86400)
+          await db.prepare(
+            'UPDATE lineworks_config SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=datetime("now") WHERE is_active=1'
+          ).bind(tokenData.access_token, tokenData.refresh_token || row.refresh_token || null, expiresAt).run()
+        })
+      } catch (e: any) { result = String(e?.message || e) }
+      if (result !== true) console.error(`[LW] まとめて登録の通知失敗 userId=${u.lineworks_user_id}: ${result}`)
+      await logAll({ channel: 'lineworks', to: u.lineworks_user_id, subject, status: result === true ? 'sent' : 'failed', error: result === true ? null : String(result) })
+    }
+  }
+}
+
 // レスポンス返却後も通知処理を続ける（画面遷移を待たせない）
 function runInBackground(c: any, task: () => Promise<void>): void {
   const p = (async () => { try { await task() } catch (e) { console.error('[BG] 請求書受付通知エラー:', e) } })()
@@ -229,9 +292,14 @@ inbox.get('/', async (c) => {
       <!-- ヘッダー -->
       <div class="flex items-center justify-between">
         <h2 class="text-xl font-bold text-gray-800">📥 請求書受付管理</h2>
-        <a href="/inbox/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
-          <span>＋</span><span>請求書を登録</span>
-        </a>
+        <div class="flex items-center gap-2">
+          <a href="/inbox/bulk" class="bg-white border border-[#396999] text-[#396999] hover:bg-[#EEF4FA] text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
+            <span>📚</span><span>まとめて登録</span>
+          </a>
+          <a href="/inbox/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
+            <span>＋</span><span>請求書を登録</span>
+          </a>
+        </div>
       </div>
 
       ${c.req.query('edited') ? `
@@ -331,6 +399,158 @@ inbox.get('/', async (c) => {
 // ============================================================
 // 請求書受付 登録フォーム
 // ============================================================
+// ============================================================
+// 請求書をまとめて登録（複数物件）
+//   ファイル名「物件番号3桁＋空白＋担当者名.pdf」から物件と担当フロントを自動で入れる
+//   画面から1件ずつ /inbox/bulk/item に送って受付を作り、最後に /inbox/bulk/notify で担当者ごとに1通お知らせ
+// ============================================================
+const BULK_MAX = 30
+
+inbox.get('/bulk', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.redirect('/')
+  const db = c.env.DB
+  await maybeSyncAssignees(c)
+  const mansions = await db.prepare("SELECT id, mansion_number, name, front_user_id FROM mansions WHERE is_active = 1 AND is_visible = 1 ORDER BY CAST(mansion_number AS INTEGER)").all()
+  const frontsRes = await db.prepare("SELECT id, name, email FROM users WHERE role IN ('front', 'front_supervisor') AND is_active = 1 ORDER BY name").all()
+  const isTestMode = user.is_admin && user.test_mode === 1
+  const testExtra = isTestMode
+    ? ((await db.prepare("SELECT id, name, email FROM users WHERE employee_number IN ('030','049') AND is_active = 1 ORDER BY employee_number").all()).results as any[])
+    : []
+  const testIds = new Set(testExtra.map((u: any) => u.id))
+  const fronts = [...testExtra.map((u: any) => ({ ...u, test: true })), ...((frontsRes.results as any[]).filter((f: any) => !testIds.has(f.id)))]
+  const data = {
+    max: BULK_MAX,
+    mansions: (mansions.results as any[]).map((m: any) => ({ id: m.id, number: Number(m.mansion_number), name: m.name, frontId: m.front_user_id || null })),
+    fronts: fronts.map((f: any) => ({ id: f.id, name: f.name, email: f.email, test: !!f.test })),
+  }
+  const content = `
+    <div class="max-w-6xl mx-auto space-y-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 class="text-xl font-bold text-gray-800">📚 請求書をまとめて登録・担当者へ送信</h2>
+          <p class="text-sm text-gray-500 mt-1">複数の物件の請求書PDFを一度に登録します。1物件だけのときは <a href="/inbox/new" class="text-[#396999] hover:underline">1件ずつの登録画面</a> を使ってください。</p>
+        </div>
+        <a href="/inbox" class="text-sm text-gray-500 hover:underline">← 請求書受付管理へ</a>
+      </div>
+
+      <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-900">
+        <div class="font-bold mb-1">📝 ファイル名の決まり</div>
+        <div>「<b>物件番号（3桁）＋空白＋担当者名</b>.pdf」にしてください。例：<code class="bg-white px-1.5 py-0.5 rounded border">005 上野.pdf</code>　<code class="bg-white px-1.5 py-0.5 rounded border">044 上野_(2).pdf</code></div>
+        <div class="text-xs mt-1">物件と担当フロントは自動で入ります（担当フロントはマンション管理マスタの担当者）。同じ物件のPDFが2つあるときは、別々の受付になります。一度に最大${BULK_MAX}件までです。</div>
+      </div>
+
+      <div id="bulkDropZone" class="bg-white border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:border-[#5B8AB5] transition"
+           onclick="document.getElementById('bulkPicker').click()">
+        <div class="text-4xl mb-1">📄📄📄</div>
+        <p class="text-sm text-gray-700 font-semibold">ここにPDFをまとめてドラッグ＆ドロップ、またはクリックして選択</p>
+        <p class="text-xs text-gray-400 mt-1">PDF形式（1つ最大10MB）・あとから追加もできます</p>
+        <input type="file" id="bulkPicker" accept=".pdf,application/pdf" multiple class="hidden">
+      </div>
+
+      <div id="bulkTableWrap" class="hidden bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-wrap gap-2">
+          <div class="text-sm text-gray-700"><b id="bulkCount">0</b> 件 <span id="bulkSummary" class="text-xs text-gray-500 ml-2"></span></div>
+          <button type="button" id="bulkClearBtn" onclick="Bulk.clearAll()" class="text-xs text-gray-500 hover:text-red-600">すべて外す</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs text-gray-500">
+              <tr>
+                <th class="px-3 py-2 text-left w-8">#</th>
+                <th class="px-3 py-2 text-left">PDF</th>
+                <th class="px-3 py-2 text-left whitespace-nowrap">物件</th>
+                <th class="px-3 py-2 text-left whitespace-nowrap">担当フロント</th>
+                <th class="px-3 py-2 text-left whitespace-nowrap">確認</th>
+                <th class="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody id="bulkRows" class="divide-y divide-gray-100"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="bulkFooter" class="hidden bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">備考（全件共通・任意）</label>
+          <input type="text" id="bulkNote" maxlength="200" placeholder="例：10月分 管理組合宛請求書" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#396999]">
+        </div>
+        <div id="bulkResult" class="hidden"></div>
+        <div class="flex gap-3">
+          <a href="/inbox" class="flex-1 text-center px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">キャンセル</a>
+          <button type="button" id="bulkSubmitBtn" onclick="Bulk.submit()" class="flex-[2] bg-[#396999] hover:bg-[#2E5580] text-white font-semibold px-4 py-2.5 rounded-lg text-sm transition">📤 まとめて登録して送信</button>
+        </div>
+      </div>
+    </div>
+    <script>window.BULK_DATA = ${JSON.stringify(data).replace(/</g, '\\u003c')};</script>
+    <script src="/static/inbox-bulk.js"></script>
+  `
+  return c.html(layout('請求書まとめて登録', content, user))
+})
+
+// 1件分の受付を作る（お知らせはまだ送らない）
+inbox.post('/bulk/item', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.json({ ok: false, error: '権限がありません' }, 403)
+  const db = c.env.DB
+  const body = await c.req.parseBody() as any
+  const mansionId = parseInt(String(body.mansion_id || '')) || 0
+  const frontUserId = parseInt(String(body.front_user_id || '')) || 0
+  const note = String(body.note || '').trim().slice(0, 200) || null
+  const pdf = fileOf(body.pdf_file)
+  if (!mansionId || !frontUserId) return c.json({ ok: false, error: '物件と担当フロントを選んでください' }, 400)
+  if (!pdf) return c.json({ ok: false, error: 'PDFがありません' }, 400)
+  if (!validPdf(pdf)) return c.json({ ok: false, error: 'PDFではないか、10MBを超えています' }, 400)
+  const m = await db.prepare('SELECT id, name, mansion_number FROM mansions WHERE id = ?').bind(mansionId).first() as any
+  if (!m) return c.json({ ok: false, error: '物件が見つかりません' }, 400)
+  const f = await db.prepare('SELECT id FROM users WHERE id = ? AND is_active = 1').bind(frontUserId).first()
+  if (!f) return c.json({ ok: false, error: '担当フロントが見つかりません' }, 400)
+
+  const saved = await putInboxPdf(c.env.R2, pdf, 1)
+  const now = new Date().toISOString()
+  const res = await db.prepare(`
+    INSERT INTO invoice_inbox (mansion_id, front_user_id, registered_by, attachment_key, attachment_name, note, status, notified_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+  `).bind(mansionId, frontUserId, user.uid, saved.key, saved.name, note, now, now, now).run()
+  return c.json({ ok: true, id: res.meta.last_row_id })
+})
+
+// 作った受付のお知らせを、担当フロントごとに1通にまとめて送る
+inbox.post('/bulk/notify', async (c) => {
+  const user = (c as any).get('user') as any
+  if (user.role !== 'operations' && !user.is_admin) return c.json({ ok: false, error: '権限がありません' }, 403)
+  const db = c.env.DB
+  const body = await c.req.json().catch(() => ({})) as any
+  const ids = (Array.isArray(body.ids) ? body.ids : []).map((x: any) => parseInt(x)).filter((n: number) => n > 0).slice(0, BULK_MAX)
+  if (!ids.length) return c.json({ ok: true, groups: 0 })
+  const rows = (await db.prepare(`
+    SELECT ii.id, ii.front_user_id, ii.note, m.mansion_number, m.name AS mansion_name
+    FROM invoice_inbox ii LEFT JOIN mansions m ON m.id = ii.mansion_id
+    WHERE ii.id IN (${ids.map(() => '?').join(',')}) AND ii.status = 'pending' AND ii.registered_by = ?
+    ORDER BY CAST(m.mansion_number AS INTEGER), ii.id
+  `).bind(...ids, user.uid).all()).results as any[]
+  const origin = new URL(c.req.url).origin
+  const groups: Record<string, any[]> = {}
+  for (const r of rows) (groups[r.front_user_id] ||= []).push(r)
+  const note = rows[0]?.note || ''
+  for (const [frontId, list] of Object.entries(groups)) {
+    if (list.length === 1) {
+      const r = list[0]
+      runInBackground(c, () => notifyInbox(db, Number(frontId), {
+        mansionName: r.mansion_name || '', registeredBy: user.name, note: r.note || '',
+        appUrl: `${origin}/applications/new?inbox_id=${r.id}`, isReminder: false, remindCount: 0, inboxId: r.id,
+      }))
+    } else {
+      runInBackground(c, () => notifyInboxBulk(db, Number(frontId), list.map(r => ({
+        inboxId: r.id,
+        label: `${r.mansion_number != null ? String(r.mansion_number).padStart(3, '0') : ''} ${r.mansion_name || ''}`.trim(),
+        url: `${origin}/applications/new?inbox_id=${r.id}`,
+      })), { registeredBy: user.name, note, dashboardUrl: `${origin}/` }))
+    }
+  }
+  return c.json({ ok: true, groups: Object.keys(groups).length, count: rows.length })
+})
+
 inbox.get('/new', (c) => renderInboxForm(c, null))
 inbox.get('/:id/edit', (c) => renderInboxForm(c, parseInt(c.req.param('id')) || -1))
 
@@ -389,6 +609,7 @@ async function renderInboxForm(c: any, editId: number | null) {
         <h2 class="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
           ${isEdit ? '✏️ 受付を編集' : '📥 請求書を登録・フロントへ送信'}
         </h2>
+        ${!isEdit ? `<p class="-mt-4 mb-5 text-xs text-gray-500">複数の物件をまとめて送るときは <a href="/inbox/bulk" class="text-[#396999] font-semibold hover:underline">📚 まとめて登録</a> が便利です。</p>` : ''}
         ${isEdit ? `<p class="-mt-4 mb-5 text-xs text-gray-500">変更を保存しても、担当フロントへのお知らせは送りません。必要なときは一覧の「再通知」を押してください。</p>` : ''}
 
         <form method="POST" action="${isEdit ? `/inbox/${editItem.id}/edit` : '/inbox'}" enctype="multipart/form-data" class="space-y-5" id="inboxForm"

@@ -228,3 +228,51 @@ export function buildMailBody(type: string, data: {
 </body>
 </html>`
 }
+
+// 請求書受付（まとめて登録）: 担当フロントごとに1通にまとめたお知らせ
+export function buildInboxBulkNotificationBody(data: {
+  frontName: string
+  registeredBy: string
+  note: string
+  items: { label: string; url: string }[]
+  dashboardUrl: string
+}): string {
+  const esc = (v: any) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])
+  const rows = data.items.map((it) => `
+        <tr style="border-bottom:1px solid #e5e7eb;">
+          <td style="padding:8px 12px 8px 0;font-size:13px;"><strong>${esc(it.label)}</strong></td>
+          <td style="padding:8px 0;font-size:13px;text-align:right;white-space:nowrap;">
+            <a href="${esc(it.url)}" style="color:#396999;font-weight:600;">回覧申請する →</a>
+          </td>
+        </tr>`).join('')
+  return `
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"></head>
+<body style="font-family:sans-serif;color:#333;margin:0;padding:0;background:#f5f5f5;">
+  <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    <div style="background:#396999;padding:20px 24px;">
+      <h2 style="color:#fff;margin:0;font-size:18px;">📥 請求書受付のお知らせ（${data.items.length}件）</h2>
+      <p style="color:#bfdbfe;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 建物管理部 請求回覧</p>
+    </div>
+    <div style="padding:24px;">
+      <p>${esc(data.frontName)} さん</p>
+      <p>業務管理課より、担当マンションの請求書が <strong>${data.items.length}件</strong> 届きました。<br>
+      それぞれ内容をご確認いただき、<strong>回覧申請</strong>をお願いします。</p>
+      <table style="border-collapse:collapse;margin:16px 0;width:100%;">${rows}
+      </table>
+      <p style="font-size:12px;color:#6b7280;">登録担当者：${esc(data.registeredBy)}${data.note ? `<br>備考：${esc(data.note)}` : ''}</p>
+      <a href="${esc(data.dashboardUrl)}"
+        style="display:inline-block;padding:12px 28px;background:#396999;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-top:8px;">
+        届いた請求書を一覧で見る →
+      </a>
+    </div>
+    <div style="background:#f9fafb;padding:16px 24px;border-top:1px solid #e5e7eb;">
+      <p style="margin:0;font-size:11px;color:#9ca3af;">
+        このメールは建物管理部 請求回覧から自動送信されています。返信しないでください。
+      </p>
+    </div>
+  </div>
+</body>
+</html>`
+}
