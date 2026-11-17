@@ -21,6 +21,73 @@ function previewBtn(url: string, name: string, label = '👁 確認', cls = 'inl
   return `<button type="button" data-url="${escAttr(url)}" data-name="${escAttr(name)}" onclick="openSavedFilePreview(this.dataset.url, this.dataset.name)" class="${cls}">${label}</button>`
 }
 
+
+// ============================================================
+// 申請一覧の「進捗」表示
+//   ✅確認済 → ⏳今の確認待ち（太字・待ち日数。5日目以上は赤） → ○まだ先
+//   差し戻し・否決・保留は、どの段階のだれで止まったかを表示
+// ============================================================
+const STEP_SHORT: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終' }
+function utcMs(v: any): number {
+  if (!v) return NaN
+  const t = String(v)
+  return Date.parse(t.includes('T') ? t : t.replace(' ', 'T') + 'Z')
+}
+function waitDays(since: any): { n: number; html: string } {
+  const ms = utcMs(since)
+  if (isNaN(ms)) return { n: 0, html: '' }
+  const n = Math.max(0, Math.floor((Date.now() - ms) / 86400000)) + 1
+  const cls = n >= 5 ? 'bg-red-100 text-red-700 font-bold' : 'bg-gray-100 text-gray-600'
+  return { n, html: `<span class="ml-1 text-[11px] px-1.5 py-0.5 rounded ${cls} whitespace-nowrap">${n}日目</span>` }
+}
+function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
+  const firstName = (n: any) => String(n || '').split(/[\s\u3000]/)[0] || String(n || '')
+  const arrow = '<span class="text-gray-300 mx-0.5">→</span>'
+  const sorted = [...steps].sort((a, b) => a.step_number - b.step_number)
+  if (app.status === 'draft') return '<span class="text-xs text-gray-500">📝 下書き</span>'
+  if (!sorted.length) return statusBadge(app.status)
+
+  // 今の段階の待ち始め = 直前に承認された時刻（なければ申請日時）
+  const sinceOf = (stepNo: number) => {
+    const prev = sorted.filter(s => s.step_number < stepNo && s.status === 'approved' && s.acted_at).map(s => utcMs(s.acted_at))
+    return prev.length ? new Date(Math.max(...prev)).toISOString() : app.created_at
+  }
+  const parts: string[] = []
+  let tail = ''
+  for (const st of sorted) {
+    const label = STEP_SHORT[st.step_number] || `段階${st.step_number}`
+    const who = escAttr(st.reviewer_name || '')
+    if (st.status === 'approved') {
+      parts.push(`<span class="text-green-700 whitespace-nowrap" title="${who} ${escAttr(String(st.acted_at || '').slice(0, 16))} 確認済">✅${label}</span>`)
+    } else if (st.status === 'pending' && app.status === 'circulating' && st.step_number === app.current_step) {
+      const w = waitDays(sinceOf(st.step_number))
+      parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded bg-[#EEF4FA] border border-[#AECBE5] text-[#234166] font-bold">⏳${label}（${escAttr(firstName(st.reviewer_name))}）${w.html}</span>`)
+    } else if (st.status === 'returned') {
+      const w = waitDays(st.acted_at)
+      parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-orange-50 border border-orange-200 text-orange-700 font-bold">🔙${label}（${escAttr(firstName(st.reviewer_name))}）で差し戻し</span>`)
+      tail = hasSuccessor
+        ? `<div class="mt-1 text-[11px] text-gray-500">→ 再申請済</div>`
+        : `<div class="mt-1 text-[11px] text-orange-700 font-semibold">→ 申請者（${escAttr(firstName(app.applicant_name))}）の再申請待ち${w.html}</div>`
+      break
+    } else if (st.status === 'rejected') {
+      parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-700 font-bold">✖${label}（${escAttr(firstName(st.reviewer_name))}）で否決</span>`)
+      if (hasSuccessor) tail = `<div class="mt-1 text-[11px] text-gray-500">→ 再提出済</div>`
+      break
+    } else if (st.status === 'on_hold') {
+      const w = waitDays(st.acted_at)
+      parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-yellow-50 border border-yellow-300 text-yellow-800 font-bold">❓${label}（${escAttr(firstName(st.reviewer_name))}）が保留・質問中</span>`)
+      tail = `<div class="mt-1 text-[11px] text-yellow-800 font-semibold">→ 申請者（${escAttr(firstName(app.applicant_name))}）の回答待ち${w.html}</div>`
+      break
+    } else {
+      parts.push(`<span class="text-gray-400 whitespace-nowrap">○${label}</span>`)
+    }
+  }
+  const head = app.status === 'completed'
+    ? '<span class="inline-block mb-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">🎉 完了</span><br>'
+    : ''
+  return `<div class="text-xs leading-6">${head}${parts.join(arrow)}${tail}</div>`
+}
+
 // ============================================================
 // 統合通知ヘルパー: メール + LINE WORKS を通知設定に応じて送信
 // ============================================================
@@ -158,6 +225,7 @@ applications.get('/', async (c) => {
   const status = c.req.query('status') || ''
   const from = c.req.query('from') || ''
   const to = c.req.query('to') || ''
+  const waiting = parseInt(c.req.query('waiting') || '') || 0   // 確認待ちの人（その人の確認で止まっている申請）
   const createdAppNumber = c.req.query('created') || ''  // 新規申請直後のトースト表示用
   const deletedMsg = (c.req.query('deleted') || '').replace(/[<>&"']/g, (ch) =>
     ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[ch] as string))
@@ -174,9 +242,41 @@ applications.get('/', async (c) => {
   if (status) { sql += ` AND a.status = ?`; params.push(status) }
   if (from) { sql += ` AND a.created_at >= ?`; params.push(from) }
   if (to) { sql += ` AND a.created_at <= ?`; params.push(to + ' 23:59:59') }
+  if (waiting) {
+    sql += ` AND a.status = 'circulating' AND EXISTS (SELECT 1 FROM circulation_steps cw WHERE cw.application_id = a.id AND cw.step_number = a.current_step AND cw.status = 'pending' AND cw.reviewer_id = ?)`
+    params.push(waiting)
+  }
   sql += ` ORDER BY a.created_at DESC LIMIT 100`
 
   const apps = await db.prepare(sql).bind(...params).all()
+
+  // 進捗表示用: 表示する申請の回覧ステップをまとめて取得
+  const appIds = (apps.results as any[]).map(a => a.id)
+  const stepsByApp: Record<string, any[]> = {}
+  if (appIds.length) {
+    const stepRows = await db.prepare(`
+      SELECT cs.id, cs.application_id, cs.step_number, cs.status, cs.acted_at, cs.created_at, u.name AS reviewer_name
+      FROM circulation_steps cs LEFT JOIN users u ON u.id = cs.reviewer_id
+      WHERE cs.application_id IN (SELECT value FROM json_each(?))
+      ORDER BY cs.application_id, cs.step_number, cs.id
+    `).bind(JSON.stringify(appIds)).all()
+    for (const r of stepRows.results as any[]) {
+      const list = (stepsByApp[r.application_id] ||= [])
+      // 同じ段階が複数あるときは新しいほうを使う
+      const i = list.findIndex((x: any) => x.step_number === r.step_number)
+      if (i >= 0) list[i] = r; else list.push(r)
+    }
+  }
+
+  // 絞り込み用: 今、確認待ちになっている人と件数
+  const waitingPeople = (await db.prepare(`
+    SELECT u.id, u.name, COUNT(*) AS cnt
+    FROM circulation_steps cs
+    JOIN applications a ON a.id = cs.application_id
+    JOIN users u ON u.id = cs.reviewer_id
+    WHERE a.status = 'circulating' AND cs.step_number = a.current_step AND cs.status = 'pending'
+    GROUP BY u.id ORDER BY u.name
+  `).all()).results as any[]
 
   // 保留中案件が存在するかを確認（存在する場合のみ、絞り込みプルダウンに「保留中」を表示）
   const holdCountRow = await db.prepare("SELECT COUNT(*) as c FROM applications WHERE status = 'on_hold'").first() as any
@@ -235,13 +335,14 @@ applications.get('/', async (c) => {
           <option value="">すべての状態</option>
           <option value="circulating" ${status==='circulating'?'selected':''}>回覧中</option>
           <option value="completed" ${status==='completed'?'selected':''}>完了</option>
-          <option value="rejected" ${status==='rejected'?'selected':''}>差し戻し</option>
+          <option value="returned" ${status==='returned'?'selected':''}>差し戻し</option>
+          <option value="rejected" ${status==='rejected'?'selected':''}>否決</option>
           ${(hasHoldApps || status === 'on_hold') ? `<option value="on_hold" ${status==='on_hold'?'selected':''}>保留中</option>` : ''}
           <option value="draft" ${status==='draft'?'selected':''}>下書き</option>
         </select>
         <button type="submit" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition">検索</button>
       </div>
-      <div class="grid grid-cols-2 gap-3 mt-3">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
         <div class="flex items-center gap-2">
           <label class="text-sm text-gray-500 whitespace-nowrap">期間（開始）</label>
           <input type="date" name="from" value="${from}" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
@@ -249,6 +350,13 @@ applications.get('/', async (c) => {
         <div class="flex items-center gap-2">
           <label class="text-sm text-gray-500 whitespace-nowrap">期間（終了）</label>
           <input type="date" name="to" value="${to}" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-500 whitespace-nowrap">確認待ちの人</label>
+          <select name="waiting" onchange="this.form.submit()" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+            <option value="">すべて</option>
+            ${waitingPeople.map(w => `<option value="${w.id}" ${waiting === w.id ? 'selected' : ''}>${escAttr(w.name)}（${w.cnt}件）</option>`).join('')}
+          </select>
         </div>
       </div>
     </form>
@@ -270,14 +378,13 @@ applications.get('/', async (c) => {
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">マンション名</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">申請者</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">支払先</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">金額</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">進捗 <span class="font-normal text-gray-400">（✅確認済 → ⏳確認待ち → ○まだ先）</span></th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">申請日</th>
               <th class="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-50">
-            ${apps.results.length === 0 ? `<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">該当する申請はありません</td></tr>` :
+            ${apps.results.length === 0 ? `<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">該当する申請はありません</td></tr>` :
               (apps.results as any[]).map(app => {
                 const motoukeAbadge = (app.payment_target === 'td' && app.td_type === 'motouke') ? '<span class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 rounded" title="元請セット申請A">🔗A</span>' : ''
                 const motoukeBbadge = app.original_application_id ? '<span class="ml-1 bg-emerald-100 text-emerald-700 text-xs px-1.5 rounded" title="元請セット申請B（後続）">🔗B</span>' : ''
@@ -303,10 +410,9 @@ applications.get('/', async (c) => {
                 <tr class="${rowClass}">
                   <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${testBadge}${resubmitBadge}${motoukeAbadge}${motoukeBbadge}</td>
                   <td class="px-4 py-3 font-medium text-gray-800">${app.mansion_name || app.title}</td>
-                  <td class="px-4 py-3 text-gray-600">${app.applicant_name}</td>
+                  <td class="px-4 py-3 text-gray-600 whitespace-nowrap">${app.applicant_name}</td>
                   <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
-                  <td class="px-4 py-3 text-gray-700">${Number(app.budget_amount).toLocaleString()}円</td>
-                  <td class="px-4 py-3">${statusBadge(app.status)}</td>
+                  <td class="px-4 py-3">${progressCell(app, stepsByApp[app.id] || [], hasSuccessor)}</td>
                   <td class="px-4 py-3 text-gray-400 text-xs">${app.created_at?.substring(0,10)}</td>
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-2 justify-end">
