@@ -254,7 +254,7 @@ export function layout(title: string, content: string, user: any): string {
 
     <!-- メインコンテンツ -->
     <main class="flex-1 lg:ml-64 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6">
-      <div class="max-w-6xl mx-auto">
+      <div class="max-w-screen-2xl mx-auto">
         <h1 class="text-lg sm:text-xl font-bold text-gray-800 mb-4 sm:mb-6">${title}</h1>
         ${content}
       </div>

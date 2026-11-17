@@ -426,7 +426,7 @@ inbox.get('/bulk', async (c) => {
     fronts: fronts.map((f: any) => ({ id: f.id, name: f.name, email: f.email, test: !!f.test })),
   }
   const content = `
-    <div class="max-w-6xl mx-auto space-y-4">
+    <div class="max-w-screen-2xl mx-auto space-y-4">
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 class="text-xl font-bold text-gray-800">📚 まとめて登録・担当者へ送信</h2>

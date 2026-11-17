@@ -281,7 +281,7 @@ app.get('/', async (c) => {
     ${sidebar}
     <div id="overlay" onclick="document.getElementById('sidebar').classList.add('-translate-x-full');this.classList.add('hidden')" class="fixed inset-0 bg-black bg-opacity-30 z-30 hidden lg:hidden"></div>
     <main class="flex-1 lg:ml-60 p-6">
-      <div class="max-w-6xl mx-auto">
+      <div class="max-w-screen-2xl mx-auto">
         <h1 class="text-xl font-bold text-gray-800 mb-6">ダッシュボード</h1>
         ${pwChanged ? `<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm mb-6">✅ パスワードを変更しました。</div>` : ''}
         <div class="space-y-8">
