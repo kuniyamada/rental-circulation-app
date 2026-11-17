@@ -38,21 +38,31 @@
 
   <!-- 1 + 2 -->
   <div class="row">
-    <div class="step" style="flex:0 0 27%">
+    <div class="step" style="flex:0 0 22%">
       <div class="t"><div class="n">1</div><h2>ログイン</h2></div>
       <img src="manual_img/1_login.png">
       <div class="cap">社員番号とパスワード</div>
     </div>
-    <div class="step o" style="flex:1">
-      <div class="t"><div class="n">2</div><h2>お知らせが来たら「回覧申請する」</h2></div>
-      <div class="cap" style="margin:0 0 4px">メール／LINE WORKS でお知らせ → ログインすると最初の画面に出ます</div>
-      <img src="manual_img/2_inbox.png">
+    <div style="flex:1; display:flex; flex-direction:column; gap:0">
+      <div class="step o">
+        <div class="t"><div class="n" style="flex-basis:40px;border-radius:13px">2-1</div><h2>業務管理課から請求が来たら</h2></div>
+        <div class="cap" style="margin:0 0 4px">お知らせ（メール／LINE WORKS）→ 最初の画面の「回覧申請する」</div>
+        <img src="manual_img/2_inbox.png">
+      </div>
+      <div class="step o" style="margin-bottom:6px">
+        <div class="t"><div class="n" style="flex-basis:40px;border-radius:13px">2-2</div><h2>業者から請求が来たら</h2></div>
+        <div class="row">
+          <div style="flex:0 0 30%"><img src="manual_img/2b_menu.png"><div class="cap">左メニューの「新規申請」</div></div>
+          <div class="arrow">▶</div>
+          <div style="flex:1"><img src="manual_img/2b_form.png"><div class="cap">マンション番号を入れて、請求書PDFを添付</div></div>
+        </div>
+      </div>
     </div>
   </div>
 
   <!-- 3 -->
   <div class="step">
-    <div class="t"><div class="n">3</div><h2>支払先を選んで、空いている所を入れる</h2></div>
+    <div class="t"><div class="n">3</div><h2>支払先を選んで、空いている所を入れる <span style="font-size:10pt;color:#6b7280;font-weight:normal">（ここからは 2-1・2-2 共通）</span></h2></div>
     <div class="row">
       <div style="flex:1.15">
         <img src="manual_img/3b_pay.png">
