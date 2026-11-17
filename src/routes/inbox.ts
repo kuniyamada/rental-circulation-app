@@ -254,8 +254,15 @@ inbox.get('/new', async (c) => {
     ? await db.prepare(`SELECT e.*, a.application_number FROM estimate_ledger e LEFT JOIN applications a ON a.id = e.application_id WHERE e.id = ?`).bind(estimateId).first().catch(() => null) as any
     : null
 
+  const errKey = c.req.query('error') || ''
+  const errMsg = errKey === 'pdf_required' ? '請求書PDFを添付してください（PDFがないと登録できません）'
+    : errKey === 'pdf_invalid' ? 'PDFファイルを選択してください（最大10MB）'
+    : errKey === 'required' ? 'マンションと担当フロントを選択してください'
+    : ''
+
   const content = `
     <div class="max-w-xl mx-auto">
+      ${errMsg ? `<div class="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg">⚠️ ${errMsg}</div>` : ''}
       ${estRow ? `
       <div class="mb-4 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 text-sm text-amber-900">
         <div class="font-bold mb-1">📒 管理簿の見積書から請求書を登録します</div>
@@ -270,7 +277,8 @@ inbox.get('/new', async (c) => {
           📥 請求書を登録・フロントへ送信
         </h2>
 
-        <form method="POST" action="/inbox" enctype="multipart/form-data" class="space-y-5">
+        <form method="POST" action="/inbox" enctype="multipart/form-data" class="space-y-5" id="inboxForm"
+              onkeydown="return preventEnterSubmit(event)" onsubmit="return confirmInboxSubmit()">
           ${estRow ? `<input type="hidden" name="estimate_id" value="${estRow.id}">` : ''}
 
           <!-- マンション番号入力 -->
@@ -328,6 +336,7 @@ inbox.get('/new', async (c) => {
                 class="hidden" onchange="showFileName(this)">
               <p id="fileName" class="text-xs text-[#396999] mt-2 font-medium"></p>
             </div>
+            <p id="pdfRequiredMsg" class="hidden text-xs text-red-600 mt-1 font-semibold">⚠️ 請求書PDFを添付してください（必須）</p>
           </div>
 
           <!-- 備考 -->
@@ -342,7 +351,7 @@ inbox.get('/new', async (c) => {
             <a href="/inbox" class="flex-1 text-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
               キャンセル
             </a>
-            <button type="submit"
+            <button type="submit" id="inboxSubmitBtn"
               class="flex-1 bg-[#396999] hover:bg-[#2E5580] text-white font-semibold px-4 py-2 rounded-lg text-sm transition flex items-center justify-center gap-2">
               📤 登録してフロントに送信
             </button>
@@ -476,6 +485,58 @@ inbox.get('/new', async (c) => {
         box.innerHTML = html;
       }
 
+      // Enterキーで送信されないようにする（送信は「登録してフロントに送信」ボタンだけ）
+      //   マンション番号欄でEnter → 担当フロントへ移動するだけ
+      function preventEnterSubmit(e) {
+        if (e.key !== 'Enter') return true;
+        const t = e.target;
+        if (!t || t.tagName === 'TEXTAREA' || t.tagName === 'BUTTON' || t.tagName === 'A') return true;
+        e.preventDefault();
+        if (t.id === 'mansionNumberInput') {
+          searchMansion(t.value);
+          const fs = document.getElementById('frontSelect');
+          if (fs) fs.focus();
+        }
+        return false;
+      }
+
+      // 送信前チェック: マンション・担当フロント・PDF（必須）→ 確認ダイアログ
+      let inboxSubmitting = false;
+      function confirmInboxSubmit() {
+        if (inboxSubmitting) return false;
+        const mansionId = document.getElementById('mansionIdInput').value;
+        const fs = document.getElementById('frontSelect');
+        const pdf = document.getElementById('pdfFile');
+        const pdfMsg = document.getElementById('pdfRequiredMsg');
+        if (!mansionId) {
+          alert('マンション番号を入力してください');
+          document.getElementById('mansionNumberInput').focus();
+          return false;
+        }
+        if (!fs || !fs.value) {
+          alert('担当フロントを選択してください');
+          if (fs) fs.focus();
+          return false;
+        }
+        if (!pdf || !pdf.files || pdf.files.length === 0) {
+          if (pdfMsg) pdfMsg.classList.remove('hidden');
+          const zone = document.getElementById('pdfDropZone');
+          if (zone) { zone.classList.add('border-red-400', 'bg-red-50'); zone.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+          alert('請求書PDFを添付してください（必須です）');
+          return false;
+        }
+        const frontName = fs.options[fs.selectedIndex].text.replace(/^★\\s*/, '').replace(/（.*$/, '').trim();
+        const mansionName = (document.getElementById('mansionResult').textContent || '').replace(/\\s+/g, ' ').trim();
+        const ok = confirm(frontName + ' さんに送信します。よろしいですか？\\n\\n'
+          + 'マンション：' + mansionName + '\\n'
+          + '請求書PDF：' + pdf.files[0].name);
+        if (!ok) return false;
+        inboxSubmitting = true;
+        const btn = document.getElementById('inboxSubmitBtn');
+        if (btn) { btn.disabled = true; btn.classList.add('opacity-60'); btn.textContent = '送信中…'; }
+        return true;
+      }
+
       // PDFかどうか・サイズ（最大10MB）をチェック
       function isValidPdf(file) {
         if (!file) return false;
@@ -494,6 +555,10 @@ inbox.get('/new', async (c) => {
             return;
           }
           p.textContent = '✅ ' + input.files[0].name;
+          const pdfMsg = document.getElementById('pdfRequiredMsg');
+          if (pdfMsg) pdfMsg.classList.add('hidden');
+          const zone = document.getElementById('pdfDropZone');
+          if (zone) zone.classList.remove('border-red-400', 'bg-red-50');
         } else {
           p.textContent = '';
         }
@@ -556,8 +621,18 @@ inbox.post('/', async (c) => {
   const note = body.note || null
   const pdfFile = body.pdf_file as File | null
 
+  const backQs = body.estimate_id ? `&estimate_id=${encodeURIComponent(String(body.estimate_id))}` : ''
   if (!mansionId || !frontUserId) {
-    return c.redirect('/inbox/new?error=required')
+    return c.redirect('/inbox/new?error=required' + backQs)
+  }
+  // 請求書PDFは必須（PDFなしの受付が担当フロントに届かないように）
+  if (!pdfFile || typeof pdfFile === 'string' || !(pdfFile as File).size) {
+    return c.redirect('/inbox/new?error=pdf_required' + backQs)
+  }
+  const pf = pdfFile as File
+  const isPdf = pf.type === 'application/pdf' || /\.pdf$/i.test(pf.name || '')
+  if (!isPdf || pf.size > 10 * 1024 * 1024) {
+    return c.redirect('/inbox/new?error=pdf_invalid' + backQs)
   }
 
   let attachmentKey: string | null = null
