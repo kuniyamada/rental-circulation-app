@@ -45,6 +45,7 @@ export const NOTIFY_TYPE_LABEL: Record<string, string> = {
   reapplied: '再申請',
   recalled: '申請者の取消',
   reminder_summary: 'リマインドのまとめ',
+  inbox_remind_supervisor: '受付リマインド（上長へ）',
 }
 
 export const CHANNEL_LABEL: Record<string, string> = { email: 'メール', lineworks: 'LINE WORKS' }

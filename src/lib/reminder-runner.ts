@@ -17,12 +17,12 @@ export type ReminderRunResult = {
   inbox: { active: boolean; targets: number; sent: number; due_later: number; max_reached: number }
   review: { active: boolean; targets: number; sent: number; failed: number; due_later: number; max_reached: number }
   dry_run?: boolean
-  would_send?: { kind: '受付' | '承認'; to: string; item: string; count: number }[]
+  would_send?: { kind: '受付' | '承認'; to: string; item: string; count: number; supervisor?: string }[]
   summary?: { sent_to: string[]; failed_to: string[] }
 }
 
 // 管理者へのまとめ用：送った1件ずつの記録
-type SentItem = { kind: '受付' | '承認'; to: string; item: string; count: number; ok: boolean }
+type SentItem = { kind: '受付' | '承認'; to: string; item: string; count: number; ok: boolean; sup?: { name: string; ok: boolean } }
 
 const STEP_LABEL: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終承認者' }
 const esc = (v: any) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])
@@ -100,8 +100,10 @@ export async function runReminders(db: D1Database, origin: string, trigger: 'aut
     const max = settings.remind_max_count || 3
     const rows = (await db.prepare(`
       SELECT ii.id, ii.front_user_id, ii.note, ii.remind_count, ii.last_reminded_at, ii.notified_at, ii.created_at,
-             m.name AS mansion_name, r.name AS registered_by_name, f.name AS front_name
+             m.name AS mansion_name, r.name AS registered_by_name, f.name AS front_name,
+             m.supervisor_user_id AS sup_id, sv.name AS sup_name
       FROM invoice_inbox ii
+      LEFT JOIN users sv ON sv.id = (SELECT supervisor_user_id FROM mansions WHERE id = ii.mansion_id) AND sv.is_active = 1
       LEFT JOIN users f ON f.id = ii.front_user_id
       LEFT JOIN mansions m ON m.id = ii.mansion_id
       LEFT JOIN users r ON r.id = ii.registered_by
@@ -114,7 +116,9 @@ export async function runReminders(db: D1Database, origin: string, trigger: 'aut
       const due = remindDueDate(base, interval)
       if (!due || due > today) { result.inbox.due_later++; continue }
       const newCount = (it.remind_count || 0) + 1
-      if (dry) { result.would_send!.push({ kind: '受付', to: it.front_name || String(it.front_user_id), item: it.mansion_name || '', count: newCount }); result.inbox.sent++; continue }
+      // 2回目以降は、マンションの上長にも知らせる（上長が本人と同じなら送らない）
+      const supTarget = newCount >= 2 && it.sup_id && it.sup_name && Number(it.sup_id) !== Number(it.front_user_id) ? { id: Number(it.sup_id), name: String(it.sup_name) } : null
+      if (dry) { result.would_send!.push({ kind: '受付', to: it.front_name || String(it.front_user_id), item: it.mansion_name || '', count: newCount, supervisor: supTarget?.name }); result.inbox.sent++; continue }
       await db.prepare('UPDATE invoice_inbox SET remind_count = ?, last_reminded_at = ?, updated_at = ? WHERE id = ?')
         .bind(newCount, now, now, it.id).run()
       const delivered = await notifyInbox(db, it.front_user_id, {
@@ -126,7 +130,40 @@ export async function runReminders(db: D1Database, origin: string, trigger: 'aut
         remindCount: newCount,
         inboxId: it.id,
       })
-      sentItems.push({ kind: '受付', to: it.front_name || '', item: it.mansion_name || '', count: newCount, ok: delivered })
+      let sup: { name: string; ok: boolean } | undefined
+      if (supTarget) {
+        const appUrl = `${origin}/applications/new?inbox_id=${it.id}`
+        const head = `${it.front_name || '担当者'}さんに${newCount}回目のリマインドを送りました`
+        const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"></head>
+<body style="font-family:sans-serif;color:#333;margin:0;padding:0;background:#f5f5f5;">
+  <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    <div style="background:#b45309;padding:18px 24px;">
+      <h2 style="color:#fff;margin:0;font-size:17px;">📣 上長の方へ：未申請の請求書があります</h2>
+      <p style="color:#fde68a;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 建物管理部 請求回覧</p>
+    </div>
+    <div style="padding:20px 24px;">
+      <p style="font-size:14px;">${esc(supTarget.name)} さん</p>
+      <p style="font-size:14px;">${esc(head)}が、まだ回覧申請が出ていません。<br>お声がけをお願いします。</p>
+      <table style="border-collapse:collapse;margin:12px 0;width:100%;">
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 12px 6px 0;color:#6b7280;font-size:13px;white-space:nowrap;">マンション</td><td style="padding:6px 0;font-size:13px;"><strong>${esc(it.mansion_name || '')}</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 12px 6px 0;color:#6b7280;font-size:13px;white-space:nowrap;">担当フロント</td><td style="padding:6px 0;font-size:13px;">${esc(it.front_name || '')}</td></tr>
+        <tr><td style="padding:6px 12px 6px 0;color:#6b7280;font-size:13px;white-space:nowrap;">リマインド</td><td style="padding:6px 0;font-size:13px;">${newCount}回目</td></tr>
+      </table>
+      <a href="${esc(appUrl)}" style="display:inline-block;padding:10px 22px;background:#396999;color:#fff;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;">受付の内容を見る →</a>
+    </div>
+  </div>
+</body></html>`
+        const r = await notifyUser(db, supTarget.id, {
+          type: 'inbox_remind_supervisor',
+          subject: `【上長の方へ】${it.mansion_name || ''} の請求書が未申請です（${it.front_name || ''}さんへ${newCount}回目のリマインド）`,
+          html,
+          lwText: [`📣 上長の方へ`, `${head}が、まだ回覧申請が出ていません。`, '', `マンション: ${it.mansion_name || ''}`, `担当フロント: ${it.front_name || ''}`, `リマインド: ${newCount}回目`, '', 'お声がけをお願いします。'].join('\n'),
+          lwButton: { label: '受付の内容を見る', url: appUrl },
+          inboxId: it.id,
+        })
+        sup = { name: supTarget.name, ok: r.ok }
+      }
+      sentItems.push({ kind: '受付', to: it.front_name || '', item: it.mansion_name || '', count: newCount, ok: delivered, sup })
       result.inbox.sent++
     }
   }
@@ -215,11 +252,12 @@ async function sendAdminSummary(db: D1Database, origin: string, today: string, t
   const ng = items.filter(i => !i.ok).length
   const head = `${m}/${d}${trigger === 'auto' ? ' 朝' : '（手動実行）'}のリマインド ${items.length}件${ng ? `（うち送れなかった ${ng}件）` : ''}`
   const subject = `【リマインドのまとめ】${head}`
-  const mark = (i: SentItem) => i.ok ? '' : '　※送れませんでした'
+  const supTxt = (i: SentItem) => i.sup ? `　→ 上長（${i.sup.name}さん）にも送信${i.sup.ok ? '' : '※送れませんでした'}` : ''
+  const mark = (i: SentItem) => (i.ok ? '' : '　※送れませんでした') + supTxt(i)
   const lines: string[] = [`📋 ${head}`]
   if (inbox.length) { lines.push('', `■ ① 受付後の申請リマインド（${inbox.length}件）`); for (const i of inbox) lines.push(`・${i.to}：${i.item}（${i.count}回目）${mark(i)}`) }
   if (review.length) { lines.push('', `■ ② 承認者リマインド（${review.length}件）`); for (const i of review) lines.push(`・${i.to}：${i.item}（${i.count}回目）${mark(i)}`) }
-  const rowsHtml = (list: SentItem[]) => list.map(i => `<tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 10px 6px 0;font-size:13px;white-space:nowrap;"><strong>${esc(i.to)}</strong></td><td style="padding:6px 10px 6px 0;font-size:13px;">${esc(i.item)}</td><td style="padding:6px 0;font-size:13px;white-space:nowrap;">${i.count}回目${i.ok ? '' : ' <span style="color:#dc2626;font-weight:bold;">送れませんでした</span>'}</td></tr>`).join('')
+  const rowsHtml = (list: SentItem[]) => list.map(i => `<tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 10px 6px 0;font-size:13px;white-space:nowrap;"><strong>${esc(i.to)}</strong></td><td style="padding:6px 10px 6px 0;font-size:13px;">${esc(i.item)}</td><td style="padding:6px 0;font-size:13px;white-space:nowrap;">${i.count}回目${i.ok ? '' : ' <span style="color:#dc2626;font-weight:bold;">送れませんでした</span>'}${i.sup ? `<br><span style="color:#b45309;font-size:12px;">→ 上長（${esc(i.sup.name)}さん）にも送信${i.sup.ok ? '' : ' <span style="color:#dc2626;font-weight:bold;">送れませんでした</span>'}</span>` : ''}</td></tr>`).join('')
   const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"></head>
 <body style="font-family:sans-serif;color:#333;margin:0;padding:0;background:#f5f5f5;">
   <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
