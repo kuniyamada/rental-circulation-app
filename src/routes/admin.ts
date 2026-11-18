@@ -3302,6 +3302,8 @@ const LOGIN_EVENT_LABEL: Record<string, { label: string; cls: string }> = {
   logout:  { label: 'ログアウト',   cls: 'bg-blue-50 text-blue-700 border-blue-200' },
   failed:  { label: 'ログイン失敗', cls: 'bg-red-50 text-red-700 border-red-200' },
   expired: { label: '時間切れ',     cls: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  preview_start: { label: '👤 プレビュー開始', cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+  preview_end:   { label: '👤 プレビュー終了', cls: 'bg-purple-50 text-purple-600 border-purple-200' },
 }
 
 function loginLogEsc(v: any): string {
@@ -3317,7 +3319,7 @@ function buildLoginLogFilter(q: (k: string) => string | undefined) {
   const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v)
   const from = isDate(q('from')) ? q('from')! : jstDateStr(-29)
   const to = isDate(q('to')) ? q('to')! : jstDateStr(0)
-  const type = ['login', 'logout', 'failed', 'expired'].includes(q('type') || '') ? q('type')! : ''
+  const type = ['login', 'logout', 'failed', 'expired', 'preview_start', 'preview_end'].includes(q('type') || '') ? q('type')! : ''
   const keyword = (q('q') || '').trim()
 
   // created_at は UTC。JST の日付範囲を UTC に変換して比較
@@ -3470,7 +3472,7 @@ admin.get('/login-logs', async (c) => {
   const countRows = await db.prepare(
     `SELECT event_type, COUNT(*) AS cnt FROM login_logs WHERE ${f.where.join(' AND ')} GROUP BY event_type`
   ).bind(...f.binds).all()
-  const counts: Record<string, number> = { login: 0, logout: 0, failed: 0, expired: 0 }
+  const counts: Record<string, number> = { login: 0, logout: 0, failed: 0, expired: 0, preview_start: 0, preview_end: 0 }
   for (const r of countRows.results as any[]) counts[r.event_type] = r.cnt
   const totalAll = Object.values(counts).reduce((a, b) => a + b, 0)
 
@@ -3508,7 +3510,7 @@ admin.get('/login-logs', async (c) => {
       <td class="px-3 py-2">${badge(r.event_type)}</td>
       <td class="px-3 py-2 whitespace-nowrap">${loginLogEsc(r.employee_number) || '-'}</td>
       <td class="px-3 py-2 whitespace-nowrap">${loginLogEsc(r.user_name) || '-'}</td>
-      <td class="px-3 py-2 whitespace-nowrap text-red-600">${loginLogEsc(r.failure_reason)}</td>
+      <td class="px-3 py-2 whitespace-nowrap ${String(r.event_type).startsWith('preview') ? 'text-purple-700' : 'text-red-600'}">${loginLogEsc(r.failure_reason)}</td>
       <td class="px-3 py-2 font-mono text-xs text-gray-600 break-all">${loginLogEsc(r.ip_address) || '-'}</td>
       <td class="px-3 py-2 whitespace-nowrap text-gray-600">${loginLogEsc(r.device) || '-'}</td>
     </tr>`).join('')
@@ -3548,7 +3550,7 @@ admin.get('/login-logs', async (c) => {
           <div>
             <label class="block text-xs text-gray-500 mb-1">種別</label>
             <select name="type" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
-              ${typeOpt('', 'すべて')}${typeOpt('login', 'ログイン')}${typeOpt('logout', 'ログアウト')}${typeOpt('failed', 'ログイン失敗')}${typeOpt('expired', '時間切れ')}
+              ${typeOpt('', 'すべて')}${typeOpt('login', 'ログイン')}${typeOpt('logout', 'ログアウト')}${typeOpt('failed', 'ログイン失敗')}${typeOpt('expired', '時間切れ')}${typeOpt('preview_start', '👤 プレビュー開始')}${typeOpt('preview_end', '👤 プレビュー終了')}
             </select>
           </div>
           <div>
@@ -3566,6 +3568,7 @@ admin.get('/login-logs', async (c) => {
           <span class="px-2 py-1 rounded border ${LOGIN_EVENT_LABEL.logout.cls}">ログアウト ${counts.logout}件</span>
           <span class="px-2 py-1 rounded border ${LOGIN_EVENT_LABEL.failed.cls}">ログイン失敗 ${counts.failed}件</span>
           <span class="px-2 py-1 rounded border ${LOGIN_EVENT_LABEL.expired.cls}">時間切れ ${counts.expired}件</span>
+          ${(counts.preview_start || counts.preview_end) ? `<span class="px-2 py-1 rounded border ${LOGIN_EVENT_LABEL.preview_start.cls}">👤 プレビュー ${counts.preview_start}件</span>` : ''}
         </div>
       </div>
 

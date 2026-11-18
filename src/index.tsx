@@ -1,3 +1,4 @@
+import { writeLoginLog, getClientIp } from './lib/login-log'
 import { logNotify } from './lib/notify-log'
 import { Hono } from 'hono'
 import { serveStatic } from 'hono/cloudflare-workers'
@@ -43,27 +44,56 @@ app.post('/preview-role', async (c) => {
   return c.redirect('/')
 })
 
+// ===== 個人名プレビュー（管理者専用・見るだけ） =====
+// 切替: POST /preview-user  (user_id= 空 で解除)。だれがだれとして見たかをログイン履歴に残す
+app.post('/preview-user', async (c) => {
+  const sessionId = getSessionIdFromCookie(c.req.header('Cookie') || null)
+  const user = await getSessionUser(c.env.DB, sessionId)
+  if (!user) return c.redirect('/login')
+  if (!user.real_is_admin) return c.redirect('/')
+  const db = c.env.DB
+  const body = await c.req.parseBody() as any
+  const targetId = parseInt(String(body.user_id || '')) || 0
+  const target = targetId && targetId !== user.real_uid
+    ? await db.prepare('SELECT id, name, employee_number FROM users WHERE id = ? AND is_active = 1').bind(targetId).first() as any
+    : null
+  await db.prepare('UPDATE sessions SET preview_user_id = ?, preview_role = NULL WHERE id = ?').bind(target ? target.id : null, sessionId).run()
+  const prev = user.preview_user
+  if (target || prev) {
+    await writeLoginLog(db, {
+      event_type: (target ? 'preview_start' : 'preview_end') as any,
+      user_id: user.real_uid,
+      employee_number: user.real_employee_number || null,
+      user_name: user.real_name,
+      failure_reason: target ? `${target.name}（${target.employee_number}）として表示` : `${prev.name}（${prev.employee_number}）の表示を終了`,
+      ip_address: getClientIp(c.req),
+      user_agent: c.req.header('User-Agent') || '',
+    })
+  }
+  return c.redirect('/')
+})
+
 // プレビュー中は閲覧のみ: 切替・ログアウト以外の書き込み操作(GET/HEAD以外)をブロック
 app.use('*', async (c, next) => {
   const method = c.req.method
   if (method === 'GET' || method === 'HEAD') return next()
   const path = new URL(c.req.url).pathname
-  if (path === '/preview-role' || path === '/logout' || path === '/login') return next()
+  if (path === '/preview-role' || path === '/preview-user' || path === '/logout' || path === '/login') return next()
   const sessionId = getSessionIdFromCookie(c.req.header('Cookie') || null)
   if (!sessionId) return next()
   const row = await c.env.DB.prepare(
-    'SELECT s.preview_role, u.is_admin FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ?'
+    'SELECT s.preview_role, s.preview_user_id, u.is_admin FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ?'
   ).bind(sessionId).first() as any
-  if (row && row.is_admin && row.preview_role) {
+  if (row && row.is_admin && (row.preview_role || row.preview_user_id)) {
     return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
 <body class="bg-gray-50 min-h-screen flex items-center justify-center p-6">
   <div class="bg-white border-2 border-purple-300 rounded-xl shadow p-6 max-w-md text-center">
     <p class="text-3xl mb-2">👁</p>
-    <p class="font-bold text-gray-800 mb-2">役割プレビュー中は操作できません</p>
+    <p class="font-bold text-gray-800 mb-2">プレビュー中は操作できません</p>
     <p class="text-sm text-gray-600 mb-4">プレビューは「見るだけ」の機能です。申請・承認などの操作を行うには、プレビューを解除してください。</p>
     <div class="flex gap-2 justify-center">
       <button onclick="history.back()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm">戻る</button>
-      <form method="POST" action="/preview-role"><input type="hidden" name="role" value="">
+      <form method="POST" action="${row.preview_user_id ? '/preview-user' : '/preview-role'}"><input type="hidden" name="${row.preview_user_id ? 'user_id' : 'role'}" value="">
         <button class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold">プレビューを解除</button></form>
     </div>
   </div>

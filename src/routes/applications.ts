@@ -33,6 +33,7 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
   const arrow = '<span class="text-gray-300 mx-0.5">→</span>'
   const sorted = [...steps].sort((a, b) => a.step_number - b.step_number)
   if (app.status === 'draft') return '<span class="text-xs text-gray-500">📝 下書き</span>'
+  if (app.status === 'withdrawn') return '<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">🚫 申請者が取り下げ</span>'
   if (!sorted.length) return statusBadge(app.status)
 
   const parts: string[] = []
@@ -220,6 +221,7 @@ applications.get('/', async (c) => {
 
   if (q) { sql += ` AND (m.name LIKE ? OR a.title LIKE ? OR a.application_number LIKE ?)`; params.push(`%${q}%`, `%${q}%`, `%${q}%`) }
   if (status) { sql += ` AND a.status = ?`; params.push(status) }
+  else { sql += ` AND a.status != 'withdrawn'` }   // 取り下げた申請は初期表示では出さない
   if (from) { sql += ` AND a.created_at >= ?`; params.push(from) }
   if (to) { sql += ` AND a.created_at <= ?`; params.push(to + ' 23:59:59') }
   if (waiting) {
@@ -319,6 +321,7 @@ applications.get('/', async (c) => {
           <option value="rejected" ${status==='rejected'?'selected':''}>否決</option>
           ${(hasHoldApps || status === 'on_hold') ? `<option value="on_hold" ${status==='on_hold'?'selected':''}>保留中</option>` : ''}
           <option value="draft" ${status==='draft'?'selected':''}>下書き</option>
+          <option value="withdrawn" ${status==='withdrawn'?'selected':''}>取り下げ</option>
         </select>
         <button type="submit" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition">検索</button>
       </div>
@@ -379,6 +382,9 @@ applications.get('/', async (c) => {
                   : isMyReturned ? 'hover:bg-orange-100 bg-orange-50/60'
                   : isMyRejected ? 'hover:bg-red-100 bg-red-50/60'
                   : 'hover:bg-gray-50'
+                const withdrawLink = (isMyReturned || isMyRejected)
+                  ? `<a href="/applications/${app.id}#withdraw" class="inline-flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold px-2 py-1 rounded transition whitespace-nowrap" title="この申請を取り下げる">🚫 取り下げ</a>`
+                  : ''
                 const resubmitLink = isMyReturned
                   ? `<a href="/applications/new?resubmit_id=${app.id}" class="inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-2 py-1 rounded transition whitespace-nowrap" title="編集して再申請">✏ 再申請</a>`
                   : isMyRejected
@@ -397,6 +403,7 @@ applications.get('/', async (c) => {
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-2 justify-end">
                       ${resubmitLink}
+                      ${withdrawLink}
                       <a href="/applications/${app.id}" class="text-[#396999] hover:underline text-xs whitespace-nowrap">詳細</a>
                     </div>
                   </td>
@@ -616,7 +623,20 @@ applications.get('/new', async (c) => {
 
   const today = new Date().toISOString().substring(0, 10)
 
+  const newErrKey = c.req.query('error') || ''
+  const NEW_ERRORS: Record<string, string> = {
+    mansion_required: 'マンションを選んでください（必須です）',
+    fee_type_required: '手数料の種別（円 / ％ / なし）を選んでください',
+    fee_amount_required: '手数料（円）を入力してください',
+    fee_rate_required: '手数料（％）を入力してください',
+    fee_required: '手数料を入力してください',
+    account_item_required: '勘定科目を入力してください',
+    account_item_too_long: '勘定科目は10文字以内で入力してください',
+    estimate_required: '見積書を添付してください（元請の場合は必須です）',
+  }
+  const newErrMsg = NEW_ERRORS[newErrKey] || ''
   const content = `
+    ${newErrMsg ? `<div class="mb-4 max-w-3xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg">⚠️ ${newErrMsg}</div>` : ''}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-3xl">
       <!-- ステップ表示 -->
       <div class="flex items-center gap-2 mb-8">
@@ -2082,6 +2102,14 @@ applications.get('/new', async (c) => {
 
       // 送信時の最終バリデーション
       function checkFeeRequired() {
+        // マンションは必須（hidden の required はブラウザが確認しないため、ここで確認する）
+        const mIdEl = document.getElementById('mansionIdInput')
+        if (mIdEl && !mIdEl.value) {
+          alert('マンション番号を入力して、マンションを選んでください（必須です）')
+          const numEl = document.getElementById('mansionNumberInput')
+          if (numEl) { numEl.focus(); numEl.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
+          return false
+        }
         // 元請: 見積書は必須（再申請で元申請から引き継いでいる場合はOK）
         const estMsg = document.getElementById('estimateValidationMsg')
         if (estMsg) estMsg.classList.add('hidden')
@@ -2225,6 +2253,11 @@ applications.post('/', async (c) => {
     if (accountItem.length > 10) {
       return c.redirect('/applications/new?error=account_item_too_long')
     }
+  }
+
+  // マンションは必須（画面の確認をすり抜けた場合もここで止める）
+  if (!mansionId && !(fromMotoukeId && motoukeSource?.mansion_id)) {
+    return c.redirect('/applications/new?error=mansion_required')
   }
 
   // 元請: 見積書必須チェック
@@ -2603,6 +2636,9 @@ applications.get('/:id', async (c) => {
 
   const content = `
     ${deleteError ? `<div class="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg">⚠️ ${deleteError}</div>` : ''}
+    ${c.req.query('marked_test') ? `<div class="mb-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm px-4 py-2.5 rounded-lg">🧪 テスト申請扱いにしました。必要なら右上の「🗑 テスト申請を削除」で削除できます。</div>` : ''}
+    ${c.req.query('withdrawn') ? `<div class="mb-4 bg-gray-50 border border-gray-200 text-gray-700 text-sm px-4 py-2.5 rounded-lg">🚫 この申請を取り下げました。申請一覧の初期表示には出なくなります。</div>` : ''}
+    ${app.status === 'withdrawn' ? `<div class="mb-4 bg-gray-100 border border-gray-300 text-gray-700 text-sm px-4 py-3 rounded-lg">🚫 この申請は申請者が取り下げました${app.withdrawn_at ? `（${String(app.withdrawn_at).slice(0, 16).replace('T', ' ')}）` : ''}。</div>` : ''}
     <div class="space-y-6 max-w-3xl">
       ${motoukeFlash}
 
@@ -2618,10 +2654,16 @@ applications.get('/:id', async (c) => {
               <p class="text-xs text-orange-700 mt-0.5">内容（金額・請求書・添付・備考など）を修正して再申請してください。</p>
             </div>
           </div>
+          <div class="flex items-center gap-2 flex-wrap">
           <a href="/applications/new?resubmit_id=${id}"
             class="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-3 rounded-lg shadow transition text-sm whitespace-nowrap">
             ✏ 編集して再申請する →
           </a>
+          <form id="withdraw" method="POST" action="/applications/${id}/withdraw"
+                onsubmit="return confirm('この申請を取り下げますか？\\n\\n・試しに出した申請や、出し直さない申請に使います\\n・取り下げると、申請一覧の初期表示には出なくなります\\n・取り下げた申請は再申請できません')">
+            <button type="submit" class="inline-flex items-center gap-1 bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 font-semibold px-4 py-3 rounded-lg transition text-sm whitespace-nowrap">🚫 取り下げる</button>
+          </form>
+          </div>
         </div>
       </div>
       ` : ''}
@@ -2635,10 +2677,16 @@ applications.get('/:id', async (c) => {
               <p class="text-xs text-red-700 mt-0.5">内容を確認・修正して再提出できます。</p>
             </div>
           </div>
+          <div class="flex items-center gap-2 flex-wrap">
           <a href="/applications/new?resubmit_id=${id}"
             class="inline-flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white font-bold px-6 py-3 rounded-lg shadow transition text-sm whitespace-nowrap">
             ✏ 編集して再提出する →
           </a>
+          <form id="withdraw" method="POST" action="/applications/${id}/withdraw"
+                onsubmit="return confirm('この申請を取り下げますか？\\n\\n・試しに出した申請や、出し直さない申請に使います\\n・取り下げると、申請一覧の初期表示には出なくなります\\n・取り下げた申請は再申請できません')">
+            <button type="submit" class="inline-flex items-center gap-1 bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 font-semibold px-4 py-3 rounded-lg transition text-sm whitespace-nowrap">🚫 取り下げる</button>
+          </form>
+          </div>
         </div>
       </div>
       ` : ''}
@@ -2680,6 +2728,11 @@ applications.get('/:id', async (c) => {
           </div>
           <div class="flex flex-col items-end gap-2">
             ${statusBadge(app.status)}
+            ${(!app.is_test && user.is_admin) ? `
+            <form method="POST" action="/applications/${app.id}/mark-test"
+                  onsubmit="return confirm('${app.application_number} を「🧪 テスト申請」扱いにしますか？\\n\\n・試しに出された申請を片付けるときに使います\\n・テスト扱いにすると「🗑 テスト申請を削除」ボタンが出ます')">
+              <button type="submit" class="text-xs px-3 py-1.5 border border-yellow-300 text-yellow-700 bg-white rounded-lg hover:bg-yellow-50 font-semibold whitespace-nowrap">🧪 テスト扱いにする</button>
+            </form>` : ''}
             ${(app.is_test && user.is_admin) ? `
             <form method="POST" action="/applications/${app.id}/delete-test"
                   onsubmit="return confirm('テスト申請 ${app.application_number} を削除しますか？\\n\\n・回覧の記録、添付ファイル、元の請求書受付も一緒に削除されます\\n・Googleドライブに保存したファイルはゴミ箱へ移動します\\n\\n元に戻せません。')">
@@ -4225,6 +4278,9 @@ applications.post('/:id/resubmit', async (c) => {
   // === 編集後の値を取得（未入力 or フォームから来ていない場合は元申請の値を使用） ===
   const editedTitle = body.title || orig.title
   const editedMansionId = body.mansion_id ? parseInt(body.mansion_id) : orig.mansion_id
+  if (!editedMansionId) {
+    return c.redirect(`/applications/new?resubmit_id=${id}&error=mansion_required`)
+  }
   const editedStartDate = body.circulation_start_date || orig.circulation_start_date
   const editedPaymentTarget = body.payment_target || orig.payment_target
   // 勘定科目: 手入力・10文字上限（管理組合の場合のみ）
@@ -4403,6 +4459,31 @@ applications.post('/:id/resubmit', async (c) => {
 
 // ファイルダウンロード
 // テスト申請の削除（管理者のみ・is_test=1 の申請だけ）
+// 管理者: 通常の申請を「テスト申請」扱いにする（試しに出された申請を片付けるため）
+applications.post('/:id/mark-test', async (c) => {
+  const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie')))
+  if (!user) return c.redirect('/login')
+  const id = parseInt(c.req.param('id'))
+  if (!user.is_admin) return c.redirect(`/applications/${id}`)
+  await c.env.DB.prepare('UPDATE applications SET is_test = 1, updated_at = datetime("now") WHERE id = ?').bind(id).run()
+  return c.redirect(`/applications/${id}?marked_test=1`)
+})
+
+// 申請者本人: 差し戻し・否決のまま再申請していない申請を取り下げる
+applications.post('/:id/withdraw', async (c) => {
+  const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie')))
+  if (!user) return c.redirect('/login')
+  const db = c.env.DB
+  const id = parseInt(c.req.param('id'))
+  const res = await db.prepare(`
+    UPDATE applications SET status = 'withdrawn', withdrawn_at = datetime('now'), withdrawn_by = ?, updated_at = datetime('now')
+    WHERE id = ? AND applicant_id = ? AND status IN ('returned', 'rejected')
+      AND NOT EXISTS (SELECT 1 FROM applications a2 WHERE a2.original_application_id = applications.id)
+  `).bind(user.uid, id, user.uid).run()
+  if (!res.meta.changes) return c.redirect(`/applications/${id}?delete_error=${encodeURIComponent('この申請は取り下げできません（申請者本人の、差し戻し・否決で再申請していない申請だけ取り下げできます）')}`)
+  return c.redirect(`/applications/${id}?withdrawn=1`)
+})
+
 applications.post('/:id/delete-test', async (c) => {
   const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie')))
   if (!user) return c.redirect('/login')

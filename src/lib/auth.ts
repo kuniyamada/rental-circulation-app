@@ -32,13 +32,44 @@ export async function getSessionUser(db: D1Database, sessionId: string | undefin
   // 本来の権限を保持（役割プレビューの切替UI表示・解除に使う）
   session.real_role = session.role
   session.real_is_admin = session.is_admin
+  session.real_uid = session.uid
+  session.real_employee_number = session.employee_number
+  session.real_name = session.name
+  session.preview_user = null
+  // 管理者の個人名プレビュー中: 選んだ人として画面を表示（管理者権限は外す・見るだけ）
+  if (session.is_admin && session.preview_user_id) {
+    const pu = await db.prepare(
+      'SELECT id, name, email, role, employee_number FROM users WHERE id = ? AND is_active = 1'
+    ).bind(session.preview_user_id).first() as any
+    if (pu) {
+      session.preview_user = { id: pu.id, name: pu.name, employee_number: pu.employee_number }
+      session.uid = pu.id
+      session.name = pu.name
+      session.email = pu.email
+      session.role = pu.role
+      session.employee_number = pu.employee_number
+      session.is_admin = 0
+      session.test_mode = 0
+      session.must_change_password = 0
+      session.preview_role = null
+    }
+  }
   // 管理者の役割プレビュー中: 選択した役割として画面を表示（管理者権限は外す・見るだけ）
-  if (session.is_admin && session.preview_role && PREVIEW_ROLES[session.preview_role]) {
+  if (!session.preview_user && session.is_admin && session.preview_role && PREVIEW_ROLES[session.preview_role]) {
     session.role = session.preview_role
     session.is_admin = 0
     session.test_mode = 0
-  } else {
+  } else if (!session.preview_user) {
     session.preview_role = null
+  }
+  // 本来の管理者には、個人名プレビューで選べる人の一覧を持たせる（上部バーの選択欄用）
+  if (session.real_is_admin) {
+    try {
+      const rows = await db.prepare(
+        "SELECT id, name, employee_number, role FROM users WHERE is_active = 1 AND id != ? ORDER BY CAST(employee_number AS INTEGER), name"
+      ).bind(session.real_uid).all()
+      session.preview_user_options = rows.results || []
+    } catch { session.preview_user_options = [] }
   }
   return session
 }

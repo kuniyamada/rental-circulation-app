@@ -10,7 +10,18 @@ const PREVIEW_ROLE_OPTIONS: Array<[string, string]> = [
   ['honsha', '本社経理'],
 ]
 
-/** 上部バーに置く「役割プレビュー」切替（本来の管理者のみ表示・PC用） */
+const ROLE_JA: Record<string, string> = { front: '担当者', front_supervisor: '担当者/上司', operations: '業務管理課', accounting: '会計', honsha: '本社経理', admin: '管理者' }
+function escP(v: any): string {
+  return String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])
+}
+/** 個人名プレビューの選択肢 */
+function previewUserOptions(user: any): string {
+  const cur = user.preview_user ? String(user.preview_user.id) : ''
+  return (user.preview_user_options || []).map((u: any) =>
+    `<option value="${u.id}" ${cur === String(u.id) ? 'selected' : ''}>${escP(u.employee_number)} ${escP(u.name)}（${escP(ROLE_JA[u.role] || u.role)}）</option>`
+  ).join('')
+}
+/** 上部バーに置く「役割プレビュー」「個人名プレビュー」切替（本来の管理者のみ表示・PC用） */
 export function previewRoleHeader(user: any): string {
   if (!user || !user.real_is_admin) return ''
   const cur = user.preview_role || ''
@@ -23,6 +34,15 @@ export function previewRoleHeader(user: any): string {
             <option value="">（通常表示）</option>
             ${PREVIEW_ROLE_OPTIONS.map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('')}
           </select>
+        </form>
+        <form method="POST" action="/preview-user" class="hidden md:flex items-center gap-1.5 px-2 py-1 rounded-lg border ${user.preview_user ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-gray-50'}"
+              title="選んだ人から見た画面を確認できます（見るだけ）">
+          <label class="text-xs font-bold ${user.preview_user ? 'text-purple-700' : 'text-gray-500'} whitespace-nowrap">👤 この人として見る</label>
+          <select name="user_id" onchange="this.form.submit()"
+            class="max-w-[190px] px-1.5 py-0.5 border border-gray-300 rounded text-xs bg-white focus:ring-2 focus:ring-purple-400 outline-none">
+            <option value="">（自分）</option>
+            ${previewUserOptions(user)}
+          </select>
         </form>`
 }
 
@@ -31,7 +51,7 @@ export function previewRoleSelector(user: any): string {
   if (!user || !user.real_is_admin) return ''
   const cur = user.preview_role || ''
   return `
-        <div class="md:hidden mb-2 mx-1 p-2.5 rounded-lg border ${cur ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-gray-50'}">
+        <div class="md:hidden mb-2 mx-1 p-2.5 rounded-lg border ${cur || user.preview_user ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-gray-50'}">
           <form method="POST" action="/preview-role">
             <label class="block text-xs font-bold ${cur ? 'text-purple-700' : 'text-gray-500'} mb-1">👁 役割プレビュー（見るだけ）</label>
             <select name="role" onchange="this.form.submit()"
@@ -40,11 +60,30 @@ export function previewRoleSelector(user: any): string {
               ${PREVIEW_ROLE_OPTIONS.map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('')}
             </select>
           </form>
+          <form method="POST" action="/preview-user" class="mt-2">
+            <label class="block text-xs font-bold ${user.preview_user ? 'text-purple-700' : 'text-gray-500'} mb-1">👤 この人として見る（見るだけ）</label>
+            <select name="user_id" onchange="this.form.submit()"
+              class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-purple-400 outline-none">
+              <option value="">（自分）</option>
+              ${previewUserOptions(user)}
+            </select>
+          </form>
         </div>`
 }
 
 /** プレビュー中に画面上部に出す帯 */
 export function previewRoleBanner(user: any): string {
+  if (user && user.real_is_admin && user.preview_user) {
+    const pu = user.preview_user
+    return `
+  <div class="fixed top-14 left-0 right-0 z-[45] bg-purple-600 text-white text-xs sm:text-sm px-4 py-1.5 flex items-center justify-center gap-3 shadow">
+    <span>👤 個人名プレビュー中：<strong>${escP(pu.name)}（${escP(pu.employee_number)}・${escP(ROLE_JA[user.role] || user.role)}）</strong> さんから見た画面です（見るだけ・操作はできません）</span>
+    <form method="POST" action="/preview-user" class="inline"><input type="hidden" name="user_id" value="">
+      <button class="bg-white text-purple-700 font-semibold px-2.5 py-0.5 rounded hover:bg-purple-50">自分の画面に戻る</button>
+    </form>
+  </div>
+  <div class="h-8"></div>`
+  }
   if (!user || !user.real_is_admin || !user.preview_role) return ''
   const label = (PREVIEW_ROLE_OPTIONS.find(([v]) => v === user.preview_role) || ['', user.preview_role])[1]
   return `
@@ -414,6 +453,7 @@ export function statusBadge(status: string): string {
     returned:    { label: '差し戻し',     cls: 'bg-orange-100 text-orange-700' },
     on_hold:     { label: '保留中',       cls: 'bg-yellow-100 text-yellow-700' },
     completed:   { label: '完了',         cls: 'bg-purple-100 text-purple-700' },
+    withdrawn:   { label: '取り下げ',     cls: 'bg-gray-100 text-gray-500' },
   }
   const s = map[status] || { label: status, cls: 'bg-gray-100 text-gray-600' }
   return `<span class="text-xs font-semibold px-2 py-0.5 rounded-full ${s.cls}">${s.label}</span>`
