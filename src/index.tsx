@@ -700,131 +700,31 @@ app.route('/admin', admin)
 // ===== 請求書受付管理 =====
 app.route('/inbox', inbox)
 
-// ===== 承認リマインド自動送信API =====
-// このエンドポイントを定期的に呼び出す（外部cronや管理画面の手動実行）
+// ===== 自動リマインド（① 受付後の申請リマインド ＋ ② 承認者リマインド）=====
+// 毎朝 8:00（日本時間）に webapp-backup-worker の予定実行から呼ばれる（合言葉 REMINDER_TOKEN 必須）
+// 日曜・祝日・年末年始（12/29〜1/4）は送らない。間隔は「実際に送った日から N日後」
+app.get('/api/cron/reminders', async (c) => {
+  const expected = (c.env as any).REMINDER_TOKEN as string | undefined
+  const given = c.req.header('X-Reminder-Token') || c.req.query('token') || ''
+  if (!expected || given !== expected) return c.json({ error: 'unauthorized' }, 401)
+  const { runReminders, describeRun } = await import('./lib/reminder-runner')
+  const dryRun = c.req.query('dry') === '1'   // dry=1: 送らずに「送る予定の相手」だけ返す（確認用）
+  const r = await runReminders(c.env.DB, new URL(c.req.url).origin, 'auto', { dryRun })
+  return c.json({ ok: true, message: (dryRun ? '【確認のみ・送信なし】' : '') + describeRun(r), result: r })
+})
+
+// 管理画面の「今すぐ実行」（業務管理課・管理者のみ。送らない日でも実行できる）
 app.get('/api/trigger-review-reminders', async (c) => {
-  const db = c.env.DB
-
-  // リマインダー設定を取得
-  const settings = await db.prepare('SELECT * FROM reminder_settings WHERE id = 1').first() as any
-  if (!settings || !settings.review_remind_is_active) {
-    return c.json({ message: '承認リマインドは無効です', sent: 0 })
+  const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie') || null))
+  if (!user || (user.role !== 'operations' && user.role !== 'admin' && !user.is_admin)) {
+    return c.json({ error: 'unauthorized', message: '権限がありません' }, 403)
   }
-
-  const intervalDays = settings.review_remind_interval_days || 2
-  const maxCount = settings.review_remind_max_count || 3
-
-  // 承認待ち中（current_step と一致）でリマインド対象のステップを取得
-  // 最終リマインドから interval_days 日以上経過、または一度もリマインドされていない
-  const targets = await db.prepare(`
-    SELECT
-      cs.id as step_id, cs.application_id, cs.step_number,
-      cs.reviewer_id, cs.remind_count, cs.last_reminded_at, cs.created_at as step_created_at,
-      u.name as reviewer_name, u.email as reviewer_email,
-      a.application_number, a.title, a.current_step,
-      m.name as mansion_name,
-      ap.name as applicant_name
-    FROM circulation_steps cs
-    JOIN applications a ON cs.application_id = a.id
-    JOIN users u ON cs.reviewer_id = u.id
-    LEFT JOIN mansions m ON a.mansion_id = m.id
-    LEFT JOIN users ap ON a.applicant_id = ap.id
-    WHERE cs.status = 'pending'
-      AND a.status = 'circulating'
-      AND a.current_step = cs.step_number
-      AND (cs.remind_count IS NULL OR cs.remind_count < ?)
-      AND (
-        cs.last_reminded_at IS NULL
-        AND julianday('now') - julianday(cs.created_at) >= ?
-        OR
-        cs.last_reminded_at IS NOT NULL
-        AND julianday('now') - julianday(cs.last_reminded_at) >= ?
-      )
-  `).bind(maxCount, intervalDays, intervalDays).all()
-
-  const { sendMail, buildMailSubject } = await import('./lib/mail')
-  const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
-
-  let sentCount = 0
-  const now = new Date().toISOString()
-
-  for (const t of (targets.results as any[])) {
-    if (!t.reviewer_email || !smtp) {
-      await logNotify(db, { type: 'review_reminder', channel: 'email', recipientId: t.reviewer_id, recipientName: t.reviewer_name, to: t.reviewer_email, status: 'skipped', error: !smtp ? 'メール送信設定（SMTP）がありません' : 'メールアドレスが登録されていません', applicationId: t.application_id })
-      continue
-    }
-
-    const newCount = (t.remind_count || 0) + 1
-    const stepLabel: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終承認者' }
-    const appUrl = `${new URL(c.req.url).origin}/applications/${t.application_id}`
-    const subject = `【承認リマインド第${newCount}回】${t.application_number} - ${t.mansion_name || t.title} の確認をお願いします`
-    const html = `
-<!DOCTYPE html>
-<html lang="ja">
-<head><meta charset="UTF-8"></head>
-<body style="font-family:sans-serif;color:#333;margin:0;padding:0;background:#f5f5f5;">
-  <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-    <div style="background:#d97706;padding:20px 24px;">
-      <h2 style="color:#fff;margin:0;font-size:18px;">⚠️ 承認リマインド（第${newCount}回）</h2>
-      <p style="color:#fde68a;margin:4px 0 0;font-size:13px;">東京ディフェンス株式会社 建物管理部 請求回覧</p>
-    </div>
-    <div style="padding:24px;">
-      <p style="color:#92400e;background:#fffbeb;border-left:4px solid #d97706;padding:8px 12px;border-radius:4px;">
-        <strong>${t.reviewer_name} さん</strong><br>
-        下記の請求書回覧について、まだ${stepLabel[t.step_number] || '承認'}が完了していません。<br>
-        お手数ですが、至急ご確認・ご承認をお願いします。
-      </p>
-      <table style="border-collapse:collapse;margin:16px 0;width:100%;">
-        <tr style="border-bottom:1px solid #e5e7eb;">
-          <td style="padding:8px 12px 8px 0;color:#6b7280;font-size:13px;white-space:nowrap;">申請番号</td>
-          <td style="padding:8px 0;font-size:13px;"><strong>${t.application_number}</strong></td>
-        </tr>
-        <tr style="border-bottom:1px solid #e5e7eb;">
-          <td style="padding:8px 12px 8px 0;color:#6b7280;font-size:13px;white-space:nowrap;">件名</td>
-          <td style="padding:8px 0;font-size:13px;">${t.mansion_name || t.title}</td>
-        </tr>
-        <tr style="border-bottom:1px solid #e5e7eb;">
-          <td style="padding:8px 12px 8px 0;color:#6b7280;font-size:13px;white-space:nowrap;">申請者</td>
-          <td style="padding:8px 0;font-size:13px;">${t.applicant_name}</td>
-        </tr>
-        <tr>
-          <td style="padding:8px 12px 8px 0;color:#6b7280;font-size:13px;white-space:nowrap;">あなたの役割</td>
-          <td style="padding:8px 0;font-size:13px;"><strong>${stepLabel[t.step_number] || 'レビュアー'}</strong>（Step ${t.step_number}）</td>
-        </tr>
-      </table>
-      <a href="${appUrl}"
-        style="display:inline-block;padding:12px 28px;background:#396999;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-top:8px;">
-        確認・承認する →
-      </a>
-    </div>
-    <div style="background:#f9fafb;padding:16px 24px;border-top:1px solid #e5e7eb;">
-      <p style="margin:0;font-size:11px;color:#9ca3af;">
-        このメールは建物管理部 請求回覧から自動送信されています。返信しないでください。
-      </p>
-    </div>
-  </div>
-</body>
-</html>`
-
-    const { sendMailDetailed } = await import('./lib/mail')
-    const r = await sendMailDetailed(smtp, { to: t.reviewer_email, subject, html })
-    const ok = r.ok
-    await logNotify(db, { type: 'review_reminder', channel: 'email', recipientId: t.reviewer_id, recipientName: t.reviewer_name, to: t.reviewer_email, subject, status: ok ? 'sent' : 'failed', error: ok ? null : (r.error || '送信に失敗しました'), applicationId: t.application_id })
-    if (ok) {
-      await db.prepare(
-        'UPDATE circulation_steps SET remind_count = ?, last_reminded_at = ? WHERE id = ?'
-      ).bind(newCount, now, t.step_id).run()
-
-      // notification_logs に記録
-      await db.prepare(
-        'INSERT INTO notification_logs (application_id, recipient_id, notification_type, email_to, subject, status) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(t.application_id, t.reviewer_id, 'review_reminder', t.reviewer_email, subject, 'sent').run()
-
-      sentCount++
-    }
+  if ((user as any).preview_role || (user as any).preview_user) {
+    return c.json({ error: 'preview', message: 'プレビュー中は実行できません' }, 403)
   }
-
-  return c.json({ message: `承認リマインド送信完了`, sent: sentCount, targets: targets.results.length })
+  const { runReminders, describeRun } = await import('./lib/reminder-runner')
+  const r = await runReminders(c.env.DB, new URL(c.req.url).origin, 'manual')
+  return c.json({ ok: true, message: describeRun(r), result: r, sent: r.inbox.sent + r.review.sent })
 })
 
 // 手動リマインド（管理画面から特定ステップへ）

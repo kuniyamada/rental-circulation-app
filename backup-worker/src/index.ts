@@ -7,13 +7,40 @@
  * - SQLダンプを生成して R2 の backups/ 配下に保存
  * - 最新30件を超える古い自動バックアップは自動削除
  *
+ * - 毎日 23:00 UTC (08:00 JST) に 本体アプリの自動リマインド（/api/cron/reminders）を呼ぶ
+ *
  * 手動テスト: GET / で同じ処理を実行できる（CRON_TOKEN必須）
+ *            GET /reminders で自動リマインドを実行（CRON_TOKEN必須）
  */
 
 export interface Env {
   DB: D1Database
   R2: R2Bucket
   CRON_TOKEN?: string  // GETでの手動実行を保護するための秘密トークン
+  APP_URL?: string       // 本体アプリのURL（自動リマインド用）
+  REMINDER_TOKEN?: string // 本体アプリの自動リマインドを呼ぶための合言葉
+}
+
+const REMINDER_CRON = '0 23 * * *'   // 毎日 08:00 JST
+
+// 自動リマインド：本体アプリに「今日の分を送って」と依頼する
+// （日曜・祝日・年末年始の判断や送信は本体アプリ側で行う）
+async function runReminders(env: Env): Promise<any> {
+  if (!env.APP_URL || !env.REMINDER_TOKEN) {
+    console.error('[reminder] APP_URL または REMINDER_TOKEN が設定されていません')
+    return { ok: false, error: 'APP_URL / REMINDER_TOKEN not set' }
+  }
+  try {
+    const res = await fetch(`${env.APP_URL.replace(/\/$/, '')}/api/cron/reminders`, {
+      headers: { 'X-Reminder-Token': env.REMINDER_TOKEN },
+    })
+    const text = await res.text()
+    console.log(`[reminder] status=${res.status} ${text.slice(0, 500)}`)
+    try { return { status: res.status, ...JSON.parse(text) } } catch { return { status: res.status, body: text.slice(0, 500) } }
+  } catch (e: any) {
+    console.error(`[reminder] failed: ${e?.message || e}`)
+    return { ok: false, error: e?.message || String(e) }
+  }
 }
 
 // =============== バックアップ対象テーブル ===============
@@ -182,6 +209,10 @@ export default {
   // Cron Trigger（毎日 17:00 UTC = 翌日 02:00 JST）
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     console.log(`[backup-worker] scheduled triggered at ${new Date().toISOString()} (cron=${event.cron})`)
+    if (event.cron === REMINDER_CRON) {
+      ctx.waitUntil(runReminders(env))
+      return
+    }
     ctx.waitUntil(runBackup(env))
   },
 
@@ -206,6 +237,14 @@ export default {
       // トークン認証OK: 手動実行
       const result = await runBackup(env)
       return Response.json(result)
+    }
+
+    // 自動リマインドの手動テスト（GET /reminders?token=CRON_TOKEN）
+    if (url.pathname === '/reminders') {
+      if (!env.CRON_TOKEN || url.searchParams.get('token') !== env.CRON_TOKEN) {
+        return Response.json({ error: 'unauthorized' }, { status: 401 })
+      }
+      return Response.json(await runReminders(env))
     }
 
     return Response.json({ error: 'not found' }, { status: 404 })

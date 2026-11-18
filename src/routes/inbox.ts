@@ -26,7 +26,7 @@ function previewBtn(url: string, name: string, label = '👁 確認', cls = 'inl
 //   ユーザーの通知設定(notify_method)に従い メール / LINE WORKS / 両方 で送信
 //   ※以前はメールのみで、LINE WORKS には送っていなかった
 // ============================================================
-async function notifyInbox(
+export async function notifyInbox(
   db: D1Database,
   frontUserId: number | string,
   data: { mansionName: string; registeredBy: string; note: string; appUrl: string; isReminder: boolean; remindCount: number; inboxId?: number | string | null }

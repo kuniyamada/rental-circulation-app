@@ -5,9 +5,15 @@
   "compatibility_date": "2025-03-01",
   "compatibility_flags": ["nodejs_compat"],
 
-  // 毎日 17:00 UTC = 翌日 02:00 JST
+  // 毎日 17:00 UTC = 翌日 02:00 JST … 自動バックアップ
+  // 毎日 23:00 UTC = 翌日 08:00 JST … 自動リマインド（本体アプリの /api/cron/reminders を呼ぶ）
   "triggers": {
-    "crons": ["0 17 * * *"]
+    "crons": ["0 17 * * *", "0 23 * * *"]
+  },
+
+  // 自動リマインドで呼ぶ本体アプリのURL（合言葉は secret の REMINDER_TOKEN）
+  "vars": {
+    "APP_URL": "https://webapp-production-exu.pages.dev"
   },
 
   // 本体アプリと同じD1データベースに接続

@@ -16,6 +16,8 @@ import {
 import driveRoutes from './drive'
 import { sweepExpiredSessions } from '../lib/login-log'
 import { NOTIFY_TYPE_LABEL, CHANNEL_LABEL, fmtJst } from '../lib/notify-log'
+import { jstDate, noSendDays, nextAutoRunDate, fmtDateJa, noSendReason } from '../lib/business-day'
+import { describeRun } from '../lib/reminder-runner'
 import { assigneeSyncEnabled, getSyncState, maybeSyncAssignees, runAssigneeSync } from '../lib/assignee-sync'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
@@ -1879,9 +1881,28 @@ admin.get('/reminder', async (c) => {
 
   const settings = await db.prepare('SELECT * FROM reminder_settings WHERE id = 1').first() as any
 
+  // 送らない日（日曜・祝日・年末年始）を1年分。画面のスケジュール例の計算に使う
+  const todayJst = jstDate() as string
+  const noSend = noSendDays(todayJst, 400)
+  const nextRun = nextAutoRunDate()
+  let lastRun: any = null
+  try { lastRun = settings?.last_run_result ? JSON.parse(settings.last_run_result) : null } catch { lastRun = null }
+  const upcomingHolidays = noSend.filter(d => d.reason !== '日曜日').slice(0, 6)
+
   const content = `
     <div class="max-w-xl space-y-4">
       <h2 class="text-xl font-bold text-gray-800">⏰ リマインダー設定</h2>
+
+      <!-- 自動送信の状況 -->
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-sm space-y-2">
+        <p class="font-bold text-gray-800">🕗 自動送信の状況</p>
+        <p class="text-gray-700">毎朝 <strong>8:00（日本時間）</strong>に自動で確認し、送る日が来ているものだけ送信します。</p>
+        <p class="text-gray-700">次の自動送信：<strong class="text-[#234166]">${fmtDateJa(nextRun)} 8:00</strong>
+          ${noSendReason(todayJst) ? `<span class="ml-1 text-xs text-gray-500">（今日は${noSendReason(todayJst)}のため送りません）</span>` : ''}</p>
+        <p class="text-gray-700">前回の実行：${settings?.last_run_at ? `<span class="text-gray-500">${fmtJst(settings.last_run_at, true)}</span> ` : ''}${describeRun(lastRun)}</p>
+        <p class="text-xs text-gray-500">送らない日：日曜日・祝日・年末年始（12/29〜1/4）。土曜日は送ります。
+          ${upcomingHolidays.length ? `<br>この先の祝日・休み：${upcomingHolidays.map(d => `${fmtDateJa(d.date)}${d.reason}`).join('、')}` : ''}</p>
+      </div>
 
       ${saved ? '<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">✅ 設定を保存しました。</div>' : ''}
 
@@ -1917,6 +1938,7 @@ admin.get('/reminder', async (c) => {
                   class="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm text-center focus:ring-2 focus:ring-[#396999] outline-none">
                 <span class="text-sm text-gray-600">日ごとにリマインドメールを送信</span>
               </div>
+              <p class="text-xs text-gray-400">担当者へ送った日（前回のリマインドを送った日）から数えて、その日数後の朝8時に送信</p>
             </div>
             <div class="space-y-2 mt-4">
               <label class="block text-sm font-semibold text-gray-700">最大リマインド回数</label>
@@ -1973,7 +1995,7 @@ admin.get('/reminder', async (c) => {
                   oninput="updateReviewPreview()">
                 <span class="text-sm text-gray-600">日ごとにリマインドメールを送信</span>
               </div>
-              <p class="text-xs text-gray-400">例：2日 → 承認待ちから2日後・4日後に送信</p>
+              <p class="text-xs text-gray-400">確認待ちになった日（前回のリマインドを送った日）から数えて、その日数後の朝8時に送信</p>
             </div>
             <div class="space-y-2 mt-4">
               <label class="block text-sm font-semibold text-gray-700">最大リマインド回数</label>
@@ -2008,11 +2030,14 @@ admin.get('/reminder', async (c) => {
       <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
         <p class="font-semibold mb-2">📝 リマインダーの動作について</p>
         <ul class="list-disc list-inside space-y-1 text-xs">
-          <li>① 受付登録からリマインド間隔日数が経過した未申請案件に自動送信</li>
-          <li>② 承認待ちになってからリマインド間隔日数が経過した承認者に自動送信</li>
-          <li>「今すぐ実行」ボタンで即時リマインド確認・送信が可能</li>
-          <li>最大回数を超えた場合は自動送信を停止</li>
-          <li>承認・否決・差し戻しが行われるとリマインドは自動停止</li>
+          <li>毎朝 8:00（日本時間）に自動で確認・送信します</li>
+          <li>① 担当者へ送った日から、設定した日数が経った未申請の受付に送信</li>
+          <li>② 確認待ちになった日から、設定した日数が経った承認者に送信</li>
+          <li>2回目以降は、実際に前回送った日から数えます</li>
+          <li>送る日が日曜日・祝日・年末年始（12/29〜1/4）のときは、次の送れる日の朝8時に送信（土曜日は送ります）</li>
+          <li>最大回数まで送ったら、それ以上は送りません</li>
+          <li>申請・承認・否決・差し戻しが行われると、その件のリマインドは止まります</li>
+          <li>「今すぐ実行」は、送る日が来ているものをその場で送ります（①②の両方）</li>
         </ul>
       </div>
     </div>
@@ -2025,28 +2050,40 @@ admin.get('/reminder', async (c) => {
         form.classList.toggle('pointer-events-none', !cb.checked);
       }
 
+      // 送らない日（日曜・祝日・年末年始）。サーバーで計算した1年分
+      const NO_SEND = ${JSON.stringify(Object.fromEntries(noSend.map(d => [d.date, d.reason])))};
+      const TODAY = '${todayJst}';
+      const WEEK = ['日','月','火','水','木','金','土'];
+      function addDays(ds, n) { const [y,m,d] = ds.split('-').map(Number); const t = new Date(Date.UTC(y, m-1, d+n)); return t.toISOString().slice(0,10); }
+      function fmt(ds) { const [y,m,d] = ds.split('-').map(Number); return m + '/' + d + '（' + WEEK[new Date(Date.UTC(y,m-1,d)).getUTCDay()] + '）'; }
+      function nextSend(ds) { let d = ds; for (let i = 0; i < 60 && NO_SEND[d]; i++) d = addDays(d, 1); return d; }
+      function scheduleHtml(title, startLabel, interval, maxCount) {
+        // 例：今日の15時に送った場合
+        let html = '<p class="font-semibold mb-2">📅 ' + title + '（例：' + fmt(TODAY) + ' 15:00 に' + startLabel + '場合）</p>';
+        let base = TODAY;
+        for (let i = 1; i <= maxCount; i++) {
+          const planned = addDays(base, Math.max(1, interval));
+          const date = nextSend(planned);
+          html += '<p>第' + i + '回 → <strong>' + fmt(date) + ' 8:00</strong>'
+            + (date !== planned ? ' <span class="opacity-75">（' + fmt(planned) + 'は' + NO_SEND[planned] + 'のため）</span>' : '') + '</p>';
+          base = date;
+        }
+        return html;
+      }
       function updatePreview() {
         const interval = parseInt(document.querySelector('[name=remind_interval_days]')?.value || '3');
-        const maxCount = parseInt(document.querySelector('[name=remind_max_count]')?.value || '3');
+        const maxCount = Math.min(10, parseInt(document.querySelector('[name=remind_max_count]')?.value || '3'));
         const preview = document.getElementById('preview');
         if (!preview) return;
-        let html = '<p class="font-semibold mb-2">📅 送信スケジュール（例）</p>';
-        for (let i = 1; i <= maxCount; i++) {
-          html += '<p>受付登録から ' + (interval * i) + ' 日後 → 第' + i + 'リマインド送信</p>';
-        }
-        preview.innerHTML = html;
+        preview.innerHTML = scheduleHtml('送信スケジュール', '担当者へ送った', interval, maxCount);
       }
 
       function updateReviewPreview() {
         const interval = parseInt(document.querySelector('[name=review_remind_interval_days]')?.value || '2');
-        const maxCount = parseInt(document.querySelector('[name=review_remind_max_count]')?.value || '3');
+        const maxCount = Math.min(10, parseInt(document.querySelector('[name=review_remind_max_count]')?.value || '3'));
         const preview = document.getElementById('reviewPreview');
         if (!preview) return;
-        let html = '<p class="font-semibold mb-2">📅 承認リマインド スケジュール（例）</p>';
-        for (let i = 1; i <= maxCount; i++) {
-          html += '<p>承認待ちから ' + (interval * i) + ' 日後 → 第' + i + '回リマインド送信</p>';
-        }
-        preview.innerHTML = html;
+        preview.innerHTML = scheduleHtml('承認リマインド スケジュール', '確認待ちになった', interval, maxCount);
       }
 
       async function triggerReviewReminder() {
@@ -2057,12 +2094,13 @@ admin.get('/reminder', async (c) => {
         try {
           const res = await fetch('/api/trigger-review-reminders');
           const data = await res.json();
+          if (!res.ok) throw new Error(data.message || 'エラー');
           resultEl.className = 'text-sm px-4 py-2 rounded-lg bg-green-50 text-green-700 border border-green-200';
-          resultEl.textContent = '✅ ' + data.message + '（対象: ' + data.targets + '件 / 送信: ' + data.sent + '件）';
+          resultEl.textContent = '✅ ' + data.message;
           resultEl.classList.remove('hidden');
         } catch(e) {
           resultEl.className = 'text-sm px-4 py-2 rounded-lg bg-red-50 text-red-700 border border-red-200';
-          resultEl.textContent = '❌ エラーが発生しました';
+          resultEl.textContent = '❌ ' + (e && e.message ? e.message : 'エラーが発生しました');
           resultEl.classList.remove('hidden');
         } finally {
           btn.disabled = false;
