@@ -7,7 +7,7 @@ import auth from './routes/auth'
 import applications from './routes/applications'
 import admin from './routes/admin'
 import inbox from './routes/inbox'
-import { previewRoleBanner, previewRoleHeader, sidebarNav, SIDEBAR_CSS } from './routes/layout'
+import { previewRoleBanner, previewRoleHeader, sidebarNav, SIDEBAR_CSS, sidebarCollapseBtn } from './routes/layout'
 import { findBudget, openBudgetFile, BudgetError } from './lib/budget'
 
 type Bindings = {
@@ -288,6 +288,7 @@ app.get('/', async (c) => {
           </div>
           <span class="font-bold text-gray-800 text-sm">建物管理部 請求回覧</span>
         </div>
+        ${sidebarCollapseBtn()}
       </div>
       <div class="flex items-center gap-3">
         ${(user.test_mode && ['030', '049'].includes(String(user.employee_number))) ? `
@@ -310,8 +311,8 @@ app.get('/', async (c) => {
   <div class="flex pt-14">
     ${sidebar}
     <div id="overlay" onclick="document.getElementById('sidebar').classList.add('-translate-x-full');this.classList.add('hidden')" class="fixed inset-0 bg-black bg-opacity-30 z-30 hidden lg:hidden"></div>
-    <main class="flex-1 lg:ml-60 p-6">
-      <div class="max-w-screen-2xl mx-auto">
+    <main class="main-area flex-1 min-w-0 lg:ml-60 p-6 transition-[margin] duration-200">
+      <div class="max-w-[1920px] mx-auto">
         <h1 class="text-xl font-bold text-gray-800 mb-6">ダッシュボード</h1>
         ${pwChanged ? `<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm mb-6">✅ パスワードを変更しました。</div>` : ''}
         <div class="space-y-8">

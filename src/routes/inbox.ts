@@ -240,6 +240,11 @@ inbox.get('/', async (c) => {
     ORDER BY ii.created_at DESC
   `).all()
 
+  // タブの件数
+  const countRows = (await db.prepare('SELECT status, COUNT(*) AS n FROM invoice_inbox GROUP BY status').all()).results as any[]
+  const counts: Record<string, number> = { all: 0 }
+  for (const r of countRows) { counts[r.status] = r.n; counts.all += r.n }
+
   // 通知履歴（受付ごと）
   const logsRes = await db.prepare(
     'SELECT * FROM notify_logs WHERE inbox_id IS NOT NULL ORDER BY id DESC LIMIT 5000'
@@ -250,17 +255,17 @@ inbox.get('/', async (c) => {
   const esc = escAttr
   const notifyCell = (inboxId: any, remindCount: number): string => {
     const logs = logsByInbox[inboxId] || []
-    const remind = remindCount > 0 ? `<div class="text-orange-600 whitespace-nowrap">🔁 再通知 ${remindCount}回</div>` : ''
-    if (logs.length === 0) return `<div class="text-xs space-y-1">${remind}<span class="text-gray-300">記録なし</span></div>`
+    const remind = remindCount > 0 ? `<span class="text-orange-600 whitespace-nowrap">🔁再通知${remindCount}回</span>` : ''
+    if (logs.length === 0) return `<div class="text-xs flex flex-wrap items-center gap-x-2">${remind}<span class="text-gray-300">記録なし</span></div>`
     // チャネルごとの最新結果
     const latest: any[] = []
     const seen = new Set<string>()
     for (const l of logs) { if (!seen.has(l.channel)) { seen.add(l.channel); latest.push(l) } }
     const line = (l: any) => {
       const ch = CHANNEL_LABEL[l.channel] || l.channel
-      if (l.status === 'sent') return `<div class="text-green-700 whitespace-nowrap">✅ ${ch} ${fmtJst(l.created_at)}</div>`
-      const label = l.status === 'failed' ? '⚠️ 送信失敗' : '⚠️ 未送信'
-      return `<div class="text-red-600"><span class="font-bold whitespace-nowrap">${label}</span><span class="text-gray-500">（${ch} ${fmtJst(l.created_at)}）</span><div class="text-[11px] text-red-500 break-all max-w-[220px]">${esc(l.error || '')}</div></div>`
+      if (l.status === 'sent') return `<span class="text-green-700 whitespace-nowrap" title="${esc(ch)}で送信">✅${l.channel === 'email' ? '' : 'LW '}${fmtJst(l.created_at)}</span>`
+      const label = l.status === 'failed' ? '⚠️送信失敗' : '⚠️未送信'
+      return `<span class="text-red-600 font-bold whitespace-nowrap cursor-help" title="${esc(ch)}：${esc(l.error || '')}">${label}</span>`
     }
     const history = logs.map((l: any) => {
       const ok = l.status === 'sent'
@@ -271,10 +276,10 @@ inbox.get('/', async (c) => {
         ${ok ? '' : `<div class="text-red-500 break-all">理由: ${esc(l.error || '-')}</div>`}
       </li>`
     }).join('')
-    return `<div class="text-xs space-y-1">${remind}${latest.map(line).join('')}
-      <details class="mt-1">
-        <summary class="cursor-pointer text-[#396999] hover:underline select-none">履歴を見る（${logs.length}件）</summary>
-        <ul class="mt-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 min-w-[260px] max-w-[340px]">${history}</ul>
+    return `<div class="text-xs flex items-start gap-x-2 whitespace-nowrap">${latest.map(line).join('')}${remind}
+      <details class="relative">
+        <summary class="cursor-pointer text-[#396999] hover:underline select-none w-fit whitespace-nowrap" title="お知らせの履歴を見る">履歴${logs.length > 1 ? logs.length : ''}</summary>
+        <ul class="absolute right-0 z-20 mt-1 bg-white shadow-lg border border-gray-200 rounded-lg px-2 py-1 min-w-[280px] max-w-[360px] whitespace-normal">${history}</ul>
       </details></div>`
   }
 
@@ -289,10 +294,17 @@ inbox.get('/', async (c) => {
 
   const content = `
     <div class="space-y-4">
-      <!-- ヘッダー -->
-      <div class="flex items-center justify-between">
-        <h2 class="text-xl font-bold text-gray-800">📥 請求書受付管理</h2>
-        <div class="flex items-center gap-2 flex-wrap justify-end">
+      <!-- タブ（左）と 担当者へ送るボタン（右）を1行に -->
+      <div class="flex items-end justify-between gap-3 flex-wrap border-b border-gray-200">
+        <div class="flex gap-1">
+          ${[['all','すべて'],['pending','未申請'],['applied','申請済'],['cancelled','キャンセル']].map(([v,l]) => `
+            <a href="/inbox?status=${v}" class="px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition
+              ${statusFilter === v ? 'border-[#396999] text-[#396999] bg-[#EEF4FA]' : 'border-transparent text-gray-500 hover:text-gray-700'}">
+              ${l}<span class="ml-1 text-xs text-gray-400">${counts[v] ?? 0}</span>
+            </a>
+          `).join('')}
+        </div>
+        <div class="flex items-center gap-2 flex-wrap justify-end pb-2">
           <span class="text-xs font-bold text-orange-700 mr-1">📤 担当者へ送る：</span>
           <a href="/inbox/new" class="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2 shadow-sm">
             <span>＋</span><span>1件ずつ登録・送信</span>
@@ -312,16 +324,6 @@ inbox.get('/', async (c) => {
       ${c.req.query('delete_error') ? `
       <div class="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2">⚠ ${c.req.query('delete_error') === 'applied' ? 'この受付はすでに申請済のため削除できません' : '対象の受付が見つかりませんでした'}</div>` : ''}
 
-      <!-- フィルタータブ -->
-      <div class="flex gap-2 border-b border-gray-200 pb-0">
-        ${[['all','すべて'],['pending','未申請'],['applied','申請済'],['cancelled','キャンセル']].map(([v,l]) => `
-          <a href="/inbox?status=${v}" class="px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition
-            ${statusFilter === v ? 'border-[#396999] text-[#396999] bg-[#EEF4FA]' : 'border-transparent text-gray-500 hover:text-gray-700'}">
-            ${l}
-          </a>
-        `).join('')}
-      </div>
-
       <!-- 一覧テーブル -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         ${items.results.length === 0 ? `
@@ -334,53 +336,52 @@ inbox.get('/', async (c) => {
             <table class="w-full text-sm">
               <thead class="bg-gray-50">
                 <tr>
-                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">登録日時</th>
-                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">マンション</th>
-                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">担当フロント</th>
-                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">添付PDF</th>
-                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">通知</th>
-                  <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ">状態</th>
-                  <th class="px-3 py-3"></th>
+                  <th class="px-2 py-2 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">登録日時</th>
+                  <th class="px-2 py-2 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">マンション</th>
+                  <th class="px-2 py-2 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">担当フロント</th>
+                  <th class="px-2 py-2 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">添付PDF</th>
+                  <th class="px-2 py-2 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">通知</th>
+                  <th class="px-2 py-2 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">状態</th>
+                  <th class="px-2 py-2"></th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-100">
                 ${(items.results as any[]).map(item => {
                   const files = inboxFiles(item)
                   return `
-                  <tr class="hover:bg-gray-50 align-top">
-                    <td class="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">${fmtJst(item.created_at, true)}<div class="text-[11px] text-gray-400">登録: ${esc(item.registered_by_name || '-')}</div></td>
-                    <td class="px-3 py-3 min-w-[160px]">
-                      <div class="font-semibold text-gray-800">${item.mansion_number != null ? `<span class="text-[#2E5580] mr-1">${esc(item.mansion_number)}</span>` : ''}${esc(item.mansion_name || '-')}</div>
-                      ${item.note ? `<div class="text-[11px] text-gray-500 mt-0.5 break-all">💬 ${esc(item.note)}</div>` : ''}
+                  <tr class="hover:bg-gray-50">
+                    <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap" title="登録: ${esc(item.registered_by_name || '-')}">${fmtJst(item.created_at)}<span class="ml-1 text-[11px] text-gray-400">${esc(String(item.registered_by_name || '').split(/[\s\u3000]/)[0])}</span></td>
+                    <td class="px-2 py-1.5">
+                      <div class="flex items-baseline gap-2 min-w-0">
+                        <span class="font-semibold text-gray-800 whitespace-nowrap" title="${esc(item.mansion_name || '')}">${item.mansion_number != null ? `<span class="text-[#2E5580] mr-1">${esc(item.mansion_number)}</span>` : ''}${esc(String(item.mansion_name || '-').replace(/[\s\u3000]*管理組合$/, ''))}</span>
+                        ${item.note ? `<span class="text-[11px] text-gray-500 truncate max-w-[140px] cursor-help" title="備考：${esc(item.note)}">💬<span class="hidden min-[1500px]:inline"> ${esc(item.note)}</span></span>` : ''}
+                      </div>
                     </td>
-                    <td class="px-3 py-3 whitespace-nowrap">
-                      <div class="text-gray-800">${esc(item.front_name || '-')}</div>
-                      <div class="text-[11px] text-gray-400">${esc(item.front_email || '')}</div>
-                    </td>
-                    <td class="px-3 py-3">
-                      ${files.length ? `<div class="space-y-1">${files.map(f => `<div class="flex items-center gap-1.5 whitespace-nowrap">
-                          <span class="text-[10px] px-1.5 py-0.5 rounded ${f.n === 1 ? 'bg-[#396999] text-white' : 'bg-gray-200 text-gray-700'}">${inboxFileLabel(f.n)}</span>
-                          ${previewBtn(`/inbox/${item.id}/download?n=${f.n}`, f.name, `📎 ${esc(f.name.length > 22 ? f.name.slice(0, 21) + '…' : f.name)}`, 'text-[#396999] hover:underline text-xs text-left')}
-                        </div>`).join('')}</div>`
+                    <td class="px-2 py-1.5 whitespace-nowrap text-gray-800" title="${esc(item.front_email || '')}">${esc(item.front_name || '-')}</td>
+                    <td class="px-2 py-1.5">
+                      ${files.length ? `<div class="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 max-w-[250px]">${files.map(f => `<span class="inline-flex items-center gap-1 whitespace-nowrap" title="${esc(inboxFileLabel(f.n))}：${esc(f.name)}">
+                          <span class="text-[10px] px-1.5 py-0.5 rounded ${f.n === 1 ? 'bg-[#396999] text-white' : 'bg-gray-200 text-gray-700'}">${f.n === 1 ? '請求書' : f.n === 2 ? '資料①' : '資料②'}</span>
+                          ${previewBtn(`/inbox/${item.id}/download?n=${f.n}`, f.name, `${esc(f.name.length > 14 ? f.name.slice(0, 13) + '…' : f.name)}`, 'text-[#396999] hover:underline text-xs text-left')}
+                        </span>`).join('')}</div>`
                         : '<span class="text-gray-300 text-xs">なし</span>'}
                     </td>
-                    <td class="px-3 py-3">${notifyCell(item.id, item.remind_count || 0)}</td>
-                    <td class="px-3 py-3 whitespace-nowrap">
-                      <span class="text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${statusColor[item.status] || ''}">
+                    <td class="px-2 py-1.5">${notifyCell(item.id, item.remind_count || 0)}</td>
+                    <td class="px-2 py-1.5 whitespace-nowrap">
+                      <span class="text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${statusColor[item.status] || ''}">
                         ${statusLabel[item.status] || item.status}
                       </span>
                     </td>
-                    <td class="px-3 py-3">
-                      <div class="flex flex-col gap-1.5 items-stretch">
+                    <td class="px-2 py-1.5">
+                      <div class="flex items-center gap-1 justify-end">
                         ${item.status === 'pending' ? `
-                          <a href="/inbox/${item.id}/edit" class="text-center text-xs px-3 py-1 bg-[#EEF4FA] text-[#396999] hover:bg-[#D5E5F2] rounded whitespace-nowrap transition">✏️ 編集</a>
+                          <a href="/inbox/${item.id}/edit" class="text-xs px-2 py-1 bg-[#EEF4FA] text-[#396999] hover:bg-[#D5E5F2] rounded whitespace-nowrap transition">✏️編集</a>
                           <form method="POST" action="/inbox/${item.id}/remind" onsubmit="return confirm('${esc(item.front_name || '')}さんに再通知を送信しますか？')">
-                            <button type="submit" class="w-full text-xs px-3 py-1 bg-orange-50 text-orange-600 hover:bg-orange-100 rounded whitespace-nowrap transition">🔁 再通知</button>
+                            <button type="submit" class="text-xs px-2 py-1 bg-orange-50 text-orange-600 hover:bg-orange-100 rounded whitespace-nowrap transition">🔁再通知</button>
                           </form>
                         ` : ''}
                         ${(item.status === 'pending' || item.status === 'cancelled') ? `
                           <form method="POST" action="/inbox/${item.id}/delete" onsubmit="return confirm('この受付を削除しますか？\\n添付PDFも削除され、元に戻せません。')">
-                            <button type="submit" class="w-full text-xs px-3 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded whitespace-nowrap transition">🗑 削除</button>
+                            <button type="submit" title="この受付を削除" class="text-xs px-2 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded whitespace-nowrap transition">🗑</button>
                           </form>
                         ` : ''}
                       </div>

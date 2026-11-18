@@ -118,7 +118,32 @@ export const SIDEBAR_CSS = `<style>
     .bottom-nav-item.active { color: #396999; }
     .bottom-nav-item svg { width: 1.25rem; height: 1.25rem; }
     .bottom-nav-item span { font-size: 10px; font-weight: 500; line-height: 1; }
-  </style>`
+    /* PC：左メニューを隠して画面を広く使う（状態は記憶） */
+    .sb-label-show { display: none; }
+    html.sidebar-collapsed .sb-label-show { display: inline; }
+    html.sidebar-collapsed .sb-label-hide { display: none; }
+    @media (min-width: 1024px) {
+      #sidebar { transition: transform .2s; }
+      html.sidebar-collapsed #sidebar { transform: translateX(-100%); }
+      html.sidebar-collapsed .main-area { margin-left: 0; }
+    }
+  </style>
+  <script>
+    try { if (localStorage.getItem('sidebarCollapsed') === '1') document.documentElement.classList.add('sidebar-collapsed') } catch (e) {}
+    function toggleSidebarCollapse() {
+      var on = document.documentElement.classList.toggle('sidebar-collapsed')
+      try { localStorage.setItem('sidebarCollapsed', on ? '1' : '0') } catch (e) {}
+    }
+  </script>`
+
+/** PC用：左メニューを隠す／表示するボタン（上部バーの左に置く） */
+export function sidebarCollapseBtn(): string {
+  return `<button type="button" onclick="toggleSidebarCollapse()" title="左のメニューを隠して、画面を広く使えます（もう一度押すと元に戻ります）"
+    class="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-100 transition whitespace-nowrap">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    <span class="sb-label-hide">メニューを隠す</span><span class="sb-label-show">メニューを表示</span>
+  </button>`
+}
 
 /** 左メニュー（全画面共通。ダッシュボードもこれを使う）
  *  - 主要項目を「請求書」「回覧」に分けて表示
@@ -260,6 +285,7 @@ export function layout(title: string, content: string, user: any): string {
           </div>
           <span class="font-bold text-gray-800 text-sm">建物管理部 請求回覧</span>
         </div>
+        ${sidebarCollapseBtn()}
       </div>
       <div class="flex items-center gap-3">
         ${user.test_mode ? `
@@ -292,8 +318,8 @@ export function layout(title: string, content: string, user: any): string {
     <div id="overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black bg-opacity-40 z-30 hidden lg:hidden"></div>
 
     <!-- メインコンテンツ -->
-    <main class="flex-1 lg:ml-64 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6">
-      <div class="max-w-screen-2xl mx-auto">
+    <main class="main-area flex-1 min-w-0 lg:ml-64 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6 transition-[margin] duration-200">
+      <div class="max-w-[1920px] mx-auto">
         <h1 class="text-lg sm:text-xl font-bold text-gray-800 mb-4 sm:mb-6">${title}</h1>
         ${content}
       </div>
