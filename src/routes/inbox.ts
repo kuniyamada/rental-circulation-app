@@ -30,7 +30,7 @@ export async function notifyInbox(
   db: D1Database,
   frontUserId: number | string,
   data: { mansionName: string; registeredBy: string; note: string; appUrl: string; isReminder: boolean; remindCount: number; inboxId?: number | string | null }
-): Promise<void> {
+): Promise<boolean> {
   const type = data.isReminder ? 'inbox_remind' : 'inbox_new'
   const u = await db.prepare(
     'SELECT name, email, notify_method, lineworks_user_id FROM users WHERE id = ?'
@@ -38,8 +38,9 @@ export async function notifyInbox(
   const base = { type, recipientId: frontUserId, recipientName: u?.name ?? null, inboxId: data.inboxId ?? null }
   if (!u) {
     await logNotify(db, { ...base, channel: 'email', status: 'skipped', error: '担当フロントのユーザーが見つかりません' })
-    return
+    return false
   }
+  let delivered = false
   const method = u.notify_method || 'email'
   const subject = data.isReminder
     ? `【リマインド${data.remindCount}回目】${data.mansionName} の請求書回覧申請をお願いします`
@@ -56,6 +57,7 @@ export async function notifyInbox(
       const html = buildInboxNotificationBody({ frontName: u.name, ...data })
       const r = await sendMailDetailed(smtp, { to: u.email, subject, html })
       await logNotify(db, { ...base, channel: 'email', to: u.email, subject, status: r.ok ? 'sent' : 'failed', error: r.ok ? null : (r.error || '送信に失敗しました') })
+      if (r.ok) delivered = true
     }
   }
 
@@ -93,8 +95,10 @@ export async function notifyInbox(
       }
       if (result !== true) console.error(`[LW] 請求書受付通知の送信失敗 userId=${u.lineworks_user_id}: ${result}`)
       await logNotify(db, { ...base, channel: 'lineworks', to: u.lineworks_user_id, subject, status: result === true ? 'sent' : 'failed', error: result === true ? null : String(result) })
+      if (result === true) delivered = true
     }
   }
+  return delivered
 }
 
 

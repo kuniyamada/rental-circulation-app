@@ -44,6 +44,7 @@ export const NOTIFY_TYPE_LABEL: Record<string, string> = {
   answered: '回答',
   reapplied: '再申請',
   recalled: '申請者の取消',
+  reminder_summary: 'リマインドのまとめ',
 }
 
 export const CHANNEL_LABEL: Record<string, string> = { email: 'メール', lineworks: 'LINE WORKS' }

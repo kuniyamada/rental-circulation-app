@@ -5,7 +5,7 @@
 //   日付ルールは lib/business-day.ts（日曜・祝日・年末年始は送らない／実際に送った日から数える）
 // ============================================================
 import { logNotify } from './notify-log'
-import { sendMailDetailed } from './mail'
+import { notifyUser } from './notify-user'
 import { jstDate, remindDueDate, noSendReason, parseUtc } from './business-day'
 import { notifyInbox } from '../routes/inbox'
 
@@ -18,7 +18,11 @@ export type ReminderRunResult = {
   review: { active: boolean; targets: number; sent: number; failed: number; due_later: number; max_reached: number }
   dry_run?: boolean
   would_send?: { kind: '受付' | '承認'; to: string; item: string; count: number }[]
+  summary?: { sent_to: string[]; failed_to: string[] }
 }
+
+// 管理者へのまとめ用：送った1件ずつの記録
+type SentItem = { kind: '受付' | '承認'; to: string; item: string; count: number; ok: boolean }
 
 const STEP_LABEL: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終承認者' }
 const esc = (v: any) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])
@@ -80,6 +84,7 @@ export async function runReminders(db: D1Database, origin: string, trigger: 'aut
     review: { active: !!settings.review_remind_is_active, targets: 0, sent: 0, failed: 0, due_later: 0, max_reached: 0 },
   }
   if (dry) { result.dry_run = true; result.would_send = [] }
+  const sentItems: SentItem[] = []
 
   // 日曜・祝日・年末年始は送らない（自動実行のとき）
   const reason = noSendReason(today)
@@ -112,7 +117,7 @@ export async function runReminders(db: D1Database, origin: string, trigger: 'aut
       if (dry) { result.would_send!.push({ kind: '受付', to: it.front_name || String(it.front_user_id), item: it.mansion_name || '', count: newCount }); result.inbox.sent++; continue }
       await db.prepare('UPDATE invoice_inbox SET remind_count = ?, last_reminded_at = ?, updated_at = ? WHERE id = ?')
         .bind(newCount, now, now, it.id).run()
-      await notifyInbox(db, it.front_user_id, {
+      const delivered = await notifyInbox(db, it.front_user_id, {
         mansionName: it.mansion_name || '',
         registeredBy: it.registered_by_name || '業務管理課',
         note: it.note || '',
@@ -121,6 +126,7 @@ export async function runReminders(db: D1Database, origin: string, trigger: 'aut
         remindCount: newCount,
         inboxId: it.id,
       })
+      sentItems.push({ kind: '受付', to: it.front_name || '', item: it.mansion_name || '', count: newCount, ok: delivered })
       result.inbox.sent++
     }
   }
@@ -145,7 +151,6 @@ export async function runReminders(db: D1Database, origin: string, trigger: 'aut
         AND COALESCE(a.is_test, 0) = 0   -- テスト申請には送らない
     `).all()).results as any[]
     result.review.targets = rows.length
-    const smtp = await db.prepare('SELECT * FROM smtp_settings LIMIT 1').first() as any
     for (const t of rows) {
       if ((t.remind_count || 0) >= max) { result.review.max_reached++; continue }
       // 確認待ちになった日時：前の人が確認した日時（1段目は申請日時）。保留の回答があればその日時
@@ -155,14 +160,22 @@ export async function runReminders(db: D1Database, origin: string, trigger: 'aut
       const newCount = (t.remind_count || 0) + 1
       if (dry) { result.would_send!.push({ kind: '承認', to: t.reviewer_name, item: `${t.application_number} ${t.mansion_name || t.title || ''}`, count: newCount }); result.review.sent++; continue }
       const subject = `【承認リマインド第${newCount}回】${t.application_number} - ${t.mansion_name || t.title} の確認をお願いします`
-      if (!smtp || !t.reviewer_email) {
-        await logNotify(db, { type: 'review_reminder', channel: 'email', recipientId: t.reviewer_id, recipientName: t.reviewer_name, to: t.reviewer_email, subject, status: 'skipped', error: !smtp ? 'メール送信設定（SMTP）がありません' : 'メールアドレスが登録されていません', applicationId: t.application_id })
-        result.review.failed++
-        continue
-      }
       const appUrl = `${origin}/applications/${t.application_id}`
-      const r = await sendMailDetailed(smtp, { to: t.reviewer_email, subject, html: reviewReminderHtml(t, newCount, appUrl) })
-      await logNotify(db, { type: 'review_reminder', channel: 'email', recipientId: t.reviewer_id, recipientName: t.reviewer_name, to: t.reviewer_email, subject, status: r.ok ? 'sent' : 'failed', error: r.ok ? null : (r.error || '送信に失敗しました'), applicationId: t.application_id })
+      // その人の通知設定（メール / LINE WORKS / 両方）で送る
+      const r = await notifyUser(db, t.reviewer_id, {
+        type: 'review_reminder', subject,
+        html: reviewReminderHtml(t, newCount, appUrl),
+        lwText: [
+          `⚠️ 承認リマインド（第${newCount}回）`,
+          `申請番号: ${t.application_number}`,
+          `件名: ${t.mansion_name || t.title || ''}`,
+          `申請者: ${t.applicant_name || ''}`,
+          '', `${STEP_LABEL[t.step_number] || '承認'}の確認がまだです。ご確認をお願いします。`,
+        ].join('\n'),
+        lwButton: { label: '確認・承認する', url: appUrl },
+        applicationId: t.application_id,
+      })
+      sentItems.push({ kind: '承認', to: t.reviewer_name || '', item: `${t.application_number} ${t.mansion_name || t.title || ''}`, count: newCount, ok: r.ok })
       if (r.ok) {
         await db.prepare('UPDATE circulation_steps SET remind_count = ?, last_reminded_at = ? WHERE id = ?').bind(newCount, now, t.step_id).run()
         result.review.sent++
@@ -172,8 +185,64 @@ export async function runReminders(db: D1Database, origin: string, trigger: 'aut
     }
   }
 
+  // ---------- 管理者へまとめ（送った件があるときだけ） ----------
+  if (!dry && sentItems.length && settings.admin_summary_active !== 0) {
+    result.summary = await sendAdminSummary(db, origin, today, trigger, sentItems, settings.admin_summary_ids)
+  }
+
   if (!dry) await saveResult(db, result)
   return result
+}
+
+// まとめの送り先：設定で選んだ人。未設定なら管理者全員（有効なユーザーだけ）
+export async function adminSummaryRecipients(db: D1Database, idsJson: any): Promise<{ id: number; name: string }[]> {
+  let ids: number[] | null = null
+  try { const v = idsJson ? JSON.parse(idsJson) : null; if (Array.isArray(v)) ids = v.map(Number).filter(Boolean) } catch { ids = null }
+  if (ids) {
+    if (!ids.length) return []
+    return (await db.prepare(`SELECT id, name FROM users WHERE is_active = 1 AND id IN (SELECT value FROM json_each(?)) ORDER BY id`).bind(JSON.stringify(ids)).all()).results as any[]
+  }
+  return (await db.prepare('SELECT id, name FROM users WHERE is_active = 1 AND is_admin = 1 ORDER BY id').all()).results as any[]
+}
+
+async function sendAdminSummary(db: D1Database, origin: string, today: string, trigger: 'auto' | 'manual', items: SentItem[], idsJson: any) {
+  const out = { sent_to: [] as string[], failed_to: [] as string[] }
+  const to = await adminSummaryRecipients(db, idsJson)
+  if (!to.length) return out
+  const [, m, d] = today.split('-').map(Number)
+  const inbox = items.filter(i => i.kind === '受付')
+  const review = items.filter(i => i.kind === '承認')
+  const ng = items.filter(i => !i.ok).length
+  const head = `${m}/${d}${trigger === 'auto' ? ' 朝' : '（手動実行）'}のリマインド ${items.length}件${ng ? `（うち送れなかった ${ng}件）` : ''}`
+  const subject = `【リマインドのまとめ】${head}`
+  const mark = (i: SentItem) => i.ok ? '' : '　※送れませんでした'
+  const lines: string[] = [`📋 ${head}`]
+  if (inbox.length) { lines.push('', `■ ① 受付後の申請リマインド（${inbox.length}件）`); for (const i of inbox) lines.push(`・${i.to}：${i.item}（${i.count}回目）${mark(i)}`) }
+  if (review.length) { lines.push('', `■ ② 承認者リマインド（${review.length}件）`); for (const i of review) lines.push(`・${i.to}：${i.item}（${i.count}回目）${mark(i)}`) }
+  const rowsHtml = (list: SentItem[]) => list.map(i => `<tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 10px 6px 0;font-size:13px;white-space:nowrap;"><strong>${esc(i.to)}</strong></td><td style="padding:6px 10px 6px 0;font-size:13px;">${esc(i.item)}</td><td style="padding:6px 0;font-size:13px;white-space:nowrap;">${i.count}回目${i.ok ? '' : ' <span style="color:#dc2626;font-weight:bold;">送れませんでした</span>'}</td></tr>`).join('')
+  const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"></head>
+<body style="font-family:sans-serif;color:#333;margin:0;padding:0;background:#f5f5f5;">
+  <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    <div style="background:#396999;padding:18px 24px;">
+      <h2 style="color:#fff;margin:0;font-size:17px;">📋 リマインドのまとめ</h2>
+      <p style="color:#bfdbfe;margin:4px 0 0;font-size:13px;">${esc(head)}</p>
+    </div>
+    <div style="padding:20px 24px;">
+      <p style="font-size:13px;margin:0 0 12px;">今日、次の人にリマインド（催促）を送りました。</p>
+      ${inbox.length ? `<p style="font-weight:bold;font-size:14px;margin:16px 0 4px;">① 受付後の申請リマインド（${inbox.length}件）</p><table style="border-collapse:collapse;width:100%;">${rowsHtml(inbox)}</table>` : ''}
+      ${review.length ? `<p style="font-weight:bold;font-size:14px;margin:16px 0 4px;">② 承認者リマインド（${review.length}件）</p><table style="border-collapse:collapse;width:100%;">${rowsHtml(review)}</table>` : ''}
+      <a href="${esc(origin)}/admin/notify-logs" style="display:inline-block;margin-top:18px;padding:10px 22px;background:#396999;color:#fff;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;">通知履歴を見る →</a>
+    </div>
+    <div style="background:#f9fafb;padding:14px 24px;border-top:1px solid #e5e7eb;">
+      <p style="margin:0;font-size:11px;color:#9ca3af;">このメールは建物管理部 請求回覧から自動送信されています。送り先はリマインダー設定の画面で変えられます。</p>
+    </div>
+  </div>
+</body></html>`
+  for (const u of to) {
+    const r = await notifyUser(db, u.id, { type: 'reminder_summary', subject, html, lwText: lines.join('\n'), lwButton: { label: '通知履歴を見る', url: `${origin}/admin/notify-logs` } })
+    ;(r.ok ? out.sent_to : out.failed_to).push(u.name)
+  }
+  return out
 }
 
 async function saveResult(db: D1Database, r: ReminderRunResult): Promise<void> {
@@ -193,5 +262,8 @@ export function describeRun(r: ReminderRunResult | null): string {
   const parts: string[] = []
   parts.push(r.inbox.active ? `① 受付後リマインド ${r.inbox.sent}件送信` : '① 受付後リマインドは無効')
   parts.push(r.review.active ? `② 承認者リマインド ${r.review.sent}件送信${r.review.failed ? `（送れなかった ${r.review.failed}件）` : ''}` : '② 承認者リマインドは無効')
+  if (r.summary && (r.summary.sent_to.length || r.summary.failed_to.length)) {
+    parts.push(`まとめ：${r.summary.sent_to.length ? r.summary.sent_to.join('・') + 'さんへ送信' : ''}${r.summary.failed_to.length ? `（送れなかった：${r.summary.failed_to.join('・')}）` : ''}`)
+  }
   return `${head}：${parts.join(' ／ ')}`
 }

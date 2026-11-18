@@ -17,7 +17,7 @@ import driveRoutes from './drive'
 import { sweepExpiredSessions } from '../lib/login-log'
 import { NOTIFY_TYPE_LABEL, CHANNEL_LABEL, fmtJst } from '../lib/notify-log'
 import { jstDate, noSendDays, nextAutoRunDate, fmtDateJa, noSendReason } from '../lib/business-day'
-import { describeRun } from '../lib/reminder-runner'
+import { describeRun, adminSummaryRecipients } from '../lib/reminder-runner'
 import { assigneeSyncEnabled, getSyncState, maybeSyncAssignees, runAssigneeSync } from '../lib/assignee-sync'
 
 type Bindings = { DB: D1Database; R2: R2Bucket; [k: string]: any }
@@ -1888,6 +1888,12 @@ admin.get('/reminder', async (c) => {
   let lastRun: any = null
   try { lastRun = settings?.last_run_result ? JSON.parse(settings.last_run_result) : null } catch { lastRun = null }
   const upcomingHolidays = noSend.filter(d => d.reason !== '日曜日').slice(0, 6)
+  // 管理者へのまとめ：送り先の候補（有効なユーザー全員）と、今の送り先
+  const summaryOn = settings?.admin_summary_active !== 0
+  const summaryTo = await adminSummaryRecipients(db, settings?.admin_summary_ids)
+  const summaryToIds = new Set(summaryTo.map(u => u.id))
+  const allUsers = (await db.prepare('SELECT id, name, is_admin, notify_method FROM users WHERE is_active = 1 ORDER BY is_admin DESC, CAST(employee_number AS INTEGER), name').all()).results as any[]
+  const methodJa = (m: string) => m === 'lineworks' ? 'LINE WORKS' : m === 'both' ? 'メール＋LINE WORKS' : 'メール'
 
   const content = `
     <div class="max-w-xl space-y-4">
@@ -2026,13 +2032,42 @@ admin.get('/reminder', async (c) => {
         </form>
       </div>
 
+      <!-- ③ 管理者へのまとめ -->
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="text-base font-bold text-gray-800 mb-1">📋 ③ 管理者へのまとめ</h3>
+        <p class="text-sm text-gray-500 mb-4">
+          リマインドを送った日は、その後に「誰に何を送ったか」のまとめを1通送ります。<br>
+          送った件数が0件の日は送りません。届け方は、受け取る人の通知設定（メール／LINE WORKS）のとおりです。
+        </p>
+        <form method="POST" action="/admin/reminder-summary" class="space-y-4">
+          <label class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg cursor-pointer">
+            <input type="checkbox" name="admin_summary_active" value="1" ${summaryOn ? 'checked' : ''} class="w-4 h-4">
+            <span class="text-sm font-semibold text-gray-700">まとめを送る</span>
+          </label>
+          <div>
+            <p class="text-sm font-semibold text-gray-700 mb-1">送り先 <span class="text-xs font-normal text-gray-400">（最初は管理者の権限がある人全員）</span></p>
+            <div class="max-h-56 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+              ${allUsers.map(u => `
+              <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-50 cursor-pointer">
+                <input type="checkbox" name="admin_summary_ids" value="${u.id}" ${summaryToIds.has(u.id) ? 'checked' : ''} class="w-4 h-4">
+                <span class="text-gray-800">${String(u.name).replace(/[<>&"]/g, '')}</span>
+                ${u.is_admin ? '<span class="text-[10px] bg-[#EEF4FA] text-[#396999] px-1.5 rounded">管理者</span>' : ''}
+                <span class="ml-auto text-[11px] text-gray-400">${methodJa(u.notify_method)}</span>
+              </label>`).join('')}
+            </div>
+          </div>
+          <button type="submit" class="bg-[#396999] hover:bg-[#2E5580] text-white font-semibold px-6 py-2.5 rounded-lg transition text-sm">保存する</button>
+        </form>
+      </div>
+
       <!-- 動作説明 -->
       <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
         <p class="font-semibold mb-2">📝 リマインダーの動作について</p>
         <ul class="list-disc list-inside space-y-1 text-xs">
           <li>毎朝 8:00（日本時間）に自動で確認・送信します</li>
           <li>① 担当者へ送った日から、設定した日数が経った未申請の受付に送信</li>
-          <li>② 確認待ちになった日から、設定した日数が経った承認者に送信</li>
+          <li>② 確認待ちになった日から、設定した日数が経った承認者に送信（その人の通知設定：メール／LINE WORKS のとおり）</li>
+          <li>送った日は、③の送り先に「まとめ」を1通送ります</li>
           <li>2回目以降は、実際に前回送った日から数えます</li>
           <li>送る日が日曜日・祝日・年末年始（12/29〜1/4）のときは、次の送れる日の朝8時に送信（土曜日は送ります）</li>
           <li>最大回数まで送ったら、それ以上は送りません</li>
@@ -2141,6 +2176,18 @@ admin.post('/reminder', async (c) => {
       VALUES (?, ?, ?, ?, ?)
     `).bind(intervalDays, maxCount, isActive, me.id, now).run()
   }
+  return c.redirect('/admin/reminder?saved=1')
+})
+
+// 管理者へのまとめ 設定保存
+admin.post('/reminder-summary', async (c) => {
+  const db = c.env.DB
+  const body = await c.req.parseBody({ all: true }) as any
+  const active = body.admin_summary_active ? 1 : 0
+  const raw = body.admin_summary_ids
+  const ids = (Array.isArray(raw) ? raw : raw ? [raw] : []).map((v: any) => parseInt(String(v))).filter((n: number) => n > 0)
+  await db.prepare('UPDATE reminder_settings SET admin_summary_active = ?, admin_summary_ids = ?, updated_at = ? WHERE id = 1')
+    .bind(active, JSON.stringify(ids), new Date().toISOString()).run()
   return c.redirect('/admin/reminder?saved=1')
 })
 
