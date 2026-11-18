@@ -43,6 +43,7 @@ export const NOTIFY_TYPE_LABEL: Record<string, string> = {
   returned: '差し戻し',
   answered: '回答',
   reapplied: '再申請',
+  recalled: '申請者の引き戻し',
 }
 
 export const CHANNEL_LABEL: Record<string, string> = { email: 'メール', lineworks: 'LINE WORKS' }

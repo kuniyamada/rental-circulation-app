@@ -52,6 +52,12 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
         ? `<span class="ml-1 text-[11px] text-gray-500 whitespace-nowrap">→ 再申請済</span>`
         : `<span class="ml-1 text-[11px] text-orange-700 font-semibold whitespace-nowrap">→ 再申請待ち</span>`
       break
+    } else if (st.status === 'recalled') {
+      parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-gray-100 border border-gray-300 text-gray-700 font-bold" title="${escAttr(st.action_comment || '')}">↩申請者が引き戻し（${label}確認中）</span>`)
+      tail = hasSuccessor
+        ? `<span class="ml-1 text-[11px] text-gray-500 whitespace-nowrap">→ 再申請済</span>`
+        : `<span class="ml-1 text-[11px] text-orange-700 font-semibold whitespace-nowrap">→ 再申請待ち</span>`
+      break
     } else if (st.status === 'rejected') {
       parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-700 font-bold">✖${label}（${escAttr(firstName(st.reviewer_name))}）否決</span>`)
       if (hasSuccessor) tail = `<span class="ml-1 text-[11px] text-gray-500 whitespace-nowrap">→ 再提出済</span>`
@@ -257,7 +263,7 @@ applications.get('/', async (c) => {
   const stepsByApp: Record<string, any[]> = {}
   if (appIds.length) {
     const stepRows = await db.prepare(`
-      SELECT cs.id, cs.application_id, cs.step_number, cs.status, cs.acted_at, cs.created_at, cs.approval_memo, u.name AS reviewer_name
+      SELECT cs.id, cs.application_id, cs.step_number, cs.status, cs.acted_at, cs.created_at, cs.approval_memo, cs.action_comment, u.name AS reviewer_name
       FROM circulation_steps cs LEFT JOIN users u ON u.id = cs.reviewer_id
       WHERE cs.application_id IN (SELECT value FROM json_each(?))
       ORDER BY cs.application_id, cs.step_number, cs.id
@@ -2614,12 +2620,13 @@ applications.get('/:id', async (c) => {
     if (status === 'approved') return { dot: 'bg-green-500 border-green-500', card: 'bg-green-50 border-green-200', text: 'text-green-700' }
     if (status === 'rejected') return { dot: 'bg-red-500 border-red-500', card: 'bg-red-50 border-red-200', text: 'text-red-700' }
     if (status === 'returned') return { dot: 'bg-orange-500 border-orange-500', card: 'bg-orange-50 border-orange-200', text: 'text-orange-700' }
+    if (status === 'recalled') return { dot: 'bg-gray-500 border-gray-500', card: 'bg-gray-50 border-gray-300', text: 'text-gray-700' }
     if (status === 'on_hold') return { dot: 'bg-yellow-400 border-yellow-400', card: 'bg-yellow-50 border-yellow-200', text: 'text-yellow-700' }
     if (isCurrent) return { dot: 'bg-[#396999] border-[#396999]', card: 'bg-[#EEF4FA] border-[#AECBE5]', text: 'text-[#2E5580]' }
     return { dot: 'bg-gray-300 border-gray-300', card: 'bg-gray-50 border-gray-200', text: 'text-gray-400' }
   }
   const statusLabel: Record<string, string> = {
-    approved: '承認済', rejected: '否決', returned: '差し戻し', on_hold: '保留中', pending: '待機中'
+    approved: '承認済', rejected: '否決', returned: '差し戻し', recalled: '申請者が引き戻し', on_hold: '保留中', pending: '待機中'
   }
 
   const isApplicant = app.applicant_id === user.uid
@@ -2659,6 +2666,16 @@ applications.get('/:id', async (c) => {
     `).bind(id).first() as any
   }
 
+  // 引き戻しできるか：申請者本人・回覧中/保留中・後続の申請（元請B／再申請）が無い
+  let canRecall = false
+  let recallWaitingName = ''
+  if (isApplicant && (app.status === 'circulating' || app.status === 'on_hold')) {
+    const succ = await db.prepare('SELECT 1 FROM applications WHERE original_application_id = ? LIMIT 1').bind(id).first()
+    canRecall = !succ
+    const cur = (steps.results as any[]).find(s => s.step_number === app.current_step && (s.status === 'pending' || s.status === 'on_hold'))
+    recallWaitingName = cur?.reviewer_name || ''
+  }
+
   // クエリパラメータからのフラッシュメッセージ
   const deleteError = (c.req.query('delete_error') || '').replace(/[<>&"']/g, (ch) =>
     ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[ch] as string))
@@ -2680,6 +2697,8 @@ applications.get('/:id', async (c) => {
     ${deleteError ? `<div class="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg">⚠️ ${deleteError}</div>` : ''}
     ${c.req.query('memo_saved') ? `<div class="mb-4 bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-2.5 rounded-lg">✅ 承認メモを保存しました</div>` : ''}
     ${c.req.query('marked_test') ? `<div class="mb-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm px-4 py-2.5 rounded-lg">🧪 テスト申請扱いにしました。必要なら右上の「🗑 テスト申請を削除」で削除できます。</div>` : ''}
+    ${c.req.query('recalled') ? `<div class="mb-4 bg-gray-50 border border-gray-300 text-gray-700 text-sm px-4 py-2.5 rounded-lg">↩ 申請を引き戻しました。確認待ちだった人にお知らせしました。「編集して再申請する」で直して出し直せます。</div>` : ''}
+    ${c.req.query('recall_blocked') ? `<div class="mb-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm px-4 py-2.5 rounded-lg">⚠️ この申請は申請者が引き戻したため、確認の操作はできません。</div>` : ''}
     ${c.req.query('withdrawn') ? `<div class="mb-4 bg-gray-50 border border-gray-200 text-gray-700 text-sm px-4 py-2.5 rounded-lg">🚫 この申請を取り下げました。申請一覧の初期表示には出なくなります。</div>` : ''}
     ${app.status === 'withdrawn' ? `<div class="mb-4 bg-gray-100 border border-gray-300 text-gray-700 text-sm px-4 py-3 rounded-lg">🚫 この申請は申請者が取り下げました${app.withdrawn_at ? `（${String(app.withdrawn_at).slice(0, 16).replace('T', ' ')}）` : ''}。</div>` : ''}
     <div class="space-y-6 max-w-3xl">
@@ -2693,8 +2712,8 @@ applications.get('/:id', async (c) => {
           <div class="flex items-start gap-3 flex-1 min-w-0">
             <span class="text-3xl leading-none">↩</span>
             <div class="min-w-0">
-              <p class="text-base font-bold text-orange-900">この申請は差し戻されました</p>
-              <p class="text-xs text-orange-700 mt-0.5">内容（金額・請求書・添付・備考など）を修正して再申請してください。</p>
+              <p class="text-base font-bold text-orange-900">${app.recalled_at ? 'この申請を引き戻しました' : 'この申請は差し戻されました'}</p>
+              <p class="text-xs text-orange-700 mt-0.5">内容（金額・請求書・添付・備考など）を修正して再申請してください。${app.recalled_at ? '出し直さない場合は「取り下げる」で終わりにできます。' : ''}</p>
             </div>
           </div>
           <div class="flex items-center gap-2 flex-wrap">
@@ -2733,6 +2752,39 @@ applications.get('/:id', async (c) => {
         </div>
       </div>
       ` : ''}
+      <!-- 申請者による引き戻し（回覧中・保留中の申請を、完了前に自分の手元へ戻す） -->
+      ${canRecall ? `
+      <details id="recall" class="bg-white border border-gray-300 rounded-xl shadow-sm" ${c.req.query('recall_error') ? 'open' : ''}>
+        <summary class="px-5 py-3 cursor-pointer select-none flex items-center gap-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-xl">
+          <span>↩ この申請を引き戻す</span>
+          <span class="text-xs font-normal text-gray-500">（添付の間違いなどに気づいたとき。完了するまでいつでもできます）</span>
+        </summary>
+        <form method="POST" action="/applications/${id}/recall" class="px-5 pb-5 pt-1 space-y-3"
+              onsubmit="return confirmRecall(this)">
+          <ul class="text-xs text-gray-600 list-disc list-inside space-y-0.5">
+            <li>引き戻すと回覧が止まり、申請があなたの手元に戻ります（差し戻されたときと同じ状態）</li>
+            <li>「編集して再申請」で、添付などを直して出し直せます。出し直さない場合は「取り下げる」で終わりにできます</li>
+            <li>今確認待ちの人${recallWaitingName ? `（<strong>${escAttr(recallWaitingName)}</strong>さん）` : ''}に、引き戻したことをお知らせします</li>
+          </ul>
+          ${c.req.query('recall_error') ? `<p class="text-xs text-red-600 font-semibold">⚠️ ${escAttr(c.req.query('recall_error'))}</p>` : ''}
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">引き戻す理由 <span class="text-red-500">*</span></label>
+            <textarea name="recall_reason" required maxlength="500" rows="2"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none resize-none"
+              placeholder="例：添付した見積の組合名が違っていたため"></textarea>
+          </div>
+          <button type="submit" class="inline-flex items-center gap-1 bg-gray-700 hover:bg-gray-800 text-white font-semibold px-5 py-2.5 rounded-lg transition text-sm">↩ 引き戻す</button>
+        </form>
+        <script>
+          function confirmRecall(f) {
+            const r = (f.recall_reason.value || '').trim();
+            if (!r) { alert('引き戻す理由を入力してください'); return false; }
+            return confirm('この申請を引き戻しますか？\\n\\n理由：' + r + '\\n\\n・回覧が止まり、申請があなたの手元に戻ります\\n・確認待ちの人にお知らせします');
+          }
+        </script>
+      </details>
+      ` : ''}
+
       <!-- 再申請済の案内（後続申請へのリンク） -->
       ${(isReturned || isRejected) && resubmitSuccessor ? `
       <div class="bg-gradient-to-r from-emerald-50 to-white border-2 border-emerald-300 rounded-xl p-5 shadow-sm">
@@ -3000,9 +3052,9 @@ applications.get('/:id', async (c) => {
       <!-- 差し戻し情報（差し戻し中または差し戻し再申請の場合） -->
       ${(app.status === 'returned' || app.returned_reason) ? `
       <div class="bg-orange-50 border border-orange-300 rounded-xl p-5 space-y-3">
-        <h3 class="font-semibold text-orange-800 flex items-center gap-2">↩ 差し戻し情報</h3>
+        <h3 class="font-semibold text-orange-800 flex items-center gap-2">${String(app.returned_reason || '').startsWith('【申請者が引き戻し】') ? '↩ 引き戻し情報' : '↩ 差し戻し情報'}</h3>
         <div>
-          <p class="text-xs font-medium text-orange-600 mb-1">差し戻し理由</p>
+          <p class="text-xs font-medium text-orange-600 mb-1">${String(app.returned_reason || '').startsWith('【申請者が引き戻し】') ? '引き戻した理由' : '差し戻し理由'}</p>
           <p class="text-sm text-orange-900 bg-white rounded-lg p-3 border border-orange-200">${app.returned_reason || '-'}</p>
         </div>
         ${app.reapply_reason ? `
@@ -3084,6 +3136,7 @@ applications.get('/:id', async (c) => {
                 step.status === 'approved' ? '承認日時' :
                 step.status === 'rejected' ? '否決日時' :
                 step.status === 'returned' ? '差し戻し日時' :
+                step.status === 'recalled' ? '引き戻し日時' :
                 step.status === 'on_hold'  ? '保留日時' : '対応日時'
               return `
             <div class="relative flex gap-4 pb-6">
@@ -3100,6 +3153,7 @@ applications.get('/:id', async (c) => {
                     step.status === 'approved' ? 'bg-green-100 text-green-700' :
                     step.status === 'rejected' ? 'bg-red-100 text-red-700' :
                     step.status === 'returned' ? 'bg-orange-100 text-orange-700' :
+                    step.status === 'recalled' ? 'bg-gray-200 text-gray-700' :
                     step.status === 'on_hold'  ? 'bg-yellow-100 text-yellow-700' :
                     isCurrent ? 'bg-[#EEF4FA] text-[#396999]' : 'bg-gray-100 text-gray-400'
                   }">${statusLabel[step.status] || '待機中'}</span>
@@ -3110,7 +3164,8 @@ applications.get('/:id', async (c) => {
                 </div>` : ''}
                 ${step.action_comment ? `<p class="text-xs text-gray-600 mt-2 bg-white rounded p-2 border border-gray-200">${
                   step.status === 'on_hold' ? '❓ ' :
-                  step.status === 'returned' ? '↩ 差し戻し理由：' : '💬 '
+                  step.status === 'returned' ? '↩ 差し戻し理由：' :
+                  step.status === 'recalled' ? '↩ 申請者が引き戻した理由：' : '💬 '
                 }${step.action_comment}</p>` : ''}
                 ${step.hold_answer ? `<p class="text-xs text-[#396999] mt-1.5 bg-[#EEF4FA] rounded p-2 border border-[#D5E5F2]">📝 回答：${step.hold_answer}</p>` : ''}
                 ${step.status === 'approved' && (step.approval_memo || step.reviewer_id === user.uid) && step.step_number === Math.max(...(steps.results as any[]).map((x: any) => x.step_number)) ? `
@@ -4139,6 +4194,9 @@ applications.post('/:id/review/:stepId', async (c) => {
     FROM applications a JOIN users u ON a.applicant_id = u.id WHERE a.id = ?
   `).bind(id).first() as any
   if (!app) return c.redirect(`/applications/${id}`)
+  if (step.status === 'recalled' || (app.recalled_at && app.status === 'returned')) {
+    return c.redirect(`/applications/${id}?recall_blocked=1`)
+  }
 
   const appUrl = `${new URL(c.req.url).origin}/applications/${id}`
   const isTestApp = app.is_test === 1
@@ -4306,6 +4364,13 @@ applications.post('/:id/answer/:stepId', async (c) => {
   const db = c.env.DB
   const { id, stepId } = c.req.param()
   const body = await c.req.parseBody() as any
+
+  // 引き戻し・差し戻し等で保留中でなくなった申請には回答できない（回覧が勝手に再開しないように）
+  const holdApp = await db.prepare("SELECT status FROM applications WHERE id = ?").bind(id).first() as any
+  const holdStep = await db.prepare("SELECT status FROM circulation_steps WHERE id = ? AND application_id = ?").bind(stepId, id).first() as any
+  if (!holdApp || holdApp.status !== 'on_hold' || !holdStep || holdStep.status !== 'on_hold') {
+    return c.redirect(`/applications/${id}`)
+  }
 
   await db.prepare(
     'UPDATE circulation_steps SET hold_answer = ?, status = "pending", acted_at = datetime("now") WHERE id = ?'
@@ -4565,6 +4630,50 @@ applications.post('/:id/mark-test', async (c) => {
 })
 
 // 申請者本人: 差し戻し・否決のまま再申請していない申請を取り下げる
+// 申請者による引き戻し：回覧中・保留中の申請を完了前に自分の手元へ戻す（差し戻しと同じ状態にする）
+applications.post('/:id/recall', async (c) => {
+  const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie')))
+  if (!user) return c.redirect('/login')
+  const db = c.env.DB
+  const id = parseInt(c.req.param('id'))
+  const body = await c.req.parseBody() as any
+  const reason = String(body.recall_reason || '').trim().slice(0, 500)
+  const fail = (msg: string) => c.redirect(`/applications/${id}?recall_error=${encodeURIComponent(msg)}#recall`)
+  if (!reason) return fail('引き戻す理由を入力してください')
+
+  const app = await db.prepare(
+    'SELECT a.*, u.name AS applicant_name FROM applications a JOIN users u ON u.id = a.applicant_id WHERE a.id = ?'
+  ).bind(id).first() as any
+  if (!app || app.applicant_id !== user.uid) return fail('申請者本人だけが引き戻せます')
+  if (app.status !== 'circulating' && app.status !== 'on_hold') return fail('回覧中の申請だけ引き戻せます（完了・差し戻し・否決の申請は引き戻せません）')
+  const succ = await db.prepare('SELECT 1 FROM applications WHERE original_application_id = ? LIMIT 1').bind(id).first()
+  if (succ) return fail('この申請には続きの申請（元請の管理組合宛など）があるため引き戻せません')
+
+  const cur = await db.prepare(
+    "SELECT * FROM circulation_steps WHERE application_id = ? AND step_number = ? AND status IN ('pending', 'on_hold') ORDER BY id DESC LIMIT 1"
+  ).bind(id, app.current_step).first() as any
+
+  // 同時に承認された場合に備え、状態を条件にして更新
+  const res = await db.prepare(`
+    UPDATE applications SET status = 'returned', returned_reason = ?, returned_from_step = ?, returned_by_id = ?,
+      recalled_at = datetime('now'), updated_at = datetime('now')
+    WHERE id = ? AND applicant_id = ? AND status IN ('circulating', 'on_hold')
+  `).bind(`【申請者が引き戻し】${reason}`, app.current_step, user.uid, id, user.uid).run()
+  if (!res.meta.changes) return fail('ちょうど状態が変わったため引き戻せませんでした。画面を開き直してください')
+  if (cur) {
+    await db.prepare("UPDATE circulation_steps SET status = 'recalled', action_comment = ?, acted_at = datetime('now') WHERE id = ?")
+      .bind(reason, cur.id).run()
+    const appUrl = `${new URL(c.req.url).origin}/applications/${id}`
+    runInBackground(c, async () => {
+      await sendNotification(db, 'recalled', cur.reviewer_id, {
+        appNumber: app.application_number, title: app.title, applicantName: app.applicant_name,
+        comment: reason, appUrl, isTest: app.is_test === 1,
+      })
+    })
+  }
+  return c.redirect(`/applications/${id}?recalled=1`)
+})
+
 applications.post('/:id/withdraw', async (c) => {
   const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie')))
   if (!user) return c.redirect('/login')
