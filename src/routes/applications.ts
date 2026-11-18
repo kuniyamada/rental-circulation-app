@@ -212,7 +212,13 @@ applications.get('/', async (c) => {
 
   const db = c.env.DB
   const q = c.req.query('q') || ''
-  const status = c.req.query('status') || ''
+  let status = c.req.query('status') || ''
+  // 会計担当（＝その申請の最後に確認した人）で絞り込み。
+  // 会計課の人は、指定がなければ「自分の分」を初期表示。「すべて」を選ぶと全員分（acct=all）。
+  const acctRaw = c.req.query('acct')
+  const acctDefaultSelf = acctRaw === undefined && user.role === 'accounting'
+  const acct = acctDefaultSelf ? user.uid : (acctRaw && acctRaw !== 'all' ? (parseInt(acctRaw) || 0) : 0)
+  if (acct && !status) status = 'completed'   // 会計担当を選んだら、状態は「完了」に自動で切り替え
   const from = c.req.query('from') || ''
   const to = c.req.query('to') || ''
   const waiting = parseInt(c.req.query('waiting') || '') || 0   // 確認待ちの人（その人の確認で止まっている申請）
@@ -236,6 +242,11 @@ applications.get('/', async (c) => {
   if (waiting) {
     sql += ` AND a.status = 'circulating' AND EXISTS (SELECT 1 FROM circulation_steps cw WHERE cw.application_id = a.id AND cw.step_number = a.current_step AND cw.status = 'pending' AND cw.reviewer_id = ?)`
     params.push(waiting)
+  }
+  if (acct) {
+    sql += ` AND EXISTS (SELECT 1 FROM circulation_steps ca WHERE ca.application_id = a.id AND ca.reviewer_id = ?
+      AND ca.step_number = (SELECT MAX(cm.step_number) FROM circulation_steps cm WHERE cm.application_id = a.id))`
+    params.push(acct)
   }
   sql += ` ORDER BY a.created_at DESC LIMIT 100`
 
@@ -268,6 +279,21 @@ applications.get('/', async (c) => {
     WHERE a.status = 'circulating' AND cs.step_number = a.current_step AND cs.status = 'pending'
     GROUP BY u.id ORDER BY u.name
   `).all()).results as any[]
+
+  // 絞り込み用: 会計担当（完了した申請の最後に確認した人）と完了件数
+  const acctPeople = (await db.prepare(`
+    SELECT u.id, u.name, COUNT(DISTINCT a.id) AS cnt
+    FROM applications a
+    JOIN circulation_steps cs ON cs.application_id = a.id
+      AND cs.step_number = (SELECT MAX(cm.step_number) FROM circulation_steps cm WHERE cm.application_id = a.id)
+    JOIN users u ON u.id = cs.reviewer_id
+    WHERE a.status = 'completed'
+    GROUP BY u.id ORDER BY u.name
+  `).all()).results as any[]
+  if (acct && !acctPeople.some(p => p.id === acct)) {
+    const me = await db.prepare('SELECT id, name FROM users WHERE id = ?').bind(acct).first() as any
+    if (me) acctPeople.unshift({ id: me.id, name: me.name, cnt: 0 })
+  }
 
   // 保留中案件が存在するかを確認（存在する場合のみ、絞り込みプルダウンに「保留中」を表示）
   const holdCountRow = await db.prepare("SELECT COUNT(*) as c FROM applications WHERE status = 'on_hold'").first() as any
@@ -334,20 +360,27 @@ applications.get('/', async (c) => {
         </select>
         <button type="submit" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition">検索</button>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.35fr)] gap-3 mt-3">
         <div class="flex items-center gap-2">
           <label class="text-sm text-gray-500 whitespace-nowrap">期間（開始）</label>
-          <input type="date" name="from" value="${from}" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+          <input type="date" name="from" value="${from}" class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
         </div>
         <div class="flex items-center gap-2">
           <label class="text-sm text-gray-500 whitespace-nowrap">期間（終了）</label>
-          <input type="date" name="to" value="${to}" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+          <input type="date" name="to" value="${to}" class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
         </div>
         <div class="flex items-center gap-2">
           <label class="text-sm text-gray-500 whitespace-nowrap">確認待ちの人</label>
-          <select name="waiting" onchange="this.form.submit()" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
+          <select name="waiting" onchange="this.form.submit()" class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
             <option value="">すべて</option>
             ${waitingPeople.map(w => `<option value="${w.id}" ${waiting === w.id ? 'selected' : ''}>${escAttr(w.name)}（${w.cnt}件）</option>`).join('')}
+          </select>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-500 whitespace-nowrap" title="完了した申請を、最後に確認（会計処理）した人で絞り込みます">会計担当</label>
+          <select name="acct" onchange="this.form.submit()" class="flex-1 min-w-0 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none ${acct ? 'border-[#396999] bg-[#EEF4FA] font-semibold text-[#234166]' : 'border-gray-300'}">
+            <option value="all">すべて（全員分）</option>
+            ${acctPeople.map(p => `<option value="${p.id}" ${acct === p.id ? 'selected' : ''}>${escAttr(p.name)}${p.id === user.uid ? '（自分）' : ''} ${p.cnt}件</option>`).join('')}
           </select>
         </div>
       </div>
