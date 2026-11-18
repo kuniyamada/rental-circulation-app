@@ -131,7 +131,7 @@ export function buildMailSubject(type: string, appNumber: string, extra?: string
     resubmitted:    `【再提出】${appNumber} - 請求書が再提出されました`,
     returned:       `【差し戻し】${appNumber} - ${extra || '請求書が差し戻されました。修正の上、再申請してください'}`,
     reapplied:      `【差し戻し再申請】${appNumber} - 差し戻し後の再申請が届きました`,
-    recalled:       `【引き戻し】${appNumber} - 申請者が申請を引き戻しました（確認は不要になりました）`,
+    recalled:       `【取消】${appNumber} - 申請者が申請を取り消しました（確認は不要になりました）`,
     motouke_next:   `【承認・回覧開始のお願い】${appNumber} - 管理組合宛の請求書ができました`,
   }
   return subjects[type] || `【通知】${appNumber}`
@@ -165,10 +165,10 @@ export function buildMailBody(type: string, data: {
         <strong>差し戻し理由：</strong><br>${data.returnedReason}
       </p>` : ''}`,
     recalled: `
-      <p>下記の申請は、申請者が<strong style="color:#374151;">引き戻しました</strong>。</p>
+      <p>下記の申請は、申請者が<strong style="color:#374151;">取り消しました</strong>。</p>
       <p>この申請の確認は不要になりました。申請者が直して出し直した場合は、あらためてお知らせが届きます。</p>
       ${data.comment ? `<p style="background:#f3f4f6;border-left:4px solid #6b7280;padding:8px 12px;margin:8px 0;font-size:13px;">
-        <strong>引き戻した理由：</strong><br>${String(data.comment).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])}
+        <strong>取り消した理由：</strong><br>${String(data.comment).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch])}
       </p>` : ''}`,
     reapplied: `
       <p>差し戻し後の<strong style="color:#7c3aed;">再申請</strong>が届きました。内容をご確認の上、承認をお願いします。</p>

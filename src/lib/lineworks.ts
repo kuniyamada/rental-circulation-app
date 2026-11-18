@@ -281,7 +281,7 @@ export function buildLineWorksMessage(
     resubmitted:    '🔄 再提出',
     returned:       '↩ 差し戻し',
     reapplied:      '🔄 差し戻し再申請',
-    recalled:       '↩ 申請者が引き戻しました',
+    recalled:       '↩ 申請者が取り消しました',
     motouke_next:   '📬 管理組合宛の請求書ができました',
   }
 
@@ -311,7 +311,7 @@ export function buildLineWorksMessage(
     }
     lines.push('', '修正の上、再申請をお願いします。')
   } else if (type === 'recalled') {
-    if (data.comment) lines.push('', `引き戻した理由: ${data.comment}`)
+    if (data.comment) lines.push('', `取り消した理由: ${data.comment}`)
     lines.push('', 'この申請の確認は不要になりました。')
   } else if (type === 'reapplied') {
     if (data.returnedReason) {
