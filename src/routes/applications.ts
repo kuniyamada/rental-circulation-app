@@ -47,25 +47,25 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
     } else if (st.status === 'pending' && app.status === 'circulating' && st.step_number === app.current_step) {
       parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded bg-[#EEF4FA] border border-[#AECBE5] text-[#234166] font-bold">⏳${label}（${escAttr(firstName(st.reviewer_name))}）</span>`)
     } else if (st.status === 'returned') {
-      parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-orange-50 border border-orange-200 text-orange-700 font-bold">🔙${label}（${escAttr(firstName(st.reviewer_name))}）で差し戻し</span>`)
+      parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-orange-50 border border-orange-200 text-orange-700 font-bold">🔙${label}（${escAttr(firstName(st.reviewer_name))}）差し戻し</span>`)
       tail = hasSuccessor
-        ? `<div class="mt-1 text-[11px] text-gray-500">→ 再申請済</div>`
-        : `<div class="mt-1 text-[11px] text-orange-700 font-semibold">→ 申請者（${escAttr(firstName(app.applicant_name))}）の再申請待ち</div>`
+        ? `<span class="ml-1 text-[11px] text-gray-500 whitespace-nowrap">→ 再申請済</span>`
+        : `<span class="ml-1 text-[11px] text-orange-700 font-semibold whitespace-nowrap">→ 再申請待ち</span>`
       break
     } else if (st.status === 'rejected') {
-      parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-700 font-bold">✖${label}（${escAttr(firstName(st.reviewer_name))}）で否決</span>`)
-      if (hasSuccessor) tail = `<div class="mt-1 text-[11px] text-gray-500">→ 再提出済</div>`
+      parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-700 font-bold">✖${label}（${escAttr(firstName(st.reviewer_name))}）否決</span>`)
+      if (hasSuccessor) tail = `<span class="ml-1 text-[11px] text-gray-500 whitespace-nowrap">→ 再提出済</span>`
       break
     } else if (st.status === 'on_hold') {
-      parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-yellow-50 border border-yellow-300 text-yellow-800 font-bold">❓${label}（${escAttr(firstName(st.reviewer_name))}）が保留・質問中</span>`)
-      tail = `<div class="mt-1 text-[11px] text-yellow-800 font-semibold">→ 申請者（${escAttr(firstName(app.applicant_name))}）の回答待ち</div>`
+      parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-yellow-50 border border-yellow-300 text-yellow-800 font-bold">❓${label}（${escAttr(firstName(st.reviewer_name))}）保留中</span>`)
+      tail = `<span class="ml-1 text-[11px] text-yellow-800 font-semibold whitespace-nowrap">→ 申請者の回答待ち</span>`
       break
     } else {
       parts.push(`<span class="text-gray-400 whitespace-nowrap">○${label}</span>`)
     }
   }
   const head = app.status === 'completed'
-    ? '<span class="inline-block mb-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">🎉 完了</span><br>'
+    ? '<span class="inline-block mr-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 whitespace-nowrap">🎉 完了</span>'
     : ''
   return `<div class="text-xs leading-6">${head}${parts.join(arrow)}${tail}</div>`
 }
@@ -366,12 +366,12 @@ applications.get('/', async (c) => {
         <table class="w-full text-sm">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">申請番号</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">マンション名</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">申請者</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">支払先</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">進捗 <span class="font-normal text-gray-400">（✅確認済 → ⏳確認待ち → ○まだ先）</span></th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">申請日</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">申請番号</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 min-w-[11rem]">マンション名</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">申請者</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">支払先</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">進捗 <span class="font-normal text-gray-400">（✅確認済 → ⏳確認待ち → ○まだ先）</span></th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">申請日</th>
               <th class="px-4 py-3"></th>
             </tr>
           </thead>
@@ -403,13 +403,13 @@ applications.get('/', async (c) => {
                   : ''
                 return `
                 <tr class="${rowClass}">
-                  <td class="px-4 py-3 text-gray-500 text-xs">${app.application_number}${testBadge}${resubmitBadge}${motoukeAbadge}${motoukeBbadge}</td>
-                  <td class="px-4 py-3 font-medium text-gray-800">${app.mansion_name || app.title}</td>
-                  <td class="px-4 py-3 text-gray-600 whitespace-nowrap">${app.applicant_name}</td>
-                  <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
-                  <td class="px-4 py-3">${progressCell(app, stepsByApp[app.id] || [], hasSuccessor)}</td>
-                  <td class="px-4 py-3 text-gray-400 text-xs">${app.created_at?.substring(0,10)}</td>
-                  <td class="px-4 py-3">
+                  <td class="px-3 py-1.5 text-gray-500 text-xs whitespace-nowrap">${app.application_number}${testBadge}${resubmitBadge}${motoukeAbadge}${motoukeBbadge}</td>
+                  <td class="px-3 py-1.5 font-medium text-gray-800 min-w-[11rem]">${app.mansion_name || app.title}</td>
+                  <td class="px-3 py-1.5 text-gray-600 whitespace-nowrap">${app.applicant_name}</td>
+                  <td class="px-3 py-1.5 whitespace-nowrap">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
+                  <td class="px-3 py-1.5">${progressCell(app, stepsByApp[app.id] || [], hasSuccessor)}</td>
+                  <td class="px-3 py-1.5 text-gray-400 text-xs whitespace-nowrap">${app.created_at?.substring(0,10)}</td>
+                  <td class="px-3 py-1.5">
                     <div class="flex items-center gap-2 justify-end">
                       ${resubmitLink}
                       ${withdrawLink}
