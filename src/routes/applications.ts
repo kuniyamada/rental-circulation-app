@@ -2757,7 +2757,6 @@ applications.get('/:id', async (c) => {
       <details id="recall" class="bg-white border border-gray-300 rounded-xl shadow-sm" ${c.req.query('recall_error') ? 'open' : ''}>
         <summary class="px-5 py-3 cursor-pointer select-none flex items-center gap-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-xl">
           <span>↩ 取消</span>
-          <span class="text-xs font-normal text-gray-500">（添付の間違いなどに気づいたとき。完了するまでいつでもできます）</span>
         </summary>
         <form method="POST" action="/applications/${id}/recall" class="px-5 pb-5 pt-1 space-y-3"
               onsubmit="return confirmRecall(this)">
