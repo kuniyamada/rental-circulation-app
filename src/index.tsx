@@ -344,27 +344,39 @@ app.get('/', async (c) => {
           <!-- 業務管理課向け：未申請受付一覧 -->
           ${(pendingInbox.results as any[]).length > 0 ? `
           <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-            <div class="flex items-center gap-2 mb-3">
+            <div class="flex items-center gap-2 mb-2">
               <span class="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></span>
               <h2 class="font-bold text-yellow-800">⚠️ 未申請の受付案件</h2>
-              <span class="ml-auto bg-yellow-500 text-white text-xs font-bold px-2 py-1 rounded-full">${(pendingInbox.results as any[]).length}件</span>
+              <span class="bg-yellow-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">${(pendingInbox.results as any[]).length}件</span>
+              <a href="/inbox?status=pending" class="ml-auto text-xs px-3 py-1 bg-white text-gray-600 hover:bg-gray-50 border border-gray-200 rounded-lg transition">管理画面へ →</a>
             </div>
-            <div class="space-y-2">
-              ${(pendingInbox.results as any[]).map((item: any) => `
-                <div class="bg-white rounded-lg px-4 py-3 flex items-center justify-between shadow-sm">
-                  <div>
-                    <p class="font-semibold text-gray-800 text-sm">${item.mansion_name || '-'}</p>
-                    <p class="text-xs text-gray-500 mt-0.5">担当: ${item.front_name || '-'} / 登録: ${item.created_at?.slice(0,10)}</p>
-                    ${item.remind_count > 0 ? `<p class="text-xs text-orange-500 mt-0.5">リマインド ${item.remind_count}回送信済</p>` : '<p class="text-xs text-gray-400 mt-0.5">リマインド未送信</p>'}
-                  </div>
-                  <div class="flex gap-2">
-                    <form method="POST" action="/inbox/${item.id}/remind" onsubmit="return confirm('${item.front_name}さんにリマインドを送信しますか？')">
-                      <button type="submit" class="text-xs px-3 py-1.5 bg-orange-50 text-orange-600 hover:bg-orange-100 border border-orange-200 rounded-lg transition">再通知</button>
-                    </form>
-                    <a href="/inbox" class="text-xs px-3 py-1.5 bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 rounded-lg transition">管理画面へ</a>
-                  </div>
-                </div>
-              `).join('')}
+            <!-- 1件1行（件数が多くても一覧で見渡せるように） -->
+            <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+              <table class="w-full text-sm">
+                <thead class="bg-yellow-100/60 text-[11px] text-yellow-900">
+                  <tr>
+                    <th class="px-3 py-1.5 text-left font-semibold">マンション</th>
+                    <th class="px-3 py-1.5 text-left font-semibold whitespace-nowrap">担当</th>
+                    <th class="px-3 py-1.5 text-left font-semibold whitespace-nowrap">登録日</th>
+                    <th class="px-3 py-1.5 text-left font-semibold whitespace-nowrap">再通知</th>
+                    <th class="px-3 py-1.5"></th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  ${(pendingInbox.results as any[]).map((item: any) => `
+                  <tr class="hover:bg-yellow-50/60">
+                    <td class="px-3 py-1.5 font-semibold text-gray-800">${item.mansion_name || '-'}</td>
+                    <td class="px-3 py-1.5 text-gray-600 whitespace-nowrap">${item.front_name || '-'}</td>
+                    <td class="px-3 py-1.5 text-gray-500 text-xs whitespace-nowrap">${item.created_at?.slice(0,10) || '-'}</td>
+                    <td class="px-3 py-1.5 text-xs whitespace-nowrap">${item.remind_count > 0 ? `<span class="text-orange-600">${item.remind_count}回送信済</span>` : '<span class="text-gray-400">未送信</span>'}</td>
+                    <td class="px-3 py-1 text-right">
+                      <form method="POST" action="/inbox/${item.id}/remind" class="inline" onsubmit="return confirm('${item.front_name}さんに再通知を送信しますか？')">
+                        <button type="submit" class="text-xs px-2.5 py-0.5 bg-orange-50 text-orange-600 hover:bg-orange-100 border border-orange-200 rounded transition whitespace-nowrap">再通知</button>
+                      </form>
+                    </td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
             </div>
           </div>
           ` : ''}
