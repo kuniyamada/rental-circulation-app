@@ -42,7 +42,8 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
     const label = STEP_SHORT[st.step_number] || `段階${st.step_number}`
     const who = escAttr(st.reviewer_name || '')
     if (st.status === 'approved') {
-      parts.push(`<span class="text-green-700 whitespace-nowrap" title="${who} ${escAttr(String(st.acted_at || '').slice(0, 16))} 確認済">✅${label}</span>`)
+      const memoMark = st.approval_memo ? `<span class="ml-0.5 cursor-help px-1 rounded bg-amber-100 text-amber-800" title="承認メモ：${escAttr(st.approval_memo)}">📝</span>` : ''
+      parts.push(`<span class="text-green-700 whitespace-nowrap" title="${who} ${escAttr(String(st.acted_at || '').slice(0, 16))} 確認済">✅${label}</span>${memoMark}`)
     } else if (st.status === 'pending' && app.status === 'circulating' && st.step_number === app.current_step) {
       parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded bg-[#EEF4FA] border border-[#AECBE5] text-[#234166] font-bold">⏳${label}（${escAttr(firstName(st.reviewer_name))}）</span>`)
     } else if (st.status === 'returned') {
@@ -67,6 +68,14 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
     ? '<span class="inline-block mb-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">🎉 完了</span><br>'
     : ''
   return `<div class="text-xs leading-6">${head}${parts.join(arrow)}${tail}</div>`
+}
+
+
+// 承認メモのクイックボタン（日本時間で 今月・来月の計上、来月・再来月の払）
+function memoQuickChips(): string[] {
+  const j = new Date(Date.now() + 9 * 3600 * 1000)
+  const m = (k: number) => ((j.getUTCMonth() + k) % 12) + 1
+  return [`${m(0)}月計上`, `${m(1)}月計上`, `${m(1)}月払`, `${m(2)}月払`, '提出期限切れ']
 }
 
 // ============================================================
@@ -237,7 +246,7 @@ applications.get('/', async (c) => {
   const stepsByApp: Record<string, any[]> = {}
   if (appIds.length) {
     const stepRows = await db.prepare(`
-      SELECT cs.id, cs.application_id, cs.step_number, cs.status, cs.acted_at, cs.created_at, u.name AS reviewer_name
+      SELECT cs.id, cs.application_id, cs.step_number, cs.status, cs.acted_at, cs.created_at, cs.approval_memo, u.name AS reviewer_name
       FROM circulation_steps cs LEFT JOIN users u ON u.id = cs.reviewer_id
       WHERE cs.application_id IN (SELECT value FROM json_each(?))
       ORDER BY cs.application_id, cs.step_number, cs.id
@@ -2636,6 +2645,7 @@ applications.get('/:id', async (c) => {
 
   const content = `
     ${deleteError ? `<div class="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg">⚠️ ${deleteError}</div>` : ''}
+    ${c.req.query('memo_saved') ? `<div class="mb-4 bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-2.5 rounded-lg">✅ 承認メモを保存しました</div>` : ''}
     ${c.req.query('marked_test') ? `<div class="mb-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm px-4 py-2.5 rounded-lg">🧪 テスト申請扱いにしました。必要なら右上の「🗑 テスト申請を削除」で削除できます。</div>` : ''}
     ${c.req.query('withdrawn') ? `<div class="mb-4 bg-gray-50 border border-gray-200 text-gray-700 text-sm px-4 py-2.5 rounded-lg">🚫 この申請を取り下げました。申請一覧の初期表示には出なくなります。</div>` : ''}
     ${app.status === 'withdrawn' ? `<div class="mb-4 bg-gray-100 border border-gray-300 text-gray-700 text-sm px-4 py-3 rounded-lg">🚫 この申請は申請者が取り下げました${app.withdrawn_at ? `（${String(app.withdrawn_at).slice(0, 16).replace('T', ' ')}）` : ''}。</div>` : ''}
@@ -3070,6 +3080,18 @@ applications.get('/:id', async (c) => {
                   step.status === 'returned' ? '↩ 差し戻し理由：' : '💬 '
                 }${step.action_comment}</p>` : ''}
                 ${step.hold_answer ? `<p class="text-xs text-[#396999] mt-1.5 bg-[#EEF4FA] rounded p-2 border border-[#D5E5F2]">📝 回答：${step.hold_answer}</p>` : ''}
+                ${step.status === 'approved' && (step.approval_memo || step.reviewer_id === user.uid) && step.step_number === Math.max(...(steps.results as any[]).map((x: any) => x.step_number)) ? `
+                <div class="mt-2">
+                  ${step.approval_memo ? `<p class="text-sm text-amber-900 bg-amber-50 rounded p-2 border border-amber-200">📝 承認メモ：<strong>${escAttr(step.approval_memo)}</strong>${step.memo_updated_at ? `<span class="ml-2 text-[11px] text-amber-700">（${String(step.memo_updated_at).slice(0, 16)} 修正）</span>` : ''}</p>` : ''}
+                  ${step.reviewer_id === user.uid ? `
+                  <details class="mt-1">
+                    <summary class="text-xs text-[#396999] cursor-pointer hover:underline select-none">✏️ 承認メモを${step.approval_memo ? '直す' : '書く'}</summary>
+                    <form method="POST" action="/applications/${id}/memo/${step.id}" class="mt-1.5 flex gap-2 items-start">
+                      <textarea name="approval_memo" rows="2" maxlength="200" class="flex-1 px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#396999] outline-none resize-none" placeholder="例：11月計上／12月払">${escAttr(step.approval_memo || '')}</textarea>
+                      <button type="submit" class="text-xs px-3 py-2 bg-[#396999] hover:bg-[#2E5580] text-white rounded whitespace-nowrap">保存</button>
+                    </form>
+                  </details>` : ''}
+                </div>` : ''}
                 ${isMyTurn ? `
                 <div class="mt-2">
                   <a href="/applications/${id}/review/${step.id}"
@@ -3363,6 +3385,16 @@ applications.get('/:id/review/:stepId', async (c) => {
         <form method="POST" action="/applications/${id}/review/${stepId}" id="reviewForm">
           <input type="hidden" name="action" id="actionInput">
           <input type="hidden" name="comment" id="commentHidden">
+          ${!nextRouteStep ? `
+          <!-- 最終承認者だけ: 承認メモ（任意） -->
+          <div class="mb-4">
+            <label for="approvalMemo" class="block text-sm font-semibold text-gray-700 mb-1">📝 承認メモ <span class="text-xs font-normal text-gray-400">（任意・例：11月計上／12月払）</span></label>
+            <div class="flex flex-wrap gap-1.5 mb-2">
+              ${memoQuickChips().map(t => `<button type="button" onclick="addMemo('${t}')" class="text-xs px-2.5 py-1 rounded-full border border-[#AECBE5] bg-[#EEF4FA] text-[#396999] hover:bg-[#D5E5F2]">＋ ${t}</button>`).join('')}
+            </div>
+            <textarea name="approval_memo" id="approvalMemo" rows="2" maxlength="200" placeholder="会計処理のメモなど（承認すると回覧の記録に残ります）"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none resize-none"></textarea>
+          </div>` : ''}
           <div class="flex gap-3">
             <button type="button" onclick="submitAction('approve')"
               class="flex-1 bg-green-500 hover:bg-green-600 text-white font-semibold py-3 rounded-lg transition text-sm flex items-center justify-center gap-2">
@@ -3411,8 +3443,17 @@ applications.get('/:id/review/:stepId', async (c) => {
     <script>
       let currentAction = ''
 
+      function addMemo(t) {
+        const el = document.getElementById('approvalMemo')
+        if (!el) return
+        const v = el.value.trim()
+        el.value = v ? (v.endsWith('／') ? v + t : v + '／' + t) : t
+        el.focus()
+      }
       function submitAction(action) {
-        if (action === 'approve' && !confirm('この申請を承認しますか？')) return
+        const memoEl = document.getElementById('approvalMemo')
+        const memo = memoEl ? memoEl.value.trim() : ''
+        if (action === 'approve' && !confirm('この申請を承認しますか？' + (memo ? '\\n\\n承認メモ：' + memo : ''))) return
         document.getElementById('actionInput').value = action
         document.getElementById('commentHidden').value = ''
         document.getElementById('reviewForm').submit()
@@ -4070,10 +4111,14 @@ applications.post('/:id/review/:stepId', async (c) => {
   const isTestApp = app.is_test === 1
 
   if (action === 'approve') {
+    // 最終承認者（この申請で一番後ろの段階）だけ承認メモを残せる
+    const lastStep = await db.prepare('SELECT MAX(step_number) AS n FROM circulation_steps WHERE application_id = ?').bind(id).first() as any
+    const isFinal = lastStep && Number(lastStep.n) === Number(step.step_number)
+    const memo = isFinal ? String(body.approval_memo || '').trim().slice(0, 200) : ''
     // ステップを承認
     await db.prepare(
-      'UPDATE circulation_steps SET status = "approved", acted_at = datetime("now") WHERE id = ?'
-    ).bind(stepId).run()
+      'UPDATE circulation_steps SET status = "approved", acted_at = datetime("now"), approval_memo = ? WHERE id = ?'
+    ).bind(memo || null, stepId).run()
 
     // 次のステップへ
     const nextStep = await db.prepare(
@@ -4459,6 +4504,23 @@ applications.post('/:id/resubmit', async (c) => {
 
 // ファイルダウンロード
 // テスト申請の削除（管理者のみ・is_test=1 の申請だけ）
+// 最終承認者: 承認メモをあとから直す（書いた本人だけ）
+applications.post('/:id/memo/:stepId', async (c) => {
+  const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie')))
+  if (!user) return c.redirect('/login')
+  const db = c.env.DB
+  const id = parseInt(c.req.param('id'))
+  const stepId = parseInt(c.req.param('stepId'))
+  const body = await c.req.parseBody() as any
+  const memo = String(body.approval_memo || '').trim().slice(0, 200)
+  await db.prepare(`
+    UPDATE circulation_steps SET approval_memo = ?, memo_updated_at = datetime('now')
+    WHERE id = ? AND application_id = ? AND reviewer_id = ? AND status = 'approved'
+      AND step_number = (SELECT MAX(step_number) FROM circulation_steps WHERE application_id = ?)
+  `).bind(memo || null, stepId, id, user.uid, id).run()
+  return c.redirect(`/applications/${id}?memo_saved=1`)
+})
+
 // 管理者: 通常の申請を「テスト申請」扱いにする（試しに出された申請を片付けるため）
 applications.post('/:id/mark-test', async (c) => {
   const user = await getSessionUser(c.env.DB, getSessionIdFromCookie(c.req.header('Cookie')))
