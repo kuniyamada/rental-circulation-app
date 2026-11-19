@@ -1065,7 +1065,7 @@ applications.get('/new', async (c) => {
               <div id="feeRateBox" class="opacity-40">
                 <label class="block text-sm font-semibold text-gray-700 mb-1.5">手数料（％）</label>
                 <div class="relative">
-                  <input type="number" id="commissionRateInput" name="commission_rate" min="0" max="100" step="0.1" disabled
+                  <input type="number" id="commissionRateInput" name="commission_rate" min="0" max="100" step="any" disabled
                     class="w-full px-3 py-2.5 pr-8 text-right [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none bg-gray-50"
                     placeholder="0" oninput="validateFeeFields()">
                   <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
@@ -1324,9 +1324,13 @@ applications.get('/new', async (c) => {
 
       // カンマ区切りフォーマット関数
       function formatComma(el, hiddenId) {
-        const raw = el.value.replace(/[^0-9]/g, '')
+        // 全角数字は半角に直す。小数点以下は切り捨て（円は整数）
+        const half = el.value.replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace(/[．.].*$/, '')
+        const raw = half.replace(/[^0-9]/g, '')
         el.value = raw === '' ? '' : Number(raw).toLocaleString()
-        const hidden = document.getElementById(hiddenId + 'Hidden')
+        // 送信用の隠し欄に数字を入れる（以前は隠し欄のIDが合っておらず、円の手数料が送られていなかった）
+        const camel = hiddenId.replace(/_([a-z])/g, (_, ch) => ch.toUpperCase())
+        const hidden = document.getElementById(camel + 'Hidden') || document.getElementById(hiddenId + 'Hidden')
         if (hidden) hidden.value = raw
       }
 
