@@ -3,6 +3,7 @@ import { getSessionUser, getSessionIdFromCookie, generateApplicationNumber } fro
 import { layout, statusBadge, paymentLabel } from './layout'
 import { buildMailSubject, buildMailBody, sendMail, sendMailDetailed } from '../lib/mail'
 import { logNotify } from '../lib/notify-log'
+import { jst, jstToday } from '../lib/notify-log'
 import { sendLineWorksMessage, buildLineWorksMessage, rowToConfig, type LineWorksConfigRow } from '../lib/lineworks'
 import { syncApplicationToDrive, type SyncEnv } from '../lib/drive-sync'
 import { budgetConfigured } from '../lib/budget'
@@ -43,7 +44,7 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
     const who = escAttr(st.reviewer_name || '')
     if (st.status === 'approved') {
       const memoMark = st.approval_memo ? `<span class="ml-0.5 cursor-help px-1 rounded bg-amber-100 text-amber-800" title="承認メモ：${escAttr(st.approval_memo)}">📝</span>` : ''
-      parts.push(`<span class="text-green-700 whitespace-nowrap" title="${who} ${escAttr(String(st.acted_at || '').slice(0, 16))} 確認済">✅${label}</span>${memoMark}`)
+      parts.push(`<span class="text-green-700 whitespace-nowrap" title="${who} ${escAttr(jst(st.acted_at))} 確認済">✅${label}</span>${memoMark}`)
     } else if (st.status === 'pending' && app.status === 'circulating' && st.step_number === app.current_step) {
       parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded bg-[#EEF4FA] border border-[#AECBE5] text-[#234166] font-bold">⏳${label}（${escAttr(firstName(st.reviewer_name))}）</span>`)
     } else if (st.status === 'returned') {
@@ -243,8 +244,8 @@ applications.get('/', async (c) => {
   if (q) { sql += ` AND (m.name LIKE ? OR a.title LIKE ? OR a.application_number LIKE ?)`; params.push(`%${q}%`, `%${q}%`, `%${q}%`) }
   if (status) { sql += ` AND a.status = ?`; params.push(status) }
   else { sql += ` AND a.status != 'withdrawn'` }   // 取り下げた申請は初期表示では出さない
-  if (from) { sql += ` AND a.created_at >= ?`; params.push(from) }
-  if (to) { sql += ` AND a.created_at <= ?`; params.push(to + ' 23:59:59') }
+  if (from) { sql += ` AND a.created_at >= datetime(?, '-9 hours')`; params.push(from + ' 00:00:00') }
+  if (to) { sql += ` AND a.created_at < datetime(?, '-9 hours', '+1 day')`; params.push(to + ' 00:00:00') }
   if (waiting) {
     sql += ` AND a.status = 'circulating' AND EXISTS (SELECT 1 FROM circulation_steps cw WHERE cw.application_id = a.id AND cw.step_number = a.current_step AND cw.status = 'pending' AND cw.reviewer_id = ?)`
     params.push(waiting)
@@ -447,7 +448,7 @@ applications.get('/', async (c) => {
                   <td class="px-3 py-1.5 text-gray-600 whitespace-nowrap">${app.applicant_name}</td>
                   <td class="px-3 py-1.5 whitespace-nowrap">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
                   <td class="px-3 py-1.5">${progressCell(app, stepsByApp[app.id] || [], hasSuccessor)}</td>
-                  <td class="px-3 py-1.5 text-gray-400 text-xs whitespace-nowrap">${app.created_at?.substring(0,10)}</td>
+                  <td class="px-3 py-1.5 text-gray-400 text-xs whitespace-nowrap">${jst(app.created_at, 10)}</td>
                   <td class="px-3 py-1.5">
                     <div class="flex items-center gap-2 justify-end">
                       ${resubmitLink}
@@ -669,7 +670,7 @@ applications.get('/new', async (c) => {
     "SELECT id FROM users WHERE employee_number = '049' AND is_active = 1 LIMIT 1"
   ).first() as any
 
-  const today = new Date().toISOString().substring(0, 10)
+  const today = jstToday()
 
   const newErrKey = c.req.query('error') || ''
   const NEW_ERRORS: Record<string, string> = {
@@ -2700,7 +2701,7 @@ applications.get('/:id', async (c) => {
     ${c.req.query('recalled') ? `<div class="mb-4 bg-gray-50 border border-gray-300 text-gray-700 text-sm px-4 py-2.5 rounded-lg">↩ 申請を取り消しました。確認待ちだった人にお知らせしました。「編集して再申請する」で直して出し直せます。</div>` : ''}
     ${c.req.query('recall_blocked') ? `<div class="mb-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm px-4 py-2.5 rounded-lg">⚠️ この申請は申請者が取り消したため、確認の操作はできません。</div>` : ''}
     ${c.req.query('withdrawn') ? `<div class="mb-4 bg-gray-50 border border-gray-200 text-gray-700 text-sm px-4 py-2.5 rounded-lg">🚫 この申請を取り下げました。申請一覧の初期表示には出なくなります。</div>` : ''}
-    ${app.status === 'withdrawn' ? `<div class="mb-4 bg-gray-100 border border-gray-300 text-gray-700 text-sm px-4 py-3 rounded-lg">🚫 この申請は申請者が取り下げました${app.withdrawn_at ? `（${String(app.withdrawn_at).slice(0, 16).replace('T', ' ')}）` : ''}。</div>` : ''}
+    ${app.status === 'withdrawn' ? `<div class="mb-4 bg-gray-100 border border-gray-300 text-gray-700 text-sm px-4 py-3 rounded-lg">🚫 この申請は申請者が取り下げました${app.withdrawn_at ? `（${jst(app.withdrawn_at)}）` : ''}。</div>` : ''}
     <div class="space-y-6 max-w-3xl">
       ${motoukeFlash}
 
@@ -2795,7 +2796,7 @@ applications.get('/:id', async (c) => {
               <p class="text-xs text-emerald-700 mt-0.5">
                 後続申請: <a href="/applications/${resubmitSuccessor.id}" class="font-mono underline hover:text-emerald-900">${resubmitSuccessor.application_number}</a>
                 <span class="ml-2 text-emerald-600">(${resubmitSuccessor.status === 'circulating' ? '回覧中' : resubmitSuccessor.status === 'completed' ? '完了' : resubmitSuccessor.status === 'returned' ? '差し戻し' : resubmitSuccessor.status === 'rejected' ? '否決' : resubmitSuccessor.status})</span>
-                <span class="ml-2 text-gray-400">${resubmitSuccessor.created_at?.substring(0,16)}</span>
+                <span class="ml-2 text-gray-400">${jst(resubmitSuccessor.created_at)}</span>
               </p>
             </div>
           </div>
@@ -3120,7 +3121,7 @@ applications.get('/:id', async (c) => {
                   <span class="text-xs font-medium bg-[#D5E5F2] text-[#2E5580] px-2 py-0.5 rounded-full">申請</span>
                 </div>
                 <div class="flex items-center gap-4 mt-1.5 flex-wrap">
-                  <span class="text-xs text-gray-500">📅 申請日：${app.created_at?.substring(0,16)}</span>
+                  <span class="text-xs text-gray-500">📅 申請日：${jst(app.created_at)}</span>
                   <span class="text-xs text-gray-500">🔄 回覧開始日：${app.circulation_start_date || '-'}</span>
                 </div>
               </div>
@@ -3159,7 +3160,7 @@ applications.get('/:id', async (c) => {
                 </div>
                 ${step.acted_at ? `
                 <div class="mt-1.5">
-                  <span class="text-xs text-gray-500">🕐 ${actionDateLabel}：<span class="font-medium text-gray-700">${step.acted_at.substring(0,16)}</span></span>
+                  <span class="text-xs text-gray-500">🕐 ${actionDateLabel}：<span class="font-medium text-gray-700">${jst(step.acted_at)}</span></span>
                 </div>` : ''}
                 ${step.action_comment ? `<p class="text-xs text-gray-600 mt-2 bg-white rounded p-2 border border-gray-200">${
                   step.status === 'on_hold' ? '❓ ' :
@@ -3169,7 +3170,7 @@ applications.get('/:id', async (c) => {
                 ${step.hold_answer ? `<p class="text-xs text-[#396999] mt-1.5 bg-[#EEF4FA] rounded p-2 border border-[#D5E5F2]">📝 回答：${step.hold_answer}</p>` : ''}
                 ${step.status === 'approved' && (step.approval_memo || step.reviewer_id === user.uid) && step.step_number === Math.max(...(steps.results as any[]).map((x: any) => x.step_number)) ? `
                 <div class="mt-2">
-                  ${step.approval_memo ? `<p class="text-sm text-amber-900 bg-amber-50 rounded p-2 border border-amber-200">📝 承認メモ：<strong>${escAttr(step.approval_memo)}</strong>${step.memo_updated_at ? `<span class="ml-2 text-[11px] text-amber-700">（${String(step.memo_updated_at).slice(0, 16)} 修正）</span>` : ''}</p>` : ''}
+                  ${step.approval_memo ? `<p class="text-sm text-amber-900 bg-amber-50 rounded p-2 border border-amber-200">📝 承認メモ：<strong>${escAttr(step.approval_memo)}</strong>${step.memo_updated_at ? `<span class="ml-2 text-[11px] text-amber-700">（${jst(step.memo_updated_at)} 修正）</span>` : ''}</p>` : ''}
                   ${step.reviewer_id === user.uid ? `
                   <details class="mt-1">
                     <summary class="text-xs text-[#396999] cursor-pointer hover:underline select-none">✏️ 承認メモを${step.approval_memo ? '直す' : '書く'}</summary>
@@ -4099,7 +4100,7 @@ applications.post('/:id/motouke-b/confirm', async (c) => {
   const isTestFlag = sourceApp.is_test === 1 ? 1 : 0
 
   // 回覧開始日: 本日
-  const today = new Date().toISOString().substring(0, 10)
+  const today = jstToday()
 
   // 申請B を INSERT
   const result = await db.prepare(`

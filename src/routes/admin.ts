@@ -2897,8 +2897,8 @@ admin.get('/backup/download-legacy', async (c) => {
             END AS ステータス,
             a.current_step AS 現在ステップ,
             a.resubmit_count AS 再提出回数,
-            a.created_at AS 作成日時,
-            a.updated_at AS 更新日時
+            datetime(a.created_at, '+9 hours') AS 作成日時,
+            datetime(a.updated_at, '+9 hours') AS 更新日時
           FROM applications a
           LEFT JOIN mansions m ON a.mansion_id = m.id
           LEFT JOIN users u ON a.applicant_id = u.id

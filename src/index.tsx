@@ -1,5 +1,6 @@
 import { writeLoginLog, getClientIp } from './lib/login-log'
 import { logNotify } from './lib/notify-log'
+import { jst } from './lib/notify-log'
 import { Hono } from 'hono'
 import { serveStatic } from 'hono/cloudflare-workers'
 import { getSessionUser, getSessionIdFromCookie, PREVIEW_ROLES } from './lib/auth'
@@ -329,7 +330,7 @@ app.get('/', async (c) => {
                 <div class="bg-white rounded-lg px-4 py-3 flex items-center justify-between shadow-sm">
                   <div>
                     <p class="font-semibold text-gray-800 text-sm">${item.mansion_name || '-'}</p>
-                    <p class="text-xs text-gray-500 mt-0.5">登録：${item.registered_by_name} / ${item.created_at?.slice(0,10)}</p>
+                    <p class="text-xs text-gray-500 mt-0.5">登録：${item.registered_by_name} / ${jst(item.created_at, 10)}</p>
                     ${item.note ? `<p class="text-xs text-gray-400 mt-0.5">備考: ${item.note}</p>` : ''}
                   </div>
                   <div class="flex gap-2 items-center">
@@ -368,7 +369,7 @@ app.get('/', async (c) => {
                   <tr class="hover:bg-yellow-50/60">
                     <td class="px-3 py-1.5 font-semibold text-gray-800">${item.mansion_name || '-'}</td>
                     <td class="px-3 py-1.5 text-gray-600 whitespace-nowrap">${item.front_name || '-'}</td>
-                    <td class="px-3 py-1.5 text-gray-500 text-xs whitespace-nowrap">${item.created_at?.slice(0,10) || '-'}</td>
+                    <td class="px-3 py-1.5 text-gray-500 text-xs whitespace-nowrap">${jst(item.created_at, 10) || '-'}</td>
                     <td class="px-3 py-1.5 text-xs whitespace-nowrap">${item.remind_count > 0 ? `<span class="text-orange-600">${item.remind_count}回送信済</span>` : '<span class="text-gray-400">未送信</span>'}</td>
                     <td class="px-3 py-1 text-right">
                       <form method="POST" action="/inbox/${item.id}/remind" class="inline" onsubmit="return confirm('${item.front_name}さんに再通知を送信しますか？')">
@@ -493,7 +494,7 @@ app.get('/', async (c) => {
                     <div class="flex-1 min-w-0">
                       <p class="font-semibold text-gray-800 truncate">${app.mansion_name || app.title}</p>
                       <p class="text-xs text-orange-700 mt-1 line-clamp-2">↩ 差し戻し理由：${app.returned_reason || '-'}</p>
-                      <p class="text-xs text-gray-400 mt-0.5">${app.updated_at?.substring(0,16)}</p>
+                      <p class="text-xs text-gray-400 mt-0.5">${jst(app.updated_at)}</p>
                     </div>
                     <a href="/applications/${app.id}" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition shrink-0">再申請する</a>
                   </div>
@@ -525,7 +526,7 @@ app.get('/', async (c) => {
                         <span class="font-mono">${app.application_number}</span>
                         <span class="ml-2">組合請求金額：${Number(app.kumiai_amount || 0).toLocaleString()}円</span>
                       </p>
-                      <p class="text-xs text-gray-400 mt-0.5">${app.updated_at?.substring(0,16)}</p>
+                      <p class="text-xs text-gray-400 mt-0.5">${jst(app.updated_at)}</p>
                     </div>
                     <a href="/applications/${app.id}/motouke-b/confirm" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition shrink-0 flex items-center gap-1">
                       内容確認 →
@@ -575,7 +576,7 @@ app.get('/', async (c) => {
                         <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : app.td_type === 'motouke' ? '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD/元請)</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
                         <td class="px-4 py-3 text-gray-700">${Number(app.budget_amount).toLocaleString()}円</td>
                         <td class="px-4 py-3">${motoukeStatusBadge(app)}</td>
-                        <td class="px-4 py-3 text-gray-400 text-xs">${app.created_at?.substring(0,10)}</td>
+                        <td class="px-4 py-3 text-gray-400 text-xs">${jst(app.created_at, 10)}</td>
                         <td class="px-4 py-3"><a href="/applications/${app.id}" class="text-[#396999] hover:underline text-xs">詳細</a></td>
                       </tr>
                     `).join('')}

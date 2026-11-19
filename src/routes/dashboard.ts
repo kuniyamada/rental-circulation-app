@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { getSessionUser, getSessionIdFromCookie } from '../lib/auth'
 import { layout, statusBadge } from './layout'
+import { jst } from '../lib/notify-log'
 
 type Bindings = { DB: D1Database; R2: R2Bucket }
 const dashboard = new Hono<{ Bindings: Bindings }>()
@@ -172,7 +173,7 @@ ${(user.is_admin || ['admin','front','front_supervisor'].includes(user.role)) ? 
                     </div>
                     <p class="font-medium text-gray-800 text-sm truncate">${app.mansion_name || app.title}</p>
                     <div class="flex items-center gap-2 mt-1">
-                      <span class="text-xs text-gray-400">${app.created_at?.substring(0,10)}</span>
+                      <span class="text-xs text-gray-400">${jst(app.created_at, 10)}</span>
                       <span class="text-xs text-gray-600">${Number(app.budget_amount).toLocaleString()}円</span>
                     </div>
                   </div>
@@ -203,7 +204,7 @@ ${(user.is_admin || ['admin','front','front_supervisor'].includes(user.role)) ? 
                     <td class="px-4 py-3">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
                     <td class="px-4 py-3 text-gray-700">${Number(app.budget_amount).toLocaleString()}円</td>
                     <td class="px-4 py-3">${statusBadge(app.status)}</td>
-                    <td class="px-4 py-3 text-gray-400 text-xs">${app.created_at?.substring(0,10)}</td>
+                    <td class="px-4 py-3 text-gray-400 text-xs">${jst(app.created_at, 10)}</td>
                     <td class="px-4 py-3"><a href="/applications/${app.id}" class="text-[#396999] hover:underline text-xs">詳細</a></td>
                   </tr>
                 `).join('')}

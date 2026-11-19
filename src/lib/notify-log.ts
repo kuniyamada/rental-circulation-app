@@ -60,3 +60,17 @@ export function fmtJst(utc: string | null | undefined, withYear = false): string
   const md = `${j.getUTCMonth() + 1}/${j.getUTCDate()} ${p(j.getUTCHours())}:${p(j.getUTCMinutes())}`
   return withYear ? `${j.getUTCFullYear()}/${md}` : md
 }
+
+// DBの日時（UTC）を日本時間の 'YYYY-MM-DD HH:MM'（len=16）/ 'YYYY-MM-DD'（len=10）に
+export function jst(utc: any, len: 10 | 16 | 19 = 16): string {
+  if (!utc) return ''
+  const s = String(utc)
+  const d = new Date(s.replace(' ', 'T') + (/[zZ]$|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z'))
+  if (isNaN(d.getTime())) return s.slice(0, len)
+  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, len)
+}
+
+// 日本時間の今日（YYYY-MM-DD）
+export function jstToday(): string {
+  return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)
+}
