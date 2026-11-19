@@ -700,25 +700,7 @@ applications.get('/new', async (c) => {
   const content = `
     ${newErrMsg ? `<div class="mb-4 max-w-3xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg">⚠️ ${newErrMsg}</div>` : ''}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-3xl">
-      <!-- ステップ表示 -->
-      <div class="flex items-center gap-2 mb-8">
-        <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-[#396999] text-white rounded-full flex items-center justify-center text-sm font-bold">1</div>
-          <span class="text-sm font-semibold text-[#396999]">内容の入力</span>
-        </div>
-        <div class="flex-1 h-px bg-gray-200"></div>
-        <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-gray-200 text-gray-400 rounded-full flex items-center justify-center text-sm font-bold">2</div>
-          <span class="text-sm text-gray-400">回覧先の確認</span>
-        </div>
-        <div class="flex-1 h-px bg-gray-200"></div>
-        <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-gray-200 text-gray-400 rounded-full flex items-center justify-center text-sm font-bold">3</div>
-          <span class="text-sm text-gray-400">内容の確認</span>
-        </div>
-      </div>
-
-      <form method="POST" action="${resubmitSource ? `/applications/${resubmitSource.id}/resubmit` : '/applications'}" enctype="multipart/form-data" id="appForm" onsubmit="return checkFeeRequired()">
+      <form method="POST" action="${resubmitSource ? `/applications/${resubmitSource.id}/resubmit` : '/applications'}" enctype="multipart/form-data" id="appForm" onsubmit="return checkFeeRequired() && confirm('${resubmitSource ? '修正内容で再申請します。よろしいですか？' : '申請します。よろしいですか？\\n（押すと回覧が始まります）'}')">
         ${resubmitSource ? `
         <!-- 差し戻し再申請バナー -->
         <div class="mb-5 bg-orange-50 border-2 border-orange-300 rounded-lg p-4">
@@ -1272,8 +1254,8 @@ applications.get('/new', async (c) => {
             キャンセル
           </a>
           <button type="submit" class="flex-2 flex-grow-[2] ${resubmitSource ? 'bg-orange-500 hover:bg-orange-600' : 'bg-[#396999] hover:bg-[#2E5580]'} text-white font-semibold py-3 px-8 rounded-lg transition text-sm"
-            ${resubmitSource ? `onclick="return confirm('修正内容で再申請します。よろしいですか？')"` : ''}>
-            ${resubmitSource ? '↩ 再申請する' : '次へ：回覧先の確認 →'}
+>
+            ${resubmitSource ? '↩ 再申請する' : '申請する'}
           </button>
         </div>
       </form>
