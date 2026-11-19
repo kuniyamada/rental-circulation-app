@@ -255,7 +255,8 @@ applications.get('/', async (c) => {
       AND ca.step_number = (SELECT MAX(cm.step_number) FROM circulation_steps cm WHERE cm.application_id = a.id))`
     params.push(acct)
   }
-  sql += ` ORDER BY a.created_at DESC LIMIT 100`
+  // 並び順：まだ終わっていない申請（回覧中・保留・差し戻し等）を上、完了・取り下げは下。それぞれ新しい順
+  sql += ` ORDER BY CASE WHEN a.status IN ('completed', 'withdrawn') THEN 1 ELSE 0 END, a.created_at DESC LIMIT 100`
 
   const apps = await db.prepare(sql).bind(...params).all()
 
@@ -417,7 +418,11 @@ applications.get('/', async (c) => {
           </thead>
           <tbody class="divide-y divide-gray-50">
             ${apps.results.length === 0 ? `<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">該当する申請はありません</td></tr>` :
-              (apps.results as any[]).map(app => {
+              (apps.results as any[]).map((app, idx, arr) => {
+                const isDone = (x: any) => x.status === 'completed' || x.status === 'withdrawn'
+                const divider = isDone(app) && (idx === 0 || !isDone(arr[idx - 1])) && idx > 0
+                  ? `<tr class="bg-gray-100"><td colspan="7" class="px-3 py-1 text-xs font-semibold text-gray-500">▼ ここから下は完了・取り下げた申請</td></tr>`
+                  : ''
                 const motoukeAbadge = (app.payment_target === 'td' && app.td_type === 'motouke') ? '<span class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 rounded" title="元請セット申請A">🔗A</span>' : ''
                 const motoukeBbadge = app.original_application_id ? '<span class="ml-1 bg-emerald-100 text-emerald-700 text-xs px-1.5 rounded" title="元請セット申請B（後続）">🔗B</span>' : ''
                 const resubmitBadge = app.resubmit_count > 0 ? `<span class="ml-1 bg-purple-100 text-purple-600 text-xs px-1.5 rounded">再提出</span>` : ''
@@ -441,7 +446,7 @@ applications.get('/', async (c) => {
                   : hasSuccessor && app.applicant_id === user.uid && (app.status === 'returned' || app.status === 'rejected')
                   ? `<span class="inline-flex items-center gap-1 bg-gray-100 text-gray-500 text-xs font-semibold px-2 py-1 rounded whitespace-nowrap" title="この申請は既に再申請済です">✅ 再申請済</span>`
                   : ''
-                return `
+                return `${divider}
                 <tr class="${rowClass}">
                   <td class="px-3 py-1.5 text-gray-500 text-xs whitespace-nowrap">${app.application_number}${testBadge}${resubmitBadge}${motoukeAbadge}${motoukeBbadge}</td>
                   <td class="px-3 py-1.5 font-medium text-gray-800 min-w-[11rem]">${app.mansion_name || app.title}</td>
