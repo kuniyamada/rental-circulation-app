@@ -242,7 +242,11 @@ applications.get('/', async (c) => {
   const params: any[] = []
 
   if (q) { sql += ` AND (m.name LIKE ? OR a.title LIKE ? OR a.application_number LIKE ?)`; params.push(`%${q}%`, `%${q}%`, `%${q}%`) }
-  if (status) { sql += ` AND a.status = ?`; params.push(status) }
+  if (status === 'needs_fix') {
+    // 差し戻し・取消（否決含む）で、まだ出し直していない申請だけ
+    sql += ` AND a.status IN ('returned', 'rejected') AND NOT EXISTS (SELECT 1 FROM applications a4 WHERE a4.original_application_id = a.id)`
+  }
+  else if (status) { sql += ` AND a.status = ?`; params.push(status) }
   else { sql += ` AND a.status != 'withdrawn'` }   // 取り下げた申請は初期表示では出さない
   if (from) { sql += ` AND a.created_at >= datetime(?, '-9 hours')`; params.push(from + ' 00:00:00') }
   if (to) { sql += ` AND a.created_at < datetime(?, '-9 hours', '+1 day')`; params.push(to + ' 00:00:00') }
@@ -255,8 +259,10 @@ applications.get('/', async (c) => {
       AND ca.step_number = (SELECT MAX(cm.step_number) FROM circulation_steps cm WHERE cm.application_id = a.id))`
     params.push(acct)
   }
-  // 並び順：まだ終わっていない申請（回覧中・保留・差し戻し等）を上、完了・取り下げは下。それぞれ新しい順
-  sql += ` ORDER BY CASE WHEN a.status IN ('completed', 'withdrawn') THEN 1 ELSE 0 END, a.created_at DESC LIMIT 100`
+  // 並び順：まだ終わっていない申請（回覧中・保留・差し戻し等）を上、完了・取り下げ・再申請済（差し戻し/否決/取消のあと出し直し済み）は下。それぞれ新しい順
+  sql += ` ORDER BY CASE WHEN a.status IN ('completed', 'withdrawn')
+      OR (a.status IN ('returned', 'rejected') AND EXISTS (SELECT 1 FROM applications a3 WHERE a3.original_application_id = a.id))
+    THEN 1 ELSE 0 END, a.created_at DESC LIMIT 100`
 
   const apps = await db.prepare(sql).bind(...params).all()
 
@@ -360,6 +366,7 @@ applications.get('/', async (c) => {
           <option value="">すべての状態</option>
           <option value="circulating" ${status==='circulating'?'selected':''}>回覧中</option>
           <option value="completed" ${status==='completed'?'selected':''}>完了</option>
+          <option value="needs_fix" ${status==='needs_fix'?'selected':''}>差し戻し・取消（対応待ち）</option>
           <option value="returned" ${status==='returned'?'selected':''}>差し戻し</option>
           <option value="rejected" ${status==='rejected'?'selected':''}>否決</option>
           ${(hasHoldApps || status === 'on_hold') ? `<option value="on_hold" ${status==='on_hold'?'selected':''}>保留中</option>` : ''}
@@ -420,8 +427,9 @@ applications.get('/', async (c) => {
             ${apps.results.length === 0 ? `<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">該当する申請はありません</td></tr>` :
               (apps.results as any[]).map((app, idx, arr) => {
                 const isDone = (x: any) => x.status === 'completed' || x.status === 'withdrawn'
+                  || ((x.status === 'returned' || x.status === 'rejected') && (x.successor_count || 0) > 0)
                 const divider = isDone(app) && (idx === 0 || !isDone(arr[idx - 1])) && idx > 0
-                  ? `<tr class="bg-gray-100"><td colspan="7" class="px-3 py-1 text-xs font-semibold text-gray-500">▼ ここから下は完了・取り下げた申請</td></tr>`
+                  ? `<tr class="bg-gray-100"><td colspan="7" class="px-3 py-1 text-xs font-semibold text-gray-500">▼ ここから下は完了・取り下げ・再申請済の申請</td></tr>`
                   : ''
                 const motoukeAbadge = (app.payment_target === 'td' && app.td_type === 'motouke') ? '<span class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 rounded" title="元請セット申請A">🔗A</span>' : ''
                 const motoukeBbadge = app.original_application_id ? '<span class="ml-1 bg-emerald-100 text-emerald-700 text-xs px-1.5 rounded" title="元請セット申請B（後続）">🔗B</span>' : ''
