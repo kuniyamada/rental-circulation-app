@@ -437,7 +437,7 @@ applications.get('/', async (c) => {
           <thead class="bg-gray-50">
             <tr>
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">申請番号</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 min-w-[11rem]">マンション名</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">マンション名</th>
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">申請者</th>
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">支払先</th>
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">進捗 <span class="font-normal text-gray-400">（✓確認済 → ⏳確認待ち（枠付き） → ○まだ先）</span></th>
@@ -478,14 +478,15 @@ applications.get('/', async (c) => {
                   : ''
                 return `${divider}
                 <tr class="${rowClass}">
-                  <td class="px-3 py-1.5 text-gray-500 text-xs whitespace-nowrap">${app.application_number}${testBadge}${resubmitBadge}${motoukeAbadge}${motoukeBbadge}</td>
-                  <td class="px-3 py-1.5 font-medium text-gray-800 min-w-[11rem]">${app.mansion_name || app.title}</td>
+                  <td class="px-3 py-1.5 text-gray-500 text-xs whitespace-nowrap">${app.application_number}</td>
+                  <td class="px-3 py-1.5 font-medium text-gray-800 whitespace-nowrap">${app.mansion_name || app.title}</td>
                   <td class="px-3 py-1.5 text-gray-600 whitespace-nowrap">${app.applicant_name}</td>
                   <td class="px-3 py-1.5 whitespace-nowrap">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
                   <td class="px-3 py-1.5">${progressCell(app, stepsByApp[app.id] || [], hasSuccessor)}</td>
                   <td class="px-3 py-1.5 text-gray-400 text-xs whitespace-nowrap">${jst(app.created_at, 10)}</td>
                   <td class="px-3 py-1.5">
                     <div class="flex items-center gap-2 justify-end">
+                      ${(testBadge || resubmitBadge || motoukeAbadge || motoukeBbadge) ? `<span class="inline-flex items-center whitespace-nowrap">${testBadge}${resubmitBadge}${motoukeAbadge}${motoukeBbadge}</span>` : ''}
                       ${resubmitLink}
                       ${withdrawLink}
                       <a href="/applications/${app.id}" class="text-[#396999] hover:underline text-xs whitespace-nowrap">詳細</a>
