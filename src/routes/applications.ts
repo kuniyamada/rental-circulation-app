@@ -539,6 +539,91 @@ applications.get('/preview-reviewers', async (c) => {
 })
 
 // 新規申請を許可するロール（管理者・担当者・担当者/上司）
+// 申請詳細・承認画面の「📒 予算書を見る」ボタン（押したときだけ Googleドライブから探す。見るだけ）
+//   予算書の探し方・表示は新規申請画面と同じ（/api/budget, /api/budget-file）。予算書ビューアには問い合わせない
+function detailBudgetBlock(mansionNumber: any, enabled: boolean): string {
+  if (!enabled || !mansionNumber) return ''
+  const no = String(mansionNumber).replace(/[^0-9]/g, '')
+  if (!no) return ''
+  return `
+    <div id="detail-budget" class="mt-2">
+      <button type="button" id="detailBudgetBtn" onclick="toggleDetailBudget()"
+        class="inline-flex items-center gap-1 text-xs px-3 py-1.5 border border-[#AECBE5] text-[#2E5580] bg-[#EEF4FA] rounded-lg hover:bg-[#D5E5F2] font-semibold">
+        📒 予算書を見る
+      </button>
+      <div id="detailBudgetBox" class="hidden mt-2 max-w-xl border border-gray-200 rounded-lg bg-gray-50 px-3 py-2.5 text-sm"></div>
+    </div>
+    <script>
+      (function() {
+        const NO = ${JSON.stringify(no)};
+        let loaded = false;
+        let seq = 0;
+        function esc(v) {
+          return String(v == null ? '' : v).replace(/[&<>"']/g, function(ch) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+          });
+        }
+        window.openDetailBudgetFile = function(id) {
+          window.open('/api/budget-file/' + encodeURIComponent(id), '_blank', 'noopener');
+        };
+        window.toggleDetailBudget = function() {
+          const box = document.getElementById('detailBudgetBox');
+          const btn = document.getElementById('detailBudgetBtn');
+          if (!box || !btn) return;
+          if (!box.classList.contains('hidden')) {
+            box.classList.add('hidden');
+            btn.innerHTML = '📒 予算書を見る';
+            return;
+          }
+          box.classList.remove('hidden');
+          btn.innerHTML = '📒 予算書を閉じる';
+          if (!loaded) window.loadDetailBudget(false);
+        };
+        window.loadDetailBudget = async function(refresh) {
+          const box = document.getElementById('detailBudgetBox');
+          if (!box) return;
+          const my = ++seq;
+          box.innerHTML = '<p class="text-gray-500 text-xs">予算書を確認しています…</p>';
+          let d = null;
+          try {
+            const res = await fetch('/api/budget?no=' + encodeURIComponent(NO) + (refresh ? '&refresh=1' : ''), { headers: { Accept: 'application/json' } });
+            const type = res.headers.get('Content-Type') || '';
+            d = type.indexOf('application/json') > -1 ? await res.json() : { error: '予算書を取得できませんでした' };
+          } catch (e) {
+            d = { error: '予算書を取得できませんでした。時間をおいて再度お試しください' };
+          }
+          if (my !== seq) return;
+          loaded = true;
+          const refreshLink = '<button type="button" onclick="loadDetailBudget(true)" class="text-xs text-[#396999] hover:underline whitespace-nowrap">最新の状態を確認</button>';
+          if (!d || d.error || d.status !== 'ok') {
+            const msg = (d && (d.error || d.message)) || '予算書を取得できませんでした';
+            box.innerHTML = '<div class="flex items-start justify-between gap-2"><p class="text-xs text-gray-500">📒 ' + esc(msg) + '</p>' + refreshLink + '</div>';
+            return;
+          }
+          const row = function(f) {
+            return '<div class="flex items-center gap-2 py-1">' +
+              '<span class="flex-1 min-w-0 truncate text-gray-800" title="' + esc(f.name) + '">' + esc(f.name) + '</span>' +
+              '<span class="text-xs text-gray-400 whitespace-nowrap">' + esc(f.modified_time ? String(f.modified_time).slice(0, 10) : '') + '</span>' +
+              '<button type="button" data-id="' + esc(f.id) + '" onclick="openDetailBudgetFile(this.dataset.id)" class="px-2.5 py-1 bg-[#396999] text-white text-xs rounded-md hover:bg-[#2E5580] whitespace-nowrap">開く</button>' +
+              '</div>';
+          };
+          const folder = d.ki_folder_name ? '（' + esc(d.ki_folder_name) + 'フォルダ）' : '';
+          let html = '<div class="flex items-center justify-between gap-2 mb-1"><p class="text-xs font-semibold text-gray-600">📒 予算書' + folder + '</p>' + refreshLink + '</div>';
+          if (d.from_older_ki) {
+            html += '<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-1">⚠ 最新の' + esc(d.latest_ki_folder_name) + 'フォルダに予算書が無いため、' + esc(d.ki_folder_name) + 'フォルダの予算書を表示しています</p>';
+          }
+          if (d.latest) html += row(d.latest);
+          const older = Array.isArray(d.older) ? d.older : [];
+          if (older.length > 0) {
+            html += '<details class="mt-1"><summary class="text-xs text-gray-500 cursor-pointer select-none">以前の版を表示（' + older.length + '件）</summary>' +
+              '<div class="pl-3 border-l border-gray-200 mt-1">' + older.map(row).join('') + '</div></details>';
+          }
+          box.innerHTML = html;
+        };
+      })();
+    </script>`
+}
+
 const ALLOWED_NEW_APP_ROLES = ['admin', 'front', 'front_supervisor']
 
 // 新規申請フォーム
@@ -2582,7 +2667,7 @@ applications.get('/:id', async (c) => {
   const id = c.req.param('id')
 
   const app = await db.prepare(`
-    SELECT a.*, m.name as mansion_name, u.name as applicant_name, u.email as applicant_email
+    SELECT a.*, m.name as mansion_name, m.mansion_number as mansion_number, u.name as applicant_name, u.email as applicant_email
     FROM applications a
     LEFT JOIN mansions m ON a.mansion_id = m.id
     LEFT JOIN users u ON a.applicant_id = u.id
@@ -2819,6 +2904,7 @@ applications.get('/:id', async (c) => {
               ${app.original_application_id ? '<span class="bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-0.5 rounded-full">🔗 元請セット申請B（後続）</span>' : ''}
             </div>
             <h2 class="text-xl font-bold text-gray-800">${app.mansion_name || app.title}</h2>
+            ${detailBudgetBlock(app.mansion_number, budgetConfigured(c.env))}
           </div>
           <div class="flex flex-col items-end gap-2">
             ${statusBadge(app.status)}
@@ -3241,7 +3327,7 @@ applications.get('/:id/review/:stepId', async (c) => {
   }
 
   const app = await db.prepare(`
-    SELECT a.*, m.name as mansion_name, u.name as applicant_name
+    SELECT a.*, m.name as mansion_name, m.mansion_number as mansion_number, u.name as applicant_name
     FROM applications a LEFT JOIN mansions m ON a.mansion_id = m.id
     LEFT JOIN users u ON a.applicant_id = u.id WHERE a.id = ?
   `).bind(id).first() as any
@@ -3319,7 +3405,8 @@ applications.get('/:id/review/:stepId', async (c) => {
           ${app.resubmit_count > 0 ? `<span class="bg-purple-100 text-purple-600 text-xs font-semibold px-2 py-0.5 rounded-full">再提出 ${app.resubmit_count}回目</span>` : ''}
           ${(app.payment_target === 'td' && app.td_type === 'motouke') ? '<span class="bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5 rounded-full">元請</span>' : ''}
         </div>
-        <h2 class="text-lg font-bold text-gray-800 mb-4">${app.mansion_name || app.title}</h2>
+        <h2 class="text-lg font-bold text-gray-800 ${budgetConfigured(c.env) && app.mansion_number ? 'mb-1' : 'mb-4'}">${app.mansion_name || app.title}</h2>
+        ${budgetConfigured(c.env) && app.mansion_number ? `<div class="mb-4">${detailBudgetBlock(app.mansion_number, true)}</div>` : ''}
         <div class="grid grid-cols-2 gap-3 text-sm">
           <div><span class="text-gray-400">申請者</span><p class="font-medium">${app.applicant_name}</p></div>
           <div><span class="text-gray-400">支払先</span><p class="font-medium">${paymentLabel(app.payment_target, app.td_type)}</p></div>
