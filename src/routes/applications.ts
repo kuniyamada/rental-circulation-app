@@ -29,6 +29,13 @@ function previewBtn(url: string, name: string, label = '👁 確認', cls = 'inl
 //   差し戻し・否決・保留は、どの段階のだれで止まったかを表示
 // ============================================================
 const STEP_SHORT: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終' }
+// 今だれの番かの色分け（本橋さん要望）：フロント=オレンジ／上長=青／業務管理課=緑／会計（最終）=ピンク
+const WAIT_COLOR: Record<number, string> = {
+  1: 'bg-[#EEF4FA] border-[#AECBE5] text-[#234166]',
+  2: 'bg-emerald-50 border-emerald-300 text-emerald-800',
+  3: 'bg-pink-50 border-pink-300 text-pink-800',
+}
+const WAIT_FRONT = 'bg-orange-100 border-orange-300 text-orange-800'
 function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
   const firstName = (n: any) => String(n || '').split(/[\s\u3000]/)[0] || String(n || '')
   const arrow = '<span class="text-gray-300 mx-0.5">→</span>'
@@ -46,18 +53,18 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
       const memoMark = st.approval_memo ? `<span class="ml-0.5 cursor-help px-1 rounded bg-amber-100 text-amber-800" title="承認メモ：${escAttr(st.approval_memo)}">📝</span>` : ''
       parts.push(`<span class="text-green-700 whitespace-nowrap" title="${who} ${escAttr(jst(st.acted_at))} 確認済">✅${label}</span>${memoMark}`)
     } else if (st.status === 'pending' && app.status === 'circulating' && st.step_number === app.current_step) {
-      parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded bg-[#EEF4FA] border border-[#AECBE5] text-[#234166] font-bold">⏳${label}（${escAttr(firstName(st.reviewer_name))}）</span>`)
+      parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded border font-bold ${WAIT_COLOR[st.step_number] || WAIT_COLOR[1]}">⏳${label}（${escAttr(firstName(st.reviewer_name))}）</span>`)
     } else if (st.status === 'returned') {
       parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-orange-50 border border-orange-200 text-orange-700 font-bold">🔙${label}（${escAttr(firstName(st.reviewer_name))}）差し戻し</span>`)
       tail = hasSuccessor
         ? `<span class="ml-1 text-[11px] text-gray-500 whitespace-nowrap">→ 再申請済</span>`
-        : `<span class="ml-1 text-[11px] text-orange-700 font-semibold whitespace-nowrap">→ 再申請待ち</span>`
+        : `<span class="ml-1 inline-flex items-center text-[11px] px-1.5 py-0.5 rounded border font-bold whitespace-nowrap ${WAIT_FRONT}">⏳フロント 再申請待ち</span>`
       break
     } else if (st.status === 'recalled') {
       parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-gray-100 border border-gray-300 text-gray-700 font-bold" title="${escAttr(st.action_comment || '')}">↩申請者が取消（${label}確認中）</span>`)
       tail = hasSuccessor
         ? `<span class="ml-1 text-[11px] text-gray-500 whitespace-nowrap">→ 再申請済</span>`
-        : `<span class="ml-1 text-[11px] text-orange-700 font-semibold whitespace-nowrap">→ 再申請待ち</span>`
+        : `<span class="ml-1 inline-flex items-center text-[11px] px-1.5 py-0.5 rounded border font-bold whitespace-nowrap ${WAIT_FRONT}">⏳フロント 再申請待ち</span>`
       break
     } else if (st.status === 'rejected') {
       parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-700 font-bold">✖${label}（${escAttr(firstName(st.reviewer_name))}）否決</span>`)
@@ -65,7 +72,7 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
       break
     } else if (st.status === 'on_hold') {
       parts.push(`<span class="whitespace-nowrap px-1.5 py-0.5 rounded bg-yellow-50 border border-yellow-300 text-yellow-800 font-bold">❓${label}（${escAttr(firstName(st.reviewer_name))}）保留中</span>`)
-      tail = `<span class="ml-1 text-[11px] text-yellow-800 font-semibold whitespace-nowrap">→ 申請者の回答待ち</span>`
+      tail = `<span class="ml-1 inline-flex items-center text-[11px] px-1.5 py-0.5 rounded border font-bold whitespace-nowrap ${WAIT_FRONT}">⏳フロント 回答待ち</span>`
       break
     } else {
       parts.push(`<span class="text-gray-400 whitespace-nowrap">○${label}</span>`)
@@ -404,7 +411,16 @@ applications.get('/', async (c) => {
     <!-- 結果一覧 -->
     <div class="bg-white rounded-xl shadow-sm border border-gray-100">
       <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-        <h2 class="font-semibold text-gray-800">検索結果 <span class="text-[#396999]">${apps.results.length}件</span></h2>
+        <div class="flex items-center gap-3 flex-wrap">
+          <h2 class="font-semibold text-gray-800">検索結果 <span class="text-[#396999]">${apps.results.length}件</span></h2>
+          <div id="wait-color-legend" class="flex items-center gap-1.5 flex-wrap text-[11px] font-bold">
+            <span class="text-gray-400 font-normal">今の番：</span>
+            <span class="px-1.5 py-0.5 rounded border ${WAIT_FRONT}">フロント</span>
+            <span class="px-1.5 py-0.5 rounded border ${WAIT_COLOR[1]}">上長</span>
+            <span class="px-1.5 py-0.5 rounded border ${WAIT_COLOR[2]}">業務管理課</span>
+            <span class="px-1.5 py-0.5 rounded border ${WAIT_COLOR[3]}">会計（最終）</span>
+          </div>
+        </div>
         <div class="flex gap-2">
         ${(user.role === 'operations' || user.is_admin) ? `<a href="/inbox/new" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">📤 1件ずつ登録・送信</a>` : ''}
         ${(['admin','front','front_supervisor'].includes(user.role)) ? `<a href="/applications/new" class="bg-[#396999] hover:bg-[#2E5580] text-white text-sm font-semibold px-4 py-2 rounded-lg transition">＋ 新規申請</a>` : ''}
