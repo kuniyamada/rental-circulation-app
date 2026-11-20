@@ -29,13 +29,15 @@ function previewBtn(url: string, name: string, label = '👁 確認', cls = 'inl
 //   差し戻し・否決・保留は、どの段階のだれで止まったかを表示
 // ============================================================
 const STEP_SHORT: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終' }
-// 今だれの番かの色分け（本橋さん要望）：フロント=オレンジ／上長=青／業務管理課=緑／会計（最終）=ピンク
+// 今だれの番か・済んだ段階の色分け（本橋さん要望）：フロント=オレンジ／上長=青／業務管理課=緑／会計（最終）=ピンク
 const WAIT_COLOR: Record<number, string> = {
   1: 'bg-[#EEF4FA] border-[#AECBE5] text-[#234166]',
   2: 'bg-emerald-50 border-emerald-300 text-emerald-800',
   3: 'bg-pink-50 border-pink-300 text-pink-800',
 }
 const WAIT_FRONT = 'bg-orange-100 border-orange-300 text-orange-800'
+// 確認が済んだ段階の文字色（今の番の枠と同じ色の系統）
+const DONE_TEXT: Record<number, string> = { 1: 'text-[#2E5580]', 2: 'text-emerald-700', 3: 'text-pink-700' }
 function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
   const firstName = (n: any) => String(n || '').split(/[\s\u3000]/)[0] || String(n || '')
   const arrow = '<span class="text-gray-300 mx-0.5">→</span>'
@@ -51,7 +53,7 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
     const who = escAttr(st.reviewer_name || '')
     if (st.status === 'approved') {
       const memoMark = st.approval_memo ? `<span class="ml-0.5 cursor-help px-1 rounded bg-amber-100 text-amber-800" title="承認メモ：${escAttr(st.approval_memo)}">📝</span>` : ''
-      parts.push(`<span class="text-green-700 whitespace-nowrap" title="${who} ${escAttr(jst(st.acted_at))} 確認済">✅${label}</span>${memoMark}`)
+      parts.push(`<span class="${DONE_TEXT[st.step_number] || 'text-green-700'} font-semibold whitespace-nowrap" title="${who} ${escAttr(jst(st.acted_at))} 確認済">✅${label}</span>${memoMark}`)
     } else if (st.status === 'pending' && app.status === 'circulating' && st.step_number === app.current_step) {
       parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded border font-bold ${WAIT_COLOR[st.step_number] || WAIT_COLOR[1]}">⏳${label}（${escAttr(firstName(st.reviewer_name))}）</span>`)
     } else if (st.status === 'returned') {
