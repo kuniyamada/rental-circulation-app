@@ -484,7 +484,7 @@ applications.get('/', async (c) => {
                   : ''
                 return `${divider}
                 <tr class="${rowClass}">
-                  <td class="px-3 py-1.5 text-gray-700 font-semibold whitespace-nowrap cursor-default" title="申請番号：${escAttr(app.application_number)}">${app.mansion_number != null ? app.mansion_number : '—'}</td>
+                  <td class="px-3 py-1.5 text-gray-700 font-semibold whitespace-nowrap cursor-default" title="申請番号：${escAttr(app.application_number)}">${app.mansion_number != null ? String(app.mansion_number).padStart(3, '0') : '—'}</td>
                   <td class="px-3 py-1.5 font-medium text-gray-800 whitespace-nowrap">${app.mansion_name || app.title}</td>
                   <td class="px-3 py-1.5 text-gray-600 whitespace-nowrap">${app.applicant_name}</td>
                   <td class="px-3 py-1.5 whitespace-nowrap">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
