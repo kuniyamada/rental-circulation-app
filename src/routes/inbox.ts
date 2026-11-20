@@ -357,7 +357,7 @@ inbox.get('/', async (c) => {
                     <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap" title="登録: ${esc(item.registered_by_name || '-')}">${fmtJst(item.created_at)}<span class="ml-1 text-[11px] text-gray-400">${esc(String(item.registered_by_name || '').split(/[\s\u3000]/)[0])}</span></td>
                     <td class="px-2 py-1.5">
                       <div class="flex items-baseline gap-2 min-w-0">
-                        <span class="font-semibold text-gray-800 whitespace-nowrap" title="${esc(item.mansion_name || '')}">${item.mansion_number != null ? `<span class="text-[#2E5580] mr-1">${esc(item.mansion_number)}</span>` : ''}${esc(String(item.mansion_name || '-').replace(/[\s\u3000]*管理組合$/, ''))}</span>
+                        <span class="font-semibold text-gray-800 whitespace-nowrap" title="${esc(item.mansion_name || '')}">${item.mansion_number != null ? `<span class="text-[#2E5580] mr-1">${esc(String(item.mansion_number).padStart(3, '0'))}</span>` : ''}${esc(String(item.mansion_name || '-').replace(/[\s\u3000]*管理組合$/, ''))}</span>
                         ${item.note ? `<span class="text-[11px] text-gray-500 truncate max-w-[140px] cursor-help" title="備考：${esc(item.note)}">💬<span class="hidden min-[1500px]:inline"> ${esc(item.note)}</span></span>` : ''}
                       </div>
                     </td>
@@ -717,7 +717,7 @@ async function renderInboxForm(c: any, editId: number | null) {
 
         const found = MANSIONS.find(m => m.number === num);
         if (found) {
-          resultEl.innerHTML = '<span class="text-[#2E5580] font-bold mr-2">' + found.number + '</span><span class="font-semibold text-gray-800">' + found.name + '</span>';
+          resultEl.innerHTML = '<span class="text-[#2E5580] font-bold mr-2">' + String(found.number).padStart(3, '0') + '</span><span class="font-semibold text-gray-800">' + found.name + '</span>';
           resultEl.className = 'px-3 py-2 border-2 border-[#5B8AB5] rounded-lg text-sm bg-[#EEF4FA] min-h-[38px] flex items-center gap-1';
           notFoundEl.classList.add('hidden');
           idInput.value = found.id;

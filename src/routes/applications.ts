@@ -1801,7 +1801,7 @@ applications.get('/new', async (c) => {
 
         const found = MANSIONS.find(m => m.number === num);
         if (found) {
-          resultEl.innerHTML = '<span class="text-[#2E5580] font-bold text-base mr-2">' + found.number + '</span><span class="font-semibold text-gray-800">' + found.name + '</span>';
+          resultEl.innerHTML = '<span class="text-[#2E5580] font-bold text-base mr-2">' + String(found.number).padStart(3, '0') + '</span><span class="font-semibold text-gray-800">' + found.name + '</span>';
           resultEl.className = 'px-3 py-2.5 border-2 border-[#5B8AB5] rounded-lg text-sm bg-[#EEF4FA] min-h-[42px] flex items-center gap-1';
           notFoundEl.classList.add('hidden');
           idInput.value = found.id;
