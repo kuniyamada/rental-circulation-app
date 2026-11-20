@@ -25,7 +25,7 @@ function previewBtn(url: string, name: string, label = '👁 確認', cls = 'inl
 
 // ============================================================
 // 申請一覧の「進捗」表示
-//   ✅確認済 → ⏳今の確認待ち（太字） → ○まだ先
+//   ✓確認済（うすい色の札） → ⏳今の確認待ち（枠付き・太字） → ○まだ先
 //   差し戻し・否決・保留は、どの段階のだれで止まったかを表示
 // ============================================================
 const STEP_SHORT: Record<number, string> = { 1: '上長', 2: '業務管理課', 3: '最終' }
@@ -36,8 +36,12 @@ const WAIT_COLOR: Record<number, string> = {
   3: 'bg-pink-50 border-pink-300 text-pink-800',
 }
 const WAIT_FRONT = 'bg-orange-100 border-orange-300 text-orange-800'
-// 確認が済んだ段階の文字色（今の番の枠と同じ色の系統）
-const DONE_TEXT: Record<number, string> = { 1: 'text-[#2E5580]', 2: 'text-emerald-700', 3: 'text-pink-700' }
+// 確認が済んだ段階の札（うすい色の背景・枠なし・✓）。今の番は枠付き・⏳で見分ける
+const DONE_CHIP: Record<number, string> = {
+  1: 'bg-blue-100 text-blue-800',
+  2: 'bg-emerald-100 text-emerald-800',
+  3: 'bg-pink-100 text-pink-800',
+}
 function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
   const firstName = (n: any) => String(n || '').split(/[\s\u3000]/)[0] || String(n || '')
   const arrow = '<span class="text-gray-300 mx-0.5">→</span>'
@@ -53,7 +57,7 @@ function progressCell(app: any, steps: any[], hasSuccessor: boolean): string {
     const who = escAttr(st.reviewer_name || '')
     if (st.status === 'approved') {
       const memoMark = st.approval_memo ? `<span class="ml-0.5 cursor-help px-1 rounded bg-amber-100 text-amber-800" title="承認メモ：${escAttr(st.approval_memo)}">📝</span>` : ''
-      parts.push(`<span class="${DONE_TEXT[st.step_number] || 'text-green-700'} font-semibold whitespace-nowrap" title="${who} ${escAttr(jst(st.acted_at))} 確認済">✅${label}</span>${memoMark}`)
+      parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded font-semibold ${DONE_CHIP[st.step_number] || DONE_CHIP[1]}" title="${who} ${escAttr(jst(st.acted_at))} 確認済">✓${label}</span>${memoMark}`)
     } else if (st.status === 'pending' && app.status === 'circulating' && st.step_number === app.current_step) {
       parts.push(`<span class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded border font-bold ${WAIT_COLOR[st.step_number] || WAIT_COLOR[1]}">⏳${label}（${escAttr(firstName(st.reviewer_name))}）</span>`)
     } else if (st.status === 'returned') {
@@ -436,7 +440,7 @@ applications.get('/', async (c) => {
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 min-w-[11rem]">マンション名</th>
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">申請者</th>
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">支払先</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">進捗 <span class="font-normal text-gray-400">（✅確認済 → ⏳確認待ち → ○まだ先）</span></th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">進捗 <span class="font-normal text-gray-400">（✓確認済 → ⏳確認待ち（枠付き） → ○まだ先）</span></th>
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">申請日</th>
               <th class="px-4 py-3"></th>
             </tr>
