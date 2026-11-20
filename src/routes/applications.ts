@@ -246,7 +246,7 @@ applications.get('/', async (c) => {
   const deletedMsg = (c.req.query('deleted') || '').replace(/[<>&"']/g, (ch) =>
     ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[ch] as string))
 
-  let sql = `SELECT a.*, m.name as mansion_name, u.name as applicant_name,
+  let sql = `SELECT a.*, m.name as mansion_name, m.mansion_number as mansion_number, u.name as applicant_name,
       (SELECT COUNT(*) FROM applications a2 WHERE a2.original_application_id = a.id) as successor_count
     FROM applications a
     LEFT JOIN mansions m ON a.mansion_id = m.id
@@ -254,7 +254,13 @@ applications.get('/', async (c) => {
     WHERE 1=1`
   const params: any[] = []
 
-  if (q) { sql += ` AND (m.name LIKE ? OR a.title LIKE ? OR a.application_number LIKE ?)`; params.push(`%${q}%`, `%${q}%`, `%${q}%`) }
+  if (q) {
+    // 物件番号（数字だけを入れたとき）でも探せる。申請番号・マンション名でもこれまでどおり探せる
+    const qNo = /^[0-9０-９]+$/.test(q.trim()) ? String(parseInt(q.trim().replace(/[０-９]/g, (ch: string) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)))) : ''
+    sql += ` AND (m.name LIKE ? OR a.title LIKE ? OR a.application_number LIKE ?${qNo ? ' OR CAST(m.mansion_number AS TEXT) = ?' : ''})`
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`)
+    if (qNo) params.push(qNo)
+  }
   if (status === 'needs_fix') {
     // 差し戻し・取消（否決含む）で、まだ出し直していない申請だけ
     sql += ` AND a.status IN ('returned', 'rejected') AND NOT EXISTS (SELECT 1 FROM applications a4 WHERE a4.original_application_id = a.id)`
@@ -373,7 +379,7 @@ applications.get('/', async (c) => {
     <!-- 検索フォーム -->
     <form method="GET" action="/applications" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <input type="text" name="q" value="${q}" placeholder="マンション名・申請番号で検索"
+        <input type="text" name="q" value="${q}" placeholder="物件番号・マンション名・申請番号で検索"
           class="col-span-2 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
         <select name="status" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#396999] outline-none">
           <option value="">すべての状態</option>
@@ -436,7 +442,7 @@ applications.get('/', async (c) => {
         <table class="w-full text-sm">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">申請番号</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">物件番号</th>
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">マンション名</th>
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">申請者</th>
               <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">支払先</th>
@@ -478,7 +484,7 @@ applications.get('/', async (c) => {
                   : ''
                 return `${divider}
                 <tr class="${rowClass}">
-                  <td class="px-3 py-1.5 text-gray-500 text-xs whitespace-nowrap">${app.application_number}</td>
+                  <td class="px-3 py-1.5 text-gray-700 font-semibold whitespace-nowrap cursor-default" title="申請番号：${escAttr(app.application_number)}">${app.mansion_number != null ? app.mansion_number : '—'}</td>
                   <td class="px-3 py-1.5 font-medium text-gray-800 whitespace-nowrap">${app.mansion_name || app.title}</td>
                   <td class="px-3 py-1.5 text-gray-600 whitespace-nowrap">${app.applicant_name}</td>
                   <td class="px-3 py-1.5 whitespace-nowrap">${app.payment_target === 'kumiai' ? '<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">管理組合</span>' : '<span class="bg-[#D5E5F2] text-[#2E5580] text-xs px-2 py-0.5 rounded-full">会社(TD)</span>'}</td>
