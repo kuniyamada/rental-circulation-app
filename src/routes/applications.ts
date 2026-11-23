@@ -4558,12 +4558,30 @@ applications.post('/:id/resubmit', async (c) => {
   const editedGyoshaAmount = body.gyosha_amount !== undefined && body.gyosha_amount !== ''
     ? parseInt(String(body.gyosha_amount).replace(/,/g, ''))
     : (editedTdType === 'motouke' ? orig.gyosha_amount : null)
-  const editedBudgetAmount = body.budget_amount !== undefined && body.budget_amount !== ''
-    ? (parseInt(String(body.budget_amount).replace(/,/g, '')) || 0)
-    : orig.budget_amount
-  const editedCommissionRate = body.commission_rate !== undefined && body.commission_rate !== ''
-    ? parseFloat(body.commission_rate)
-    : orig.commission_rate
+  // 手数料：画面で選んだ種別（円／％／なし）どおりに保存する（新規申請と同じ考え方）
+  //   以前は入力欄が空だと元の申請の値を引き継いでいたため、「なし」に直しても 10% などが残る不具合があった
+  const resubFeeType = String(body.fee_type || '')
+  const resubRawBudget = parseInt(String(body.budget_amount || '0').replace(/,/g, '')) || 0
+  const resubRawCommission = body.commission_rate !== undefined && body.commission_rate !== '' ? parseFloat(body.commission_rate) : null
+  let editedBudgetAmount: any
+  let editedCommissionRate: any
+  if (editedPaymentTarget !== 'td' && resubFeeType === 'none') {
+    editedBudgetAmount = 0; editedCommissionRate = null
+  } else if (editedPaymentTarget !== 'td' && resubFeeType === 'amount') {
+    if (body.budget_amount === undefined || body.budget_amount === '') return c.redirect(`/applications/new?resubmit_id=${id}&error=fee_amount_required`)
+    editedBudgetAmount = resubRawBudget; editedCommissionRate = null
+  } else if (editedPaymentTarget !== 'td' && resubFeeType === 'rate') {
+    if (resubRawCommission === null || isNaN(resubRawCommission)) return c.redirect(`/applications/new?resubmit_id=${id}&error=fee_rate_required`)
+    editedBudgetAmount = 0; editedCommissionRate = resubRawCommission
+  } else {
+    // 種別が送られてこなかった場合（会社(TD)など）はこれまでどおり
+    editedBudgetAmount = body.budget_amount !== undefined && body.budget_amount !== ''
+      ? (parseInt(String(body.budget_amount).replace(/,/g, '')) || 0)
+      : orig.budget_amount
+    editedCommissionRate = body.commission_rate !== undefined && body.commission_rate !== ''
+      ? parseFloat(body.commission_rate)
+      : orig.commission_rate
+  }
   const editedRemarks = body.remarks !== undefined ? body.remarks : orig.remarks
 
   // 手数料バリデーション（管理組合の場合、円/％/なし の3択いずれか）
